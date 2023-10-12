@@ -1,4 +1,4 @@
-import mariadb
+import mariadb,requests,json
 
 #Perform database checks on startup
 def checkdb(config,logger):
@@ -34,18 +34,47 @@ def checkdb(config,logger):
             cur.execute("""CREATE TABLE `videos` (
                 `id` varchar(50) COLLATE utf8mb4_bin NOT NULL,
                 `youtuber` varchar(255) COLLATE utf8mb4_bin DEFAULT NULL,
-                `uploaded` datetime DEFAULT NULL,
-                `title` varchar(255) COLLATE utf8mb4_bin DEFAULT NULL,
-                `length` varchar(45) COLLATE utf8mb4_bin DEFAULT NULL,
-                `quality` varchar(45) COLLATE utf8mb4_bin DEFAULT NULL,
-                `filesize` varchar(45) COLLATE utf8mb4_bin DEFAULT NULL,
-                `tags` varchar(255) COLLATE utf8mb4_bin DEFAULT NULL,
-                `description` mediumtext COLLATE utf8mb4_bin DEFAULT NULL,
+                `json` longtext COLLATE utf8mb4_bin DEFAULT NULL,
                 `filepath` varchar(2000) COLLATE utf8mb4_bin DEFAULT NULL,
+                `AddedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `PublishedAt` TIMESTAMP DEFAULT NULL,
                 `watched` int(11) DEFAULT 0,
                 PRIMARY KEY (`id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
                         """)
         con.close()
+        return True
     except Exception as e:
         logger.error("Failed during table create: %s",e)
+        return False
+
+def check_db_video(id,config,logger):
+    logger.debug("Checking db for id: %s",id)
+    test = False
+    try:
+        check = mariadb.connect(**config._sections['Database'])
+        cur = check.cursor()
+        cur.execute("Select * FROM videos where id = '%s'"%id)
+        if(not cur.fetchone()):
+            test = False
+        else:
+            test = True
+        check.close()
+        return test
+    except Exception as e:
+        logger.error("Error during check_db_video: %s"%e)
+
+def save_video(id,ret,img,config,logger):
+    try:
+        con = mariadb.connect(**config._sections['Database'])
+        cur = con.cursor()
+        #Save Video Data
+        sql = "Insert into videos(id,youtuber,json,filepath,PublishedAt) values(%s,%s,%s,%s,%s);"
+        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace("/vault/Media/VaultTube",""),ret['PublishedAt']))
+        #Save Thumbnail
+        sql = "Insert Ignore into images(id,image) values(%s,%s)"
+        cur.execute(sql,(id,img))
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.error("Error during save_video: %s"%e)

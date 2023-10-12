@@ -37,12 +37,13 @@ if __name__ == "__main__":
     config.read('config.ini')
 
     #Check Database
-    checkdb(config,logger)
+    dbpass = checkdb(config,logger)
 
 
     #Flask Startup
     app = Flask(__name__)
     app.debug = True
+    app.config['dbconfig'] = config._sections['Database']
 
     #Video static
     videos = Blueprint('videos',__name__,static_url_path='/videos',static_folder="/vault/Media/VaultTube")
@@ -55,11 +56,19 @@ if __name__ == "__main__":
     @app.route('/')
     def home():
         return render_template('/index.html')
+    
+    @app.route('/player.html')
+    def player():
+        return render_template('/player.html')
+    
+    if(dbpass):
+        #Start Threads
+        be = threading.Thread(target=backend_thread,args=(config,logger))
+        be.start()
 
-    #Start Threads
-    be = threading.Thread(target=backend_thread,args=(logger,))
-    be.start()
-
-    #Begin
-    logger.info("Starting VaultTube")
-    app.run(host='0.0.0.0')
+        #Begin
+        logger.info("Starting VaultTube")
+        app.run(host='0.0.0.0',use_reloader=False)
+    else:
+        logger.error("DB failed to start correctly, exiting")
+        exit()
