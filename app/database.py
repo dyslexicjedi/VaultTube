@@ -39,6 +39,7 @@ def checkdb(config,logger):
                 `AddedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `PublishedAt` TIMESTAMP DEFAULT NULL,
                 `watched` int(11) DEFAULT 0,
+                `timestamp` varchar(50) DEFAULT 0,
                 PRIMARY KEY (`id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
                         """)
@@ -70,7 +71,7 @@ def save_video(id,ret,img,config,logger):
         cur = con.cursor()
         #Save Video Data
         sql = "Insert into videos(id,youtuber,json,filepath,PublishedAt) values(%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace("/vault/Media/VaultTube",""),ret['PublishedAt']))
+        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(config['Vault']['DIR'],""),ret['PublishedAt']))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))

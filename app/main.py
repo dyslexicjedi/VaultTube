@@ -46,7 +46,7 @@ if __name__ == "__main__":
     app.config['dbconfig'] = config._sections['Database']
 
     #Video static
-    videos = Blueprint('videos',__name__,static_url_path='/videos',static_folder="/vault/Media/VaultTube")
+    videos = Blueprint('videos',__name__,static_url_path='/videos',static_folder=config['Vault']['DIR'])
 
     #Register with Flask
     app.register_blueprint(videos)

@@ -51,8 +51,11 @@
 <script>
     const querystring = window.location.search;
     const urlparams = new URLSearchParams(querystring);
+    const id = urlparams.get('id');
+    const video = document.querySelector("video");
+    var tspoll;
     vPlayer = videojs('player',{techOrder: ["html5"],autoplay: false});
-    $.getJSON("/api/video/"+urlparams.get('id'),function(data){
+    $.getJSON("/api/video/"+id,function(data){
         var jobj = jQuery.parseJSON(data[0]["json"]);
         //Load Video
         vPlayer.src([{type: "video/webm",src: data[0]["filepath"]}]);
@@ -62,6 +65,10 @@
         //Adding Info to Player
         $("#title").text(jobj['items'][0]["snippet"]['title']);
         $("#desc").html(jobj['items'][0]["snippet"]['description'].replace('\n','<br>').replace('\r','<br>'));
+        //Set Timestamp if non-0
+        if(!data[0]['timestamp'] == 0){
+            vPlayer.currentTime(data[0]['timestamp']);
+        }
         //Watch Toggle
         if(data[0]["watched"])
         {
@@ -71,13 +78,22 @@
             $("#watchstatus").html("<button class='btn btn-outline-primary' onclick=\"markWatched()\">Unwatched</button>");
         }
     });
+    video.addEventListener("pause",(event) => {
+        clearInterval(tspoll);
+        $.getJSON("/api/set_timestamp/"+video.currentTime+"/"+id,function(data){});
+    });
+    video.addEventListener("play",(event) => {
+        tspoll = window.setInterval(function(){
+            $.getJSON("/api/set_timestamp/"+video.currentTime+"/"+id,function(data){});
+        }, 5000);
+    });
     function markWatched(){
-        $.ajax({url: "/api/watched/"+urlparams.get('id'), success: function(result){
+        $.ajax({url: "/api/watched/"+id, success: function(result){
             $("#watchstatus").html("<button class='btn btn-outline-secondary' onclick=\"markUnwatched()\">Watched</button>");
         }});
     }
     function markUnwatched(){
-        $.ajax({url: "/api/unwatched/"+urlparams.get('id'), success: function(result){
+        $.ajax({url: "/api/unwatched/"+id, success: function(result){
             $("#watchstatus").html("<button class='btn btn-outline-primary' onclick=\"markWatched()\">Unwatched</button>");
         }});
     }

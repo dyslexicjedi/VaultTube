@@ -5,6 +5,9 @@
     $.getJSON("/api/latest/PublishedAt/"+(currentpage*40),function(data){
         processdata(data);
     });
+    $.getJSON("/api/list/resume/",function(data){
+        processresume(data);
+    });
     function playvid(id){
         window.location.href='/player.html?id='+id;
     }
@@ -16,6 +19,21 @@
             $("#carddeck").append(txt);
         });
     }
+    function processresume(data){
+        if(data.length > 0){
+            $("#resumelabel").text("Resume");
+            $.each(data,function(i,item){
+                var jobj = jQuery.parseJSON(data[i]["json"]);
+                var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"...\"><div class=\"card-body\"><h5 class=\"card-title\">"+jobj["items"][0]["snippet"]["title"]+"</h5>";
+                txt += "</div><div class=\"card-footer\"><small class=\"text-muted\">Published: "+data[i].PublishedAt+"</small></div></div></div>";
+                $("#resumedeck").append(txt);
+            });
+        }
+    }
 </script>
+<div><h5 id="resumelabel"></h5></div>
+<div class="row row-cols-3 row-cols-md-4 g-4" id="resumedeck"></div>
+<hr>
+<div><h5 id="latestlabel">Latest</h5></div>
 <div class="row row-cols-3 row-cols-md-4 g-4" id="carddeck"></div>
 {% endblock %}

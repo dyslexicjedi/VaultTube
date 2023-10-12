@@ -5,7 +5,7 @@ from database import check_db_video,save_video
 def backend_thread(config,logger):
     while 1:
         logger.info("Scanning Vault")
-        for filename in glob.iglob('/vault/Media/VaultTube/**/*', recursive=True):
+        for filename in glob.iglob(config['Vault']['DIR']+'/**/*', recursive=True):
             get_video(os.path.abspath(filename),config,logger)
             time.sleep(5)
         time.sleep(5000)
