@@ -1,7 +1,9 @@
-import logging,os,traceback,sys
+import logging,os,traceback,sys, threading, configparser
 from logging.handlers import TimedRotatingFileHandler
 from flask import Flask,render_template,send_file,Blueprint,request
 from api import api_bp
+from backend import backend_thread
+from database import checkdb
 
 #Logging
 global logger
@@ -31,9 +33,11 @@ sys.excepthook = log_uncaught_exceptions
 #Main
 if __name__ == "__main__":
     #Load Config Data
+    config = configparser.ConfigParser()
+    config.read('config.ini')
 
     #Check Database
-
+    checkdb(config,logger)
 
 
     #Flask Startup
@@ -51,6 +55,10 @@ if __name__ == "__main__":
     @app.route('/')
     def home():
         return render_template('/index.html')
+
+    #Start Threads
+    be = threading.Thread(target=backend_thread,args=(logger,))
+    be.start()
 
     #Begin
     logger.info("Starting VaultTube")
