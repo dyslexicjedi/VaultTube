@@ -62,3 +62,31 @@ def getVideo(id):
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API Video Failed: %s"%e)
+
+@api_bp.route("/watched/<string:id>")
+def watched(id):
+    try:
+        current_app.logger.debug('Called Watched: '+id)
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        cur.execute("Update videos set watched = 1 where id = %s;",(id,))
+        con.commit()
+        con.close()
+        # return the results!
+        return "True"
+    except Exception as e:
+        current_app.logger.error("Mark Watched Failed: %s"%e)
+
+@api_bp.route("/unwatched/<string:id>")
+def unwatched(id):
+    try:
+        current_app.logger.info('Called UnWatched: '+id)
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        cur.execute("Update videos set watched = 0 where id = %s;",(id,))
+        con.commit()
+        con.close()
+        # return the results!
+        return "True"
+    except Exception as e:
+        current_app.logger.error("Mark Unwatched Failed: %s"%e)

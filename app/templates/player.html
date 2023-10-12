@@ -43,15 +43,26 @@
 
     </div>
 </div>
+<div class="row">
+    <div class="pl-3 pt-2 w-100"><h3 id="title"></h3></div>
+    <div><p id="desc"></p></div>
+    <div id="watchstatus"></div>
+</div>
 <script>
     const querystring = window.location.search;
     const urlparams = new URLSearchParams(querystring);
     vPlayer = videojs('player',{techOrder: ["html5"],autoplay: false});
     $.getJSON("/api/video/"+urlparams.get('id'),function(data){
+        var jobj = jQuery.parseJSON(data[0]["json"]);
+        //Load Video
         vPlayer.src([{type: "video/webm",src: data[0]["filepath"]}]);
         vPlayer.fluid(true);
         $("#playerrow").height(vPlayer.currentDimensions('height').height);
         $("#nextup").height(vPlayer.currentDimensions('height').height);
+        //Adding Info to Player
+        $("#title").text(jobj['items'][0]["snippet"]['title']);
+        $("#desc").html(jobj['items'][0]["snippet"]['description'].replace('\n','<br>').replace('\r','<br>'));
+        //Watch Toggle
         if(data[0]["watched"])
         {
             $("#watchstatus").html("<button class='btn btn-outline-secondary' onclick=\"markUnwatched()\">Watched</button>");
@@ -59,9 +70,16 @@
         else{
             $("#watchstatus").html("<button class='btn btn-outline-primary' onclick=\"markWatched()\">Unwatched</button>");
         }
-        for (let playid = 0; playid < data[0]["playlists"].length; playid++){
-            $("#playlists").append("<span class='label label-default'>"+data[0]["playlists"][playid]+"</span>");
-        }
     });
+    function markWatched(){
+        $.ajax({url: "/api/watched/"+urlparams.get('id'), success: function(result){
+            $("#watchstatus").html("<button class='btn btn-outline-secondary' onclick=\"markUnwatched()\">Watched</button>");
+        }});
+    }
+    function markUnwatched(){
+        $.ajax({url: "/api/unwatched/"+urlparams.get('id'), success: function(result){
+            $("#watchstatus").html("<button class='btn btn-outline-primary' onclick=\"markWatched()\">Unwatched</button>");
+        }});
+    }
 </script>
 {% endblock %}
