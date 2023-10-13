@@ -6,8 +6,9 @@ def backend_thread(config,logger):
     while 1:
         logger.info("Scanning Vault")
         for filename in glob.iglob(config['Vault']['DIR']+'/**/*', recursive=True):
-            get_video(os.path.abspath(filename),config,logger)
-            time.sleep(5)
+            if(os.path.isfile(os.path.abspath(filename))):
+                get_video(os.path.abspath(filename),config,logger)
+                time.sleep(5)
         time.sleep(5000)
 
 def get_video(fpath,config,logger):

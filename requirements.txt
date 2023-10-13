@@ -1,3 +1,4 @@
 Flask
 mariadb
 requests
+pytube

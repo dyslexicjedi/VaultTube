@@ -44,6 +44,7 @@ if __name__ == "__main__":
     app = Flask(__name__)
     app.debug = True
     app.config['dbconfig'] = config._sections['Database']
+    app.config['VaultDIR'] = config['Vault']['DIR']
 
     #Video static
     videos = Blueprint('videos',__name__,static_url_path='/videos',static_folder=config['Vault']['DIR'])
@@ -61,6 +62,11 @@ if __name__ == "__main__":
     def player():
         return render_template('/player.html')
     
+    @app.route("/download.html")
+    def download():
+        return render_template('/download.html')
+    
+  
     if(dbpass):
         #Start Threads
         be = threading.Thread(target=backend_thread,args=(config,logger))

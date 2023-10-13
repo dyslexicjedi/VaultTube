@@ -1,5 +1,6 @@
 from flask import Blueprint,current_app,send_file,Response
 import mariadb,json,io,math
+from youtube import *
 
 api_bp = Blueprint('api',__name__)
 
@@ -126,3 +127,11 @@ def list_resume():
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API List Resume Failed: %s"%e)
+
+@api_bp.route("/download/single/<string:ytid>")
+def api_download(ytid):
+    try:
+        url = "https://www.youtube.com/watch?v="+ytid
+        return single_download(url,current_app.logger,current_app.config['VaultDIR'])
+    except Exception as e:
+        current_app.logger.error("API Download Failed: %s"%e)

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-lg">
+    <h3>Download</h3>
+    <div class="input-group mb-3">
+        <input id="yturl" type="text" class="form-control" placeholder="Youtube URL" aria-label="Youtube URL" aria-describedby="button-addon2">
+        <button class="btn btn-outline-secondary" type="button" id="button-addon2" onclick="processdownload();">Download</button>
+      </div>
+</div>
+<div id="spinner" class="lds-ring"><div></div><div></div><div></div><div></div></div>
+<div id="dlpush" style="height: 200px;"></div>
+<script>
+    function processdownload(){
+        $("#spinner").show();
+        var yturl = $("#yturl").val();
+        if(yturl.includes("watch?v=")){
+            id = yturl.split('=')[1]
+            $.ajax({url: "/api/download/single/"+id, success: function(result){
+                $("#spinner").hide();
+            //$("#watchstatus").html("<button class='btn btn-outline-secondary' onclick=\"markUnwatched()\">Watched</button>");
+            }});
+            
+        }
+    }
+</script>
+{% endblock %}
