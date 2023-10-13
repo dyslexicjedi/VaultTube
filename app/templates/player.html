@@ -78,14 +78,22 @@
             $("#watchstatus").html("<button class='btn btn-outline-primary' onclick=\"markWatched()\">Unwatched</button>");
         }
     });
+    //Pause Listener - Push Timestamp to server and disable polling
     video.addEventListener("pause",(event) => {
         clearInterval(tspoll);
         $.getJSON("/api/set_timestamp/"+video.currentTime+"/"+id,function(data){});
     });
+    //Play Listener - Start polling
     video.addEventListener("play",(event) => {
         tspoll = window.setInterval(function(){
             $.getJSON("/api/set_timestamp/"+video.currentTime+"/"+id,function(data){});
         }, 5000);
+    });
+    //End Listener - Update watch status
+    video.addEventListener("ended",(event) => {
+        $.ajax({url: "/api/watched/"+id, success: function(result){}});
+        $.getJSON("/api/set_timestamp/0/"+id,function(data){});
+        clearInterval(tspoll);
     });
     function markWatched(){
         $.ajax({url: "/api/watched/"+id, success: function(result){
