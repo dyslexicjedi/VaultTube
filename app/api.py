@@ -135,3 +135,16 @@ def api_download(ytid):
         return single_download(url,current_app.logger,current_app.config['VaultDIR'])
     except Exception as e:
         current_app.logger.error("API Download Failed: %s"%e)
+
+@api_bp.route("/stats/video/count")
+def get_video_count():
+    try:
+        current_app.logger.debug('Called Get_Video_Count')
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        cur.execute("select count(*) from videos;")
+        count = cur.fetchone()[0]
+        con.close()
+        return str(count)
+    except Exception as e:
+        current_app.logger.error("API Image Failed: %s"%e)
