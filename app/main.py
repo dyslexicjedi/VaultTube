@@ -66,6 +66,10 @@ if __name__ == "__main__":
     def download():
         return render_template('/download.html')
     
+    @app.route("/channels.html")
+    def channels():
+        return render_template("/channels.html")
+    
   
     if(dbpass):
         #Start Threads

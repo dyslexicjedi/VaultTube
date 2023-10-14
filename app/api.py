@@ -148,3 +148,22 @@ def get_video_count():
         return str(count)
     except Exception as e:
         current_app.logger.error("API Image Failed: %s"%e)
+
+@api_bp.route('/channels/<string:page>')
+def channels(page):
+    try:
+        current_app.logger.debug("Called Channels %s"%(page,))
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        cur.execute("select * from channels order by channelname desc limit 40 offset %s;"%(page,))
+        # serialize results into JSON
+        row_headers=[x[0] for x in cur.description]
+        rv = cur.fetchall()
+        json_data=[]
+        for result in rv:
+            json_data.append(dict(zip(row_headers,result)))
+        con.close()
+        # return the results!
+        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API Channel Failed: %s"%e)

@@ -24,10 +24,17 @@ def checkdb(config,logger):
         if(not cur.fetchone()):
             logger.info("Tags Table not created, creating...")
             cur.execute("CREATE TABLE `tags` (`id` varchar(25) NOT NULL,`tag` varchar(250) NOT NULL,PRIMARY KEY (`id`,`tag`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
+        #Playlists
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'playlists' LIMIT 1;"%(config['Database']['database']))
         if(not cur.fetchone()):
             logger.info("Playlists Table not created, creating...")
             cur.execute("create table playlists (`playlist` varchar(100),`videoid` varchar(100),PRIMARY KEY(`playlist`,`videoid`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
+        #Channels
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'channels' LIMIT 1;"%(config['Database']['database']))
+        if(not cur.fetchone()):
+            logger.info("Channels Table not created, creating...")
+            cur.execute("create table channels (`channelid` varchar(100),`channelname` varchar(100),`json` longtext,`subscribed` int(11) DEFAULT 0,PRIMARY KEY(`channelid`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
+        #Videos
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'videos' LIMIT 1;"%(config['Database']['database']))
         if(not cur.fetchone()):
             logger.info("Tags Videos not created, creating...")
@@ -50,7 +57,7 @@ def checkdb(config,logger):
         return False
 
 def check_db_video(id,config,logger):
-    logger.debug("Checking db for id: %s",id)
+    logger.debug("Checking db for video id: %s",id)
     test = False
     try:
         check = mariadb.connect(**config._sections['Database'])
@@ -79,3 +86,31 @@ def save_video(id,ret,img,config,logger):
         con.close()
     except Exception as e:
         logger.error("Error during save_video: %s"%e)
+
+def check_db_channel(id,config,logger):
+    logger.debug("Checking db for channel id: %s",id)
+    test = False
+    try:
+        check = mariadb.connect(**config._sections['Database'])
+        cur = check.cursor()
+        cur.execute("Select * FROM channels where channelid = '%s'"%id)
+        if(not cur.fetchone()):
+            test = False
+        else:
+            test = True
+        check.close()
+        return test
+    except Exception as e:
+        logger.error("Error during check_db_channel: %s"%e)
+
+def save_channel(channelid,channelname,jdata,config,logger):
+    try:
+        con = mariadb.connect(**config._sections['Database'])
+        cur = con.cursor()
+        #Save Video Data
+        sql = "Insert into channels(channelid,channelname,json) values(%s,%s,%s);"
+        cur.execute(sql,(channelid,channelname,json.dumps(jdata)))
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.error("Error during save_channel: %s"%e)
