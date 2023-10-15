@@ -4,6 +4,10 @@
 
 <div class="row row-cols-3 row-cols-md-1 g-4 pt-4" id="carddeck"></div>
 
+<nav aria-label="..." class="pt-4 pb-4">
+    <ul id="pagelist" class="pagination"></ul>
+</nav>
+
 
 <script>
     pagination(1);
@@ -16,7 +20,8 @@
         $("#carddeck").empty();
         $.each(data,function(i,item){
             var jobj = jQuery.parseJSON(data[i]["json"]);
-            var txt = "<div class=\"card\"><div class=\"card-body\">"+data[i]['channelname']+"</div><div><p>"+jobj['items'][0]['snippet']['description']+"</p></div></div>";
+            var txt = "<div class=\"card\"><div class=\"card-body\"><a href=\"creator.html?creator="+data[i]['channelid']+"\">"+data[i]['channelname']+"</a></div><div><p>"+jobj['items'][0]['snippet']['description']+"</p></div>";
+            txt += "<div class=\"card-footer d-flex flex-row bd-highlight mb-3 btn-toolbar\" role=\"toolbar\"><div class=\"btn-group\"><button class=\"btn btn-primary\">Subscribe</button></div><div class=\"input-group-text\">Video Count: "+data[i]['vidcount']+"</div><div class=\"input-group-text\">Last Video Archived: "+data[i]['lastvidtime']+"</div></div>";
             $("#carddeck").append(txt);
         });
     }

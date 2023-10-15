@@ -155,7 +155,7 @@ def channels(page):
         current_app.logger.debug("Called Channels %s"%(page,))
         con = mariadb.connect(**current_app.config['dbconfig'])
         cur = con.cursor()
-        cur.execute("select * from channels order by channelname desc limit 40 offset %s;"%(page,))
+        cur.execute("select channels.*,count(*) as vidcount,max(PublishedAt) as lastvidtime from channels left outer join videos on channels.channelId = videos.channelId group by channelId order by channelname desc limit 40 offset %s;"%(page,))
         # serialize results into JSON
         row_headers=[x[0] for x in cur.description]
         rv = cur.fetchall()
@@ -167,3 +167,23 @@ def channels(page):
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
+
+
+@api_bp.route('/creator/<string:creator>/<string:page>')
+def api_creator(creator,page):
+    try:
+        current_app.logger.debug("Called Creator %s %s"%(creator,page))
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        cur.execute("select * from videos where channelId = '%s' order by PublishedAt desc limit 40 offset %s;"%(creator,page))
+        # serialize results into JSON
+        row_headers=[x[0] for x in cur.description]
+        rv = cur.fetchall()
+        json_data=[]
+        for result in rv:
+            json_data.append(dict(zip(row_headers,result)))
+        con.close()
+        # return the results!
+        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API Creator Failed: %s"%e)

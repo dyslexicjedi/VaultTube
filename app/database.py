@@ -41,6 +41,7 @@ def checkdb(config,logger):
             cur.execute("""CREATE TABLE `videos` (
                 `id` varchar(50) COLLATE utf8mb4_bin NOT NULL,
                 `youtuber` varchar(255) COLLATE utf8mb4_bin DEFAULT NULL,
+                `channelId` varchar(255) DEFAULT NULL,
                 `json` longtext COLLATE utf8mb4_bin DEFAULT NULL,
                 `filepath` varchar(2000) COLLATE utf8mb4_bin DEFAULT NULL,
                 `AddedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -77,8 +78,8 @@ def save_video(id,ret,img,config,logger):
         con = mariadb.connect(**config._sections['Database'])
         cur = con.cursor()
         #Save Video Data
-        sql = "Insert into videos(id,youtuber,json,filepath,PublishedAt) values(%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(config['Vault']['DIR'],""),ret['PublishedAt']))
+        sql = "Insert into videos(id,youtuber,json,filepath,PublishedAt,channelId) values(%s,%s,%s,%s,%s,%s);"
+        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(config['Vault']['DIR'],""),ret['PublishedAt'],ret['channelId']))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))

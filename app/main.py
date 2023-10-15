@@ -69,6 +69,10 @@ if __name__ == "__main__":
     @app.route("/channels.html")
     def channels():
         return render_template("/channels.html")
+
+    @app.route("/creator.html")
+    def creator():
+        return render_template("/creator.html")
     
   
     if(dbpass):

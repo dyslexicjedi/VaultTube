@@ -15,13 +15,16 @@ def backend_thread(config,logger):
         time.sleep(5000)
 
 def get_video(fpath,config,logger):
-    fname = os.path.basename(fpath)
-    id = fname.split('.')[0]
-    if(check_db_video(id,config,logger)):
-        pass
-    else:
-        logger.info("Processing New Video: %s"%id)
-        process_new_video(id,fpath,config,logger)
+    try:
+        fname = os.path.basename(fpath)
+        id = fname.split('.')[0]
+        if(check_db_video(id,config,logger)):
+            pass
+        else:
+            logger.info("Processing New Video: %s"%id)
+            process_new_video(id,fpath,config,logger)
+    except Exception as e:
+        logger.error("Error in get_video Failed: %s"%e)
 
 def process_new_video(id,fpath,config,logger):
     ret = {}
@@ -30,6 +33,7 @@ def process_new_video(id,fpath,config,logger):
         if(r['pageInfo']['totalResults'] == 1):
             ret["PublishedAt"] = datetime.datetime.strptime(r["items"][0]["snippet"]["publishedAt"], '%Y-%m-%dT%H:%M:%SZ')
             ret['Youtuber'] = r["items"][0]["snippet"]["channelTitle"]
+            ret['channelId'] = r["items"][0]["snippet"]["channelId"]
             ret['Json'] = r
             ret['Filepath'] = fpath
             if("high" in r["items"][0]["snippet"]["thumbnails"]):
