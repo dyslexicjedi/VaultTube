@@ -40,8 +40,8 @@
                       </li>
                     </ul>
                     <form class="d-flex">
-                      <input class="form-control me-2" type="search" placeholder="Search" aria-label="Search">
-                      <button class="btn btn-outline-primary" type="submit">Search</button>
+                      <input class="form-control me-2" type="search" placeholder="Search" aria-label="Search" id="searchtext">
+                      <button class="btn btn-outline-primary" type="button" onclick="do_search();">Search</button>
                     </form>
                   </div>
                 </div>
@@ -55,5 +55,11 @@
                 <p>VaultTube v1.0.0-alpha | <a href="https://github.com/jedihomelab/VaultTube" target="_blank"><img src="/static/imgs/github.svg" height="20" width="20" /></a> | #Docker Here</p>
             </div>
         </div>
+        <script>
+          function do_search(){
+            var searchterm = $("#searchtext").val();
+            window.location.href='/search.html?txt='+searchterm;
+          }
+        </script>
     </body>
 </html>

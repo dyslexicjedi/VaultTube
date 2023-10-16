@@ -60,7 +60,10 @@ def process_channel(fname,config,logger):
         else:
             logger.info("Processing Channel: "+id)
             r = requests.get('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+id+'&key='+config['YouTube']['KEY']).json()
-            save_channel(r['items'][0]['id'],r['items'][0]['snippet']['title'],r,config,logger)
-            #print(json.dumps(r))
+            if(r['pageInfo']['totalResults'] > 0):
+                save_channel(r['items'][0]['id'],r['items'][0]['snippet']['title'],r,config,logger)
+            else:
+                logger.info("Unable to find Channel: %s"%id)
     except Exception as e:
         logger.error("Error in Channel: %s"%e)
+        logger.error(json.dumps(r, indent=4))

@@ -2,3 +2,4 @@ Flask
 mariadb
 requests
 pytube
+pytest

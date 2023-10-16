@@ -19,9 +19,6 @@ function update(id){
     pagination(id);
 }
 $("#latestlabel").val(creator);
-function playvid(id){
-        window.location.href='/player.html?id='+id;
-    }
 function get_videos(currentpage,creator){
         $.getJSON("/api/creator/"+creator+"/"+(currentpage*40),function(data){
             processdata(data);

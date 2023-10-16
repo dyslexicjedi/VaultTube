@@ -19,9 +19,9 @@
 
     update(1);
     var currentId = 1;
-    function update(id,contentType){
+    function update(id){
         currentId = id;
-        get_videos(id-1,contentType);
+        get_videos(id-1);
         pagination(id);
     }
     $.getJSON("/api/list/resume/",function(data){
@@ -32,21 +32,17 @@
     //         videocount = data;
     //     });
     // }
-    function playvid(id){
-        window.location.href='/player.html?id='+id;
-    }
-    function get_videos(currentpage,contentType = "all"){
-        if(contentType == "all"){
-            $.getJSON("/api/latest/PublishedAt/"+(currentpage*40),function(data){
-                processdata(data);
-            });
-        }
-        else{
+    function get_videos(currentpage){
+        if($("#contentToggle").prop('checked')){
             $.getJSON("/api/unwatched/PublishedAt/"+(currentpage*40),function(data){
                 processdata(data);
             });
         }
-
+        else{
+            $.getJSON("/api/latest/PublishedAt/"+(currentpage*40),function(data){
+                processdata(data);
+            });
+        }
     }
     function processresume(data){
         if(data.length > 0){
@@ -61,12 +57,7 @@
         }
     }
     function contentChange(){
-        if($("#contentToggle").prop('checked')){
-            update(currentId,"unwatched");
-        }
-        else{
             update(currentId);
-        }
     }
 </script>
 {% endblock %}

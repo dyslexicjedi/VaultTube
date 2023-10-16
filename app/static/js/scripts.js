@@ -56,3 +56,6 @@ function pagination(id){
     }
     $("#pagelist").append(txt);
 }
+function playvid(id){
+    window.location.href='/player.html?id='+id;
+}

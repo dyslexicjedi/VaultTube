@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div><h5 id="searchlabel">Search Results</h5></div>
+<div class="row row-cols-3 row-cols-md-4 g-4" id="carddeck"></div>
+<nav aria-label="..." class="pt-4 pb-4">
+    <ul id="pagelist" class="pagination"></ul>
+</nav>
+
+<script src="/static/js/scripts.js"></script>
+<script>
+    const querystring = window.location.search;
+    const urlparams = new URLSearchParams(querystring);
+    const searchtxt = urlparams.get('txt');
+    update(1);
+    function update(id){
+        get_videos(id-1,searchtxt);
+        pagination(id);
+    }
+    function get_videos(currentpage,searchtxt){
+        $.getJSON("/api/search/"+searchtxt+"/"+(currentpage*40),function(data){
+            processdata(data);
+        });
+    }
+</script>
+
+
+
+{% endblock %}

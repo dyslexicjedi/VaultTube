@@ -239,3 +239,22 @@ def get_unwatched(opt,page):
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API Unwatched Failed: %s"%e)
+
+@api_bp.route('/search/<string:searchtxt>/<string:page>')
+def api_search(searchtxt,page):
+    try:
+        current_app.logger.debug("Called Creator %s %s"%(searchtxt,page))
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        cur.execute("select * from videos where json like '%s' order by PublishedAt desc limit 40 offset %s;"%("%"+searchtxt+"%",page))
+        # serialize results into JSON
+        row_headers=[x[0] for x in cur.description]
+        rv = cur.fetchall()
+        json_data=[]
+        for result in rv:
+            json_data.append(dict(zip(row_headers,result)))
+        con.close()
+        # return the results!
+        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API Creator Failed: %s"%e)
