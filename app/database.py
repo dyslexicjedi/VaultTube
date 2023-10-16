@@ -115,3 +115,14 @@ def save_channel(channelid,channelname,jdata,config,logger):
         con.close()
     except Exception as e:
         logger.error("Error during save_channel: %s"%e)
+
+def get_active_subscriptions(config,logger):
+    try:
+        con = mariadb.connect(**config._sections['Database'])
+        cur = con.cursor()
+        cur.execute("select channelid from channels where subscribed = 1;")
+        rv = cur.fetchall()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during subscription poll")

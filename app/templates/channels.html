@@ -25,8 +25,24 @@
         $.each(data,function(i,item){
             var jobj = jQuery.parseJSON(data[i]["json"]);
             var txt = "<div class=\"card\"><div class=\"card-body\"><a href=\"creator.html?creator="+data[i]['channelid']+"\">"+data[i]['channelname']+"</a></div><div><p>"+jobj['items'][0]['snippet']['description']+"</p></div>";
-            txt += "<div class=\"card-footer d-flex flex-row bd-highlight mb-3 btn-toolbar\" role=\"toolbar\"><div class=\"btn-group\"><button class=\"btn btn-primary\">Subscribe</button></div><div class=\"input-group-text\">Video Count: "+data[i]['vidcount']+"</div><div class=\"input-group-text\">Last Video Archived: "+data[i]['lastvidtime']+"</div></div>";
+            if(data[i]['subscribed']){
+                txt += "<div class=\"card-footer d-flex flex-row bd-highlight mb-3 btn-toolbar\" role=\"toolbar\"><div class=\"btn-group\"><button class=\"btn btn-secondary\" onclick=\"unsubscribe('"+data[i]['channelid']+"');\">Subscribed</button></div>";
+            }
+            else{
+                txt += "<div class=\"card-footer d-flex flex-row bd-highlight mb-3 btn-toolbar\" role=\"toolbar\"><div class=\"btn-group\"><button class=\"btn btn-primary\" onclick=\"subscribe('"+data[i]['channelid']+"');\">Subscribe</button></div>";
+            }
+            txt += "<div class=\"input-group-text\">Video Count: "+data[i]['vidcount']+"</div><div class=\"input-group-text\">Last Video Archived: "+data[i]['lastvidtime']+"</div></div>";
             $("#carddeck").append(txt);
+        });
+    }
+    function subscribe(channelid){
+        $.getJSON("/api/subscribe/"+channelid,function(data){
+            //To DO
+        });
+    }
+    function unsubscribe(channelid){
+        $.getJSON("/api/unsubscribe/"+channelid,function(data){
+            //To DO
         });
     }
 </script>

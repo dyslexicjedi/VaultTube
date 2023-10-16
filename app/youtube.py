@@ -1,5 +1,6 @@
-from pytube import YouTube
-import time,os
+from pytube import YouTube,Channel
+from database import check_db_video
+import time,os,requests,json
 
 complete = False
 
@@ -28,3 +29,23 @@ def single_download(url,logger,vaultdir):
         return "True"
     except Exception as e:
         logger.error("YT Single Download Failed: %s"%e)
+
+def get_channel_video_list(channelid,config,logger):
+    try:
+        curl = "https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&id=%s&key=%s"%(channelid[0],config['YouTube']['KEY'])
+        r = requests.get(curl).json()
+        pid = r['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+        #logger.info(json.dumps(r, indent=4))
+
+        curl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s"%(pid,config['YouTube']['KEY'])
+        r = requests.get(curl).json()
+        logger.debug(json.dumps(r, indent=4))
+        for vid in r['items']:
+            id = vid['contentDetails']['videoId']
+            if(check_db_video(id,config,logger)):
+                logger.info("Already found: %s"%id)
+            else:
+                logger.info("Processing: %s"%id)
+                single_download("https://www.youtube.com/watch?v=%s"%id,logger,config['Vault']['DIR'])
+    except Exception as e:
+        logger.error("Scanning Channel Failed: %s"%e)

@@ -187,3 +187,31 @@ def api_creator(creator,page):
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
+
+@api_bp.route("/subscribe/<string:channelid>")
+def subscribe(channelid):
+    try:
+        current_app.logger.debug('Called Subscribe: '+channelid)
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        cur.execute("Update channels set subscribed = 1 where channelid = %s;",(channelid,))
+        con.commit()
+        con.close()
+        # return the results!
+        return "True"
+    except Exception as e:
+        current_app.logger.error("Subscribe Failed: %s"%e)
+
+@api_bp.route("/unsubscribe/<string:channelid>")
+def unsubscribe(channelid):
+    try:
+        current_app.logger.debug('Called Unsubscribe: '+channelid)
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        cur.execute("Update channels set subscribed = 0 where channelid = %s;",(channelid,))
+        con.commit()
+        con.close()
+        # return the results!
+        return "True"
+    except Exception as e:
+        current_app.logger.error("Unsubscribe Failed: %s"%e)

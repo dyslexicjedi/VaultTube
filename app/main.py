@@ -4,6 +4,7 @@ from flask import Flask,render_template,send_file,Blueprint,request
 from api import api_bp
 from backend import backend_thread
 from database import checkdb
+from scanner import start_scanner
 
 #Logging
 global logger
@@ -79,6 +80,8 @@ if __name__ == "__main__":
         #Start Threads
         be = threading.Thread(target=backend_thread,args=(config,logger))
         be.start()
+        sc = threading.Thread(target=start_scanner,args=(config,logger))
+        sc.start()
 
         #Begin
         logger.info("Starting VaultTube")
