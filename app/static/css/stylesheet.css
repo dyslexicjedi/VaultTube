@@ -33,4 +33,6 @@
       transform: rotate(360deg);
     }
   }
-  
+.content-switch .form-switch{
+  margin: 3px 0px 0 15px;
+}

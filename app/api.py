@@ -155,7 +155,7 @@ def channels(page):
         current_app.logger.debug("Called Channels %s"%(page,))
         con = mariadb.connect(**current_app.config['dbconfig'])
         cur = con.cursor()
-        cur.execute("select channels.*,count(*) as vidcount,max(PublishedAt) as lastvidtime from channels left outer join videos on channels.channelId = videos.channelId group by channelId order by channelname desc limit 40 offset %s;"%(page,))
+        cur.execute("select channels.*,count(*) as vidcount,max(PublishedAt) as lastvidtime from channels left outer join videos on channels.channelId = videos.channelId group by channelId order by channelname limit 40 offset %s;"%(page,))
         # serialize results into JSON
         row_headers=[x[0] for x in cur.description]
         rv = cur.fetchall()
@@ -215,3 +215,27 @@ def unsubscribe(channelid):
         return "True"
     except Exception as e:
         current_app.logger.error("Unsubscribe Failed: %s"%e)
+
+@api_bp.route('/unwatched/<string:opt>/<string:page>')
+def get_unwatched(opt,page):
+    try:
+        current_app.logger.debug("Called Unwatched %s %s"%(opt,page))
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        if(opt == "PublishedAt"):
+            cur.execute("select * from videos where watched = 0 order by PublishedAt desc limit 40 offset %s;"%(page,))
+        elif(opt == "AddedAt"):
+            cur.execute("select * from videos order watched = 0 by AddedAt desc limit 40 offset %s;"%(page,))
+        else:
+            cur.execute("select * from videos order watched = 0 by PublishedAt desc limit 40 offset %s;"%(page,))
+        # serialize results into JSON
+        row_headers=[x[0] for x in cur.description]
+        rv = cur.fetchall()
+        json_data=[]
+        for result in rv:
+            json_data.append(dict(zip(row_headers,result)))
+        con.close()
+        # return the results!
+        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API Unwatched Failed: %s"%e)
