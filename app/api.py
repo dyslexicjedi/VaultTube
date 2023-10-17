@@ -71,6 +71,7 @@ def watched(id):
         con = mariadb.connect(**current_app.config['dbconfig'])
         cur = con.cursor()
         cur.execute("Update videos set watched = 1 where id = %s;",(id,))
+        cur.execute("Update videos set timestamp = 0 where id = %s;",(id,))
         con.commit()
         con.close()
         # return the results!
@@ -132,7 +133,7 @@ def list_resume():
 def api_download(ytid):
     try:
         url = "https://www.youtube.com/watch?v="+ytid
-        return single_download(url,current_app.logger,current_app.config['VaultDIR'])
+        return single_download(url,current_app.logger,current_app.config['file'])
     except Exception as e:
         current_app.logger.error("API Download Failed: %s"%e)
 
@@ -258,3 +259,33 @@ def api_search(searchtxt,page):
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
+
+@api_bp.route("/sub_status/<string:channelid>")
+def sub_status(channelid):
+    try:
+        current_app.logger.debug('Called Unsubscribe: '+channelid)
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        cur.execute("Select subscribed from channels where channelid = %s;",(channelid,))
+        data = cur.fetchone()[0]
+        con.commit()
+        con.close()
+        # return the results!
+        return str(data)
+    except Exception as e:
+        current_app.logger.error("Unsubscribe Failed: %s"%e)
+
+@api_bp.route("/watch_status/<string:vid>")
+def watch_status(vid):
+    try:
+        current_app.logger.debug('Called Watch Status: '+vid)
+        con = mariadb.connect(**current_app.config['dbconfig'])
+        cur = con.cursor()
+        cur.execute("Select watched from videos where id = %s;",(vid,))
+        data = cur.fetchone()[0]
+        con.commit()
+        con.close()
+        # return the results!
+        return str(data)
+    except Exception as e:
+        current_app.logger.error("Watch Status Failed: %s"%e)

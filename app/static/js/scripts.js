@@ -59,3 +59,59 @@ function pagination(id){
 function playvid(id){
     window.location.href='/player.html?id='+id;
 }
+function subscribe(channelid){
+    $.getJSON("/api/subscribe/"+channelid,function(data){
+        //To DO
+    });
+}
+function unsubscribe(channelid){
+    $.getJSON("/api/unsubscribe/"+channelid,function(data){
+        //To DO
+    });
+}
+function subscribe_status(channelId){
+    $.getJSON("/api/sub_status/"+creator,function(data){
+        if(data == 0){
+            $("#subimg").attr('src','/static/imgs/square.svg');
+        }
+        else{
+            $("#subimg").attr('src','/static/imgs/check-square.svg');
+        }
+        $("#subimg").attr('onclick','handlesub(\''+channelId+'\');');
+    });
+}
+function handlesub(channelId){
+    $.getJSON("/api/sub_status/"+creator,function(data){
+        if(data == 0){
+            subscribe(channelId);
+        }
+        else{
+            unsubscribe(channelId);
+        }
+    });
+}
+function watch_status(vid){
+    $.getJSON("/api/watch_status/"+vid,function(data){
+        if(data == 0){
+            $("#watchstatus").attr('src','/static/imgs/square.svg');
+        }
+        else{
+            $("#watchstatus").attr('src','/static/imgs/check-square.svg');
+        }
+        $("#watchstatus").attr('onclick','handlewatch(\''+vid+'\');');
+    });
+}
+function handlewatch(vid){
+    $.getJSON("/api/watch_status/"+vid,function(data){
+        if(data == 0){
+            $.ajax({url: "/api/watched/"+vid, success: function(result){
+                $("#watchstatus").attr('src','/static/imgs/check-square.svg');
+            }});
+        }
+        else{
+            $.ajax({url: "/api/unwatched/"+vid, success: function(result){
+                $("#watchstatus").attr('src','/static/imgs/square.svg');
+            }});
+        }
+    });
+}

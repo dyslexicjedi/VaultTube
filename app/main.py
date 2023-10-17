@@ -40,6 +40,7 @@ app = Flask(__name__)
 app.debug = True
 app.config['dbconfig'] = config._sections['Database']
 app.config['VaultDIR'] = config['Vault']['DIR']
+app.config['file'] = config
 
 #Video static
 videos = Blueprint('videos',__name__,static_url_path='/videos',static_folder=config['Vault']['DIR'])

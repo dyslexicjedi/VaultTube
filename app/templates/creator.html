@@ -2,7 +2,7 @@
 {% block content %}
 
 
-<div><h5 id="latestlabel"></h5></div>
+<div><img id="subimg"><h5 id="creatorlabel"></h5></div>
 <div class="row row-cols-3 row-cols-md-4 g-4" id="carddeck"></div>
 <nav aria-label="..." class="pt-4 pb-4">
     <ul id="pagelist" class="pagination"></ul>
@@ -14,16 +14,16 @@ const querystring = window.location.search;
 const urlparams = new URLSearchParams(querystring);
 const creator = urlparams.get('creator');
 update(1);
+subscribe_status(creator);
 function update(id){
     get_videos(id-1,creator);
     pagination(id);
 }
-$("#latestlabel").val(creator);
+$("#creatorlabel").text(creator);
 function get_videos(currentpage,creator){
         $.getJSON("/api/creator/"+creator+"/"+(currentpage*40),function(data){
             processdata(data);
         });
     }
-
 </script>
 {% endblock %}

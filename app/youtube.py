@@ -1,5 +1,6 @@
 from pytube import YouTube,Channel
 from database import check_db_video
+from backend import get_video
 import time,os,requests,json
 
 complete = False
@@ -15,17 +16,18 @@ def processing(stream,chunk,bytes_remaining):
     pct_completed = bytes_downloaded / total_size * 100
     print(f"Status: {round(pct_completed, 2)} %")
 
-def single_download(url,logger,vaultdir):
+def single_download(url,logger,config):
     try:
         global complete
         logger.debug("Starting Download: %s"%url)
         yt = YouTube(url,on_complete_callback=processComplete,on_progress_callback=processing)
-        if(not os.path.exists(vaultdir+"/"+yt.vid_info['videoDetails']['channelId'])):
-            os.mkdir(vaultdir+"/"+yt.vid_info['videoDetails']['channelId'])
-        ys = yt.streams.filter(progressive=True,file_extension='mp4').order_by('resolution').desc().first().download(filename=yt.vid_info['videoDetails']['videoId']+".mp4",output_path=vaultdir+"/"+yt.vid_info['videoDetails']['channelId']+"/")
+        if(not os.path.exists(config['Vault']['DIR']+"/"+yt.vid_info['videoDetails']['channelId'])):
+            os.mkdir(config['Vault']['DIR']+"/"+yt.vid_info['videoDetails']['channelId'])
+        ys = yt.streams.filter(progressive=True,file_extension='mp4').order_by('resolution').desc().first().download(filename=yt.vid_info['videoDetails']['videoId']+".mp4",output_path=config['Vault']['DIR']+"/"+yt.vid_info['videoDetails']['channelId']+"/")
         while not complete:
             time.sleep(5)
         complete = False
+        get_video(config['Vault']['DIR']+"/"+yt.vid_info['videoDetails']['channelId']+"/"+yt.vid_info['videoDetails']['videoId']+".mp4",config,logger)
         return "True"
     except Exception as e:
         logger.error("YT Single Download Failed: %s"%e)
@@ -46,6 +48,6 @@ def get_channel_video_list(channelid,config,logger):
                 logger.info("Already found: %s"%id)
             else:
                 logger.info("Processing: %s"%id)
-                single_download("https://www.youtube.com/watch?v=%s"%id,logger,config['Vault']['DIR'])
+                single_download("https://www.youtube.com/watch?v=%s"%id,logger,config)
     except Exception as e:
         logger.error("Scanning Channel Failed: %s"%e)

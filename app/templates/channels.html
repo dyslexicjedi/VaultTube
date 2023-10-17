@@ -35,16 +35,6 @@
             $("#carddeck").append(txt);
         });
     }
-    function subscribe(channelid){
-        $.getJSON("/api/subscribe/"+channelid,function(data){
-            //To DO
-        });
-    }
-    function unsubscribe(channelid){
-        $.getJSON("/api/unsubscribe/"+channelid,function(data){
-            //To DO
-        });
-    }
 </script>
 
 {% endblock %}

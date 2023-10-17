@@ -2,3 +2,6 @@
 *.pyc
 config.ini
 __pycache__
+chromedriver
+.coverage
+.pytest_cache
