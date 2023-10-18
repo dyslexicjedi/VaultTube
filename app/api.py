@@ -1,6 +1,7 @@
 from flask import Blueprint,current_app,send_file,Response
 import mariadb,json,io,math
 from youtube import *
+from backend import process_channel
 
 api_bp = Blueprint('api',__name__)
 
@@ -263,17 +264,22 @@ def api_search(searchtxt,page):
 @api_bp.route("/sub_status/<string:channelid>")
 def sub_status(channelid):
     try:
-        current_app.logger.debug('Called Unsubscribe: '+channelid)
+        current_app.logger.debug('Called Sub_status: '+channelid)
         con = mariadb.connect(**current_app.config['dbconfig'])
         cur = con.cursor()
         cur.execute("Select subscribed from channels where channelid = %s;",(channelid,))
-        data = cur.fetchone()[0]
+        if(not cur.rowcount):
+            current_app.logger.error("sub_status: Channel not found")
+            process_channel('/videos/'+channelid,current_app.config['file'],current_app.logger)
+            return "0"
+        else:
+            data = cur.fetchone()[0]
         con.commit()
         con.close()
         # return the results!
         return str(data)
     except Exception as e:
-        current_app.logger.error("Unsubscribe Failed: %s"%e)
+        current_app.logger.error("sub_status Failed: %s"%e)
 
 @api_bp.route("/watch_status/<string:vid>")
 def watch_status(vid):
