@@ -1,0 +1,13 @@
+name: Build Docker
+
+on: [push]
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v2
+            - name: "docker build"
+                run: |
+                    docker build ./app -t vaulttube:dev
