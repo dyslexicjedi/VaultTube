@@ -7,7 +7,7 @@
 <hr>
 <div class="row">
     <div class="col"><h5 id="latestlabel">Latest</h5></div>
-    <div class="col"><div class="d-flex content-switch"><div class="form-text text-1">All</div><div class="form-check form-switch form-check-inline"><input class="form-check-input form-check-inline" type="checkbox" role="switch" id="contentToggle" onclick="contentChange();"></div><div class="form-text text-2">Unwatched</div></div></div>
+    <div class="col"><div class="d-flex content-switch"><div class="form-text text-1">Unwatched</div><div class="form-check form-switch form-check-inline"><input class="form-check-input form-check-inline" type="checkbox" role="switch" id="contentToggle" onclick="contentChange();"></div><div class="form-text text-2">All</div></div></div>
 </div>
 <div class="row row-cols-3 row-cols-md-4 g-4" id="carddeck"></div>
 <nav aria-label="..." class="pt-4 pb-4">
@@ -34,12 +34,13 @@
     // }
     function get_videos(currentpage){
         if($("#contentToggle").prop('checked')){
-            $.getJSON("/api/unwatched/PublishedAt/"+(currentpage*40),function(data){
+            $.getJSON("/api/latest/PublishedAt/"+(currentpage*40),function(data){
                 processdata(data);
             });
+
         }
         else{
-            $.getJSON("/api/latest/PublishedAt/"+(currentpage*40),function(data){
+            $.getJSON("/api/unwatched/PublishedAt/"+(currentpage*40),function(data){
                 processdata(data);
             });
         }

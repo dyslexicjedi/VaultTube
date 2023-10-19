@@ -7,6 +7,54 @@ VaultTube is current pre-alpha (hot code!), expect bugs, crashes and similar iss
 
 Who should use this: Alpha testers, people who don't mind "early-access" to help improve software.
 
+## How-TO:
+Below is a docker compose entry for the database and vaulttube
+
+```
+version: "3"
+services:
+  db:
+    image: mariadb
+    environment:
+      MYSQL_ROOT_PASSWORD: SuperSecretPassword
+      MYSQL_DATABASE: vaulttube
+      MYSQL_USER: vaulttube
+      MYSQL_PASSWORD: SuperSecretPassword
+    volumes:
+      - /docker/mariadb:/var/lib/mysql
+    ports:
+      - "3306:3306"
+  vaulttube:
+    image: dyslexicjedi/vaulttube:<dev or latest>
+    container_name: vaulttube
+    ports:
+      - 5000:5000
+    volumes:
+      - <path to videos>:/videos
+      - <path to config file>:/app/config.ini
+    restart: unless-stopped
+    depends_on:
+      - db
+```
+
+## Config File
+Below is an example config file
+
+```
+[Database]
+host=<database IP>
+database=vaulttube
+user=vaulttube
+password=SuperSecretPassword
+autocommit=True
+
+[YouTube]
+KEY = <your youtube key>
+
+[Vault]
+DIR = /videos
+```
+
 ## Info
 
 Problem? Open an issue [Issues](https://github.com/jedihomelab/VaultTube/issues) 
