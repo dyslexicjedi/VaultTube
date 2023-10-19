@@ -9,4 +9,4 @@ jobs:
           - uses: actions/checkout@v2
           - name: "docker build"
             run: |
-              docker build ./app -t vaulttube:dev
+              docker build . -t vaulttube:dev
