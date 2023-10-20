@@ -3,7 +3,7 @@
 <link href="https://vjs.zencdn.net/8.6.0/video-js.css" rel="stylesheet" />
 <script src="https://vjs.zencdn.net/8.6.0/video.min.js"></script>
 
-<div id="playerdiv">
+<div id="playerdiv" >
     <video id="player" class="video-js vjs-default-skin vjs-big-play-centered videojs-overlay-player" data-setup='{}' controls preload="auto" width="auto" height="auto"></video>
 </div>
 <script src="/static/js/scripts.js"></script>
@@ -47,9 +47,17 @@
     });
     //End Listener - Update watch status
     video.addEventListener("ended",(event) => {
-        $.ajax({url: "/api/watched/"+id, success: function(result){}});
+        $.ajax({url: "/api/watched/"+id, success: function(result){
+            watch_status(id);
+        }});
         $.getJSON("/api/set_timestamp/0/"+id,function(data){});
         clearInterval(tspoll);
+    });
+    video.addEventListener("canplay",(event) => {
+        if(vPlayer.videoHeight() > vPlayer.videoWidth()){
+            $("#playerdiv").width(400);
+            console.log("Suspected Vertical Video, changing player height");
+        }
     });
 </script>
 {% endblock %}

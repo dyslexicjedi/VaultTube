@@ -107,11 +107,13 @@ function handlewatch(vid){
             $.ajax({url: "/api/watched/"+vid, success: function(result){
                 $("#watchstatus").attr('src','/static/imgs/check-square.svg');
             }});
+            watch_status(vid);
         }
         else{
             $.ajax({url: "/api/unwatched/"+vid, success: function(result){
                 $("#watchstatus").attr('src','/static/imgs/square.svg');
             }});
+            watch_status(vid);
         }
     });
 }
