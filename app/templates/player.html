@@ -1,54 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-<link href="https://vjs.zencdn.net/7.11.4/video-js.css" rel="stylesheet" />
-<link href="https://cdnjs.cloudflare.com/ajax/libs/videojs-overlay/1.1.4/videojs-overlay.css" rel="stylesheet" />
-<script src="https://vjs.zencdn.net/7.11.4/video.min.js"></script>
-<script src="https://unpkg.com/@videojs/http-streaming/dist/videojs-http-streaming.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/videojs-overlay/1.1.4/videojs-overlay.js"></script>
+<link href="https://vjs.zencdn.net/8.6.0/video-js.css" rel="stylesheet" />
+<script src="https://vjs.zencdn.net/8.6.0/video.min.js"></script>
 
-<div class="row w-100" id="playerrow">
-    <div id="playercol" class="col col-lg-10">
-        <div data-vjs-player="true" id="vjs_video_3" class="video-js vjs-big-play-centered mb-3 vjs-fluid vjs-controls-enabled vjs-workinghover vjs-v7 vjs-has-started vjs-paused vjs-user-inactive" tabindex="-1" lang="en" role="region" aria-label="Video Player" style="outline: none;">
-            <video id="player" class="video-js vjs-default-skin vjs-big-play-centered videojs-overlay-player" data-setup='{"fluid": true}' controls preload="auto" width="auto" height="auto"></video>
-            <div class="vjs-text-track-display" aria-live="off" aria-atomic="true">
-                <div style="position: absolute; inset: 0px; margin: 1.5%;"></div>
-            </div>
-            <div class="vjs-loading-spinner" dir="ltr"><span class="vjs-control-text">Video Player is loading.</span></div>
-            <button class="vjs-big-play-button" type="button" title="Play Video" aria-disabled="false">
-                <span aria-hidden="true" class="vjs-icon-placeholder"></span>
-                <span class="vjs-control-text" aria-live="polite">Play Video</span>
-            </button>
-            <div class="vjs-control-bar" dir="ltr">
-                <button class="vjs-play-control vjs-control vjs-button vjs-paused" type="button" title="Play" aria-disabled="false">
-                    <span aria-hidden="true" class="vjs-icon-placeholder"></span>
-                    <span class="vjs-control-text" aria-live="polite">Play</span>
-                </button>
-                <div class="vjs-volume-panel vjs-control vjs-volume-panel-horizontal">
-                    <button class="vjs-mute-control vjs-control vjs-button vjs-vol-3" type="button" title="Mute" aria-disabled="false">
-                        <span aria-hidden="true" class="vjs-icon-placeholder"></span>
-                        <span class="vjs-control-text" aria-live="polite">Mute</span>
-                    </button>
-                    <div class="vjs-volume-control vjs-control vjs-volume-horizontal">
-                        <div tabindex="0" class="vjs-volume-bar vjs-slider-bar vjs-slider vjs-slider-horizontal" role="slider" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" aria-label="Volume Level" aria-live="polite" aria-valuetext="100%">
-                            <div class="vjs-volume-level">
-                                <span class="vjs-control-text"></span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col col-lg-2" id="nextup" style="overflow-y: auto;">
-
-    </div>
+<div id="playerdiv">
+    <video id="player" class="video-js vjs-default-skin vjs-big-play-centered videojs-overlay-player" data-setup='{}' controls preload="auto" width="auto" height="auto"></video>
 </div>
 <script src="/static/js/scripts.js"></script>
 <div class="row">
-    <div class="pl-3 pt-2 w-100"><img id="watchstatus"><h3 id="title"></h3></div>
+    <div id="toprow" class="pl-3 pt-2 w-100"><img id="watchstatus" class="pe-1"><h3 id="title"></h3></div>
     <div><h5 id="creator"></h5></div>
     <div><p id="desc"></p></div>
-    <!-- <div id="watchstatus"></div> -->
 </div>
 <script>
     const querystring = window.location.search;
@@ -63,8 +25,6 @@
         //Load Video
         vPlayer.src([{type: "video/webm",src: data[0]["filepath"]}]);
         vPlayer.fluid(true);
-        $("#playerrow").height(vPlayer.currentDimensions('height').height);
-        $("#nextup").height(vPlayer.currentDimensions('height').height);
         //Adding Info to Player
         $("#title").text(jobj['items'][0]["snippet"]['title']);
         $("#desc").html(jobj['items'][0]["snippet"]['description'].replace('\n','<br>').replace('\r','<br>'));

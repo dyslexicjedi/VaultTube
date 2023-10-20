@@ -36,3 +36,12 @@
 .content-switch .form-switch{
   margin: 3px 0px 0 15px;
 }
+#playerdiv{
+  overflow: hidden;
+  max-height: 80vh;
+  max-width: 100%;
+}
+#toprow{
+  display: flex;
+  flex-direction: row;
+}
