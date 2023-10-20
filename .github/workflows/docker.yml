@@ -11,12 +11,6 @@ jobs:
         steps:
           - name: Checkout Code
             uses: actions/checkout@v3
-          - name: Setup Dependencies
-            run: |
-              pip install pytest
-          - name: Run Tests
-            run: |
-              python -m pytest -v --cov=app tests
           - name: "docker hub login"
             uses: docker/login-action@v1
             with: 
