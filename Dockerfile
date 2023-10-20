@@ -1,11 +1,11 @@
-FROM ubuntu:22.04
+FROM python:3.12-alpine
 
 COPY . /app/
 WORKDIR /app
 
-RUN apt update && apt install -y cron curl python3-pip libmariadb-dev && rm -rf /var/lib/apt/lists/*
-RUN ln -s /usr/bin/python3 /usr/bin/python
+RUN apk update && apk add gcc musl-dev mariadb-connector-c  mariadb-dev && pip install mariadb 
+RUN pip cache purge && apk del --rdepends --purge musl-dev gcc mariadb-dev
 
-RUN pip3 install -r requirements.txt
+RUN pip install -r requirements.txt
 
-CMD python3 /app/app/main.py
+CMD python /app/app/main.py
