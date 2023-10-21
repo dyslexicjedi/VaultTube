@@ -9,46 +9,37 @@ jobs:
     build:
         runs-on: ubuntu-latest
 
-        # services:
-        #   mariadb:
-        #     image: mariadb:latest
-        #     ports:
-        #       - 3306
-        #     env:
-        #       MYSQL_ROOT_PASSWORD: SuperSecretPassword
-        #       MYSQL_DATABASE: vaulttube
-        #       MYSQL_USER: vaulttube
-        #       MYSQL_PASSWORD: SuperSecretPassword
+        services:
+          mariadb:
+            image: mariadb:latest
+            ports:
+              - 3306:3306
+            env:
+              MARIADB_ROOT_PASSWORD: ${{ env.VAULTTUBE_DBPASS }}
+              MARIADB_DATABASE: ${{ env.VAULTTUBE_DBNAME }}
+              MARIADB_USER: ${{ env.VAULTTUBE_DBUSER }}
+              MARIADB_PASSWORD: ${{ env.VAULTTUBE_DBPASS }}
+            options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=10s --health-timeout=5s --health-retries=3
 
         steps:
           - name: Checkout Code
             uses: actions/checkout@v3
-          # - name: Setup PyTest and Deps
-          #   run: |
-          #     sudo apt update && sudo apt install -y libmariadb-dev
-          #     pip install -r requirements.txt
-          #     pip install pytest
-          # - name: Verify MariaDB connection
-          #   env:
-          #     VAULTTUBE_DBPORT: ${{ job.services.mariadb.ports[3306] }}
-          #     VAULTTUBE_DBUSER: ${{ env.VAULTTUBE_DBUSER }}
-          #     VAULTTUBE_DBPASS: ${{ env.VAULTTUBE_DBPASS }}
-          #     VAULTTUBE_DBHOST: ${{ env.VAULTTUBE_DBHOST }}
-          #   run: |
-          #     while ! mysqladmin ping -h"$VAULTTUBE_DBHOST" -P"$VAULTTUBE_DBPORT" -u"$VAULTTUBE_DBUSER" -p"$VAULTTUBE_DBPASS" ; do
-          #       sleep 1
-          #     done  
-          # - name: Run Tests
-          #   env:
-          #     VAULTTUBE_VAULTDIR: ${{ env.VAULTTUBE_VAULTDIR }}
-          #     VAULTTUBE_DBUSER: ${{ env.VAULTTUBE_DBUSER }}
-          #     VAULTTUBE_DBPASS: ${{ env.VAULTTUBE_DBPASS }}
-          #     VAULTTUBE_DBHOST: ${{ env.VAULTTUBE_DBHOST }}
-          #     VAULTTUBE_DBNAME: ${{ env.VAULTTUBE_DBNAME }}
-          #     VAULTTUBE_DBPORT: ${{ job.services.mariadb.ports[3306] }}
-          #     VAULTTUBE_YTKEY: ${{ secrets.VAULTTUBE_YTKEY }}
-          #   run: |
-          #     python -m pytest -v tests
+          - name: Setup PyTest and Deps
+            run: |
+              sudo apt update && sudo apt install -y libmariadb-dev
+              pip install -r requirements.txt
+              pip install pytest
+          - name: Run Tests
+            env:
+              VAULTTUBE_VAULTDIR: ${{ env.VAULTTUBE_VAULTDIR }}
+              VAULTTUBE_DBUSER: ${{ env.VAULTTUBE_DBUSER }}
+              VAULTTUBE_DBPASS: ${{ env.VAULTTUBE_DBPASS }}
+              VAULTTUBE_DBHOST: ${{ env.VAULTTUBE_DBHOST }}
+              VAULTTUBE_DBNAME: ${{ env.VAULTTUBE_DBNAME }}
+              VAULTTUBE_DBPORT: ${{ job.services.mariadb.ports[3306] }}
+              VAULTTUBE_YTKEY: ${{ secrets.VAULTTUBE_YTKEY }}
+            run: |
+              python -m pytest -v tests
           - name: "docker hub login"
             uses: docker/login-action@v1
             with: 
