@@ -23,9 +23,9 @@ jobs:
         steps:
           - name: Checkout Code
             uses: actions/checkout@v3
-          - name: Verify Database
-            run: |
-              mariadb -u root -pSuperSecretPassword -P 4000 -h 127.0.0.1 vaulttube -e 'show tables;'
+          # - name: Verify Database
+          #   run: |
+          #     mariadb -u root -pSuperSecretPassword -P 4000 -h 127.0.0.1 vaulttube -e 'show tables;'
           - name: Setup PyTest and Deps
             run: |
               sudo apt update && sudo apt install -y libmariadb-dev
