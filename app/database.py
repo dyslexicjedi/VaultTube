@@ -3,16 +3,24 @@ import mariadb,requests,json
 #Perform database checks on startup
 def checkdb(config,logger):
     logger.info("Startup Database Checks")
+    try:
+        logger.info("Testing connection to database")
+        dbcheck = get_connection(config,logger)
+        dbcheck.close()
+    except Exception as e:
+        logger.error("Unable to connect to database: %s"%e)
+
     #Create Database if doesn't exist
     try:
-        dbcheck = mariadb.connect(**config._sections['Database'])
+        dbcheck = get_connection(config,logger)
         dbcur = dbcheck.cursor()
         dbcur.execute("CREATE DATABASE %s;"%(config['Database']['database']))
     except Exception as e:
+        logger.debug("Database already exists")
         pass
     #Create Tables if doesn't exist
     try:
-        con = mariadb.connect(**config._sections['Database'])
+        con = get_connection(config,logger)
         cur = con.cursor()
         #Images Table
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'images' LIMIT 1;"%(config['Database']['database']))
@@ -61,7 +69,7 @@ def check_db_video(id,config,logger):
     logger.debug("Checking db for video id: %s",id)
     test = False
     try:
-        check = mariadb.connect(**config._sections['Database'])
+        check = get_connection(config,logger)
         cur = check.cursor()
         cur.execute("Select * FROM videos where id = '%s'"%id)
         if(not cur.fetchone()):
@@ -75,7 +83,7 @@ def check_db_video(id,config,logger):
 
 def save_video(id,ret,img,config,logger):
     try:
-        con = mariadb.connect(**config._sections['Database'])
+        con = get_connection(config,logger)
         cur = con.cursor()
         #Save Video Data
         sql = "Insert into videos(id,youtuber,json,filepath,PublishedAt,channelId) values(%s,%s,%s,%s,%s,%s);"
@@ -92,7 +100,7 @@ def check_db_channel(id,config,logger):
     logger.debug("Checking db for channel id: %s",id)
     test = False
     try:
-        check = mariadb.connect(**config._sections['Database'])
+        check = get_connection(config,logger)
         cur = check.cursor()
         cur.execute("Select * FROM channels where channelid = '%s'"%id)
         if(not cur.fetchone()):
@@ -106,7 +114,7 @@ def check_db_channel(id,config,logger):
 
 def save_channel(channelid,channelname,jdata,config,logger):
     try:
-        con = mariadb.connect(**config._sections['Database'])
+        con = get_connection(config,logger)
         cur = con.cursor()
         #Save Video Data
         sql = "Insert into channels(channelid,channelname,json) values(%s,%s,%s);"
@@ -118,7 +126,7 @@ def save_channel(channelid,channelname,jdata,config,logger):
 
 def get_active_subscriptions(config,logger):
     try:
-        con = mariadb.connect(**config._sections['Database'])
+        con = get_connection(config,logger)
         cur = con.cursor()
         cur.execute("select channelid from channels where subscribed = 1;")
         rv = cur.fetchall()
@@ -126,3 +134,10 @@ def get_active_subscriptions(config,logger):
         return rv
     except Exception as e:
         logger.error("Error during subscription poll")
+
+def get_connection(config,logger):
+    try:
+        con = mariadb.connect(host=config['Database']['host'],user=config['Database']['user'],password=config['Database']['password'],database=config['Database']['database'],autocommit=True,port=int(config['Database']['port']))
+        return con
+    except Exception as e:
+        logger.error("Unable to get connection: %s"%e)
