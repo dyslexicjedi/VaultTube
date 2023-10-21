@@ -13,7 +13,7 @@ jobs:
           mariadb:
             image: mariadb:latest
             ports:
-              - 3306
+              - 4000:3306
             env:
               MYSQL_ROOT_PASSWORD: SuperSecretPassword
               MYSQL_DATABASE: vaulttube
@@ -24,12 +24,8 @@ jobs:
           - name: Checkout Code
             uses: actions/checkout@v3
           - name: Verify Database
-            env:
-              PORT: ${{ job.services.mariadb.ports[3306] }}
             run: |
-              while ! mysqladmin ping -h"127.0.0.1" -P"$PORT" --silent; do
-              sleep 1
-              done 
+              mariadb -u root -pSuperSecretPassword -P 4000 -h 127.0.0.1 vaulttube -e 'show tables;'
           - name: Setup PyTest and Deps
             run: |
               sudo apt update && sudo apt install -y libmariadb-dev
