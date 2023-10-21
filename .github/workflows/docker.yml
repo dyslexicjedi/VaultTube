@@ -28,6 +28,16 @@ jobs:
               sudo apt update && sudo apt install -y libmariadb-dev
               pip install -r requirements.txt
               pip install pytest
+          - name: Verify MariaDB connection
+            env:
+              VAULTTUBE_DBPORT: ${{ job.services.mariadb.ports[3306] }}
+              VAULTTUBE_DBUSER: ${{ env.VAULTTUBE_DBUSER }}
+              VAULTTUBE_DBPASS: ${{ env.VAULTTUBE_DBPASS }}
+              VAULTTUBE_DBHOST: ${{ env.VAULTTUBE_DBHOST }}
+            run: |
+              while ! mysqladmin ping -h"$VAULTTUBE_DBHOST" -P"$VAULTTUBE_DBPORT" -u"$VAULTTUBE_DBUSER" -p"$VAULTTUBE_DBPASS" --silent; do
+                sleep 1
+              done  
           - name: Run Tests
             env:
               VAULTTUBE_VAULTDIR: ${{ env.VAULTTUBE_VAULTDIR }}
