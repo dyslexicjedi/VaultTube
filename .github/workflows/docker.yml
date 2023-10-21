@@ -30,13 +30,15 @@ jobs:
               pip install pytest
           - name: Run Tests
             env:
+              VAULTTUBE_VAULTDIR: ${{ env.VAULTTUBE_VAULTDIR }}
+              VAULTTUBE_DBUSER: ${{ env.VAULTTUBE_DBUSER }}
+              VAULTTUBE_DBPASS: ${{ env.VAULTTUBE_DBPASS }}
+              VAULTTUBE_DBHOST: ${{ env.VAULTTUBE_DBHOST }}
+              VAULTTUBE_DBNAME: ${{ env.VAULTTUBE_DBNAME }}
               VAULTTUBE_DBPORT: ${{ job.services.mariadb.ports[3306] }}
               VAULTTUBE_YTKEY: ${{ secrets.VAULTTUBE_YTKEY }}
             run: |
               python -m pytest -v tests
-          - name: Verify Database
-            run: |
-              mariadb -u root -pSuperSecretPassword -P 4000 -h 127.0.0.1 vaulttube -e 'show tables;'
           - name: "docker hub login"
             uses: docker/login-action@v1
             with: 
