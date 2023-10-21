@@ -15,10 +15,10 @@ jobs:
             ports:
               - 3306:3306
             env:
-              MARIADB_ROOT_PASSWORD: ${{ env.VAULTTUBE_DBPASS }}
-              MARIADB_DATABASE: ${{ env.VAULTTUBE_DBNAME }}
-              MARIADB_USER: ${{ env.VAULTTUBE_DBUSER }}
-              MARIADB_PASSWORD: ${{ env.VAULTTUBE_DBPASS }}
+              MARIADB_ROOT_PASSWORD: SuperSecretPassword
+              MARIADB_DATABASE: vaulttube
+              MARIADB_USER: vaulttube
+              MARIADB_PASSWORD: SuperSecretPassword
             options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=10s --health-timeout=5s --health-retries=3
 
         steps:
