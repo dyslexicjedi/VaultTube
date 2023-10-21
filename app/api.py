@@ -10,7 +10,7 @@ api_bp = Blueprint('api',__name__)
 def latest(opt,page):
     try:
         current_app.logger.debug("Called Latest %s %s"%(opt,page))
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         if(opt == "PublishedAt"):
             cur.execute("select * from videos order by PublishedAt desc limit 40 offset %s;"%(page,))
@@ -34,7 +34,7 @@ def latest(opt,page):
 def imgid(id):
     try:
         current_app.logger.debug('Called Image ID: '+id)
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select image from images where id = '%s';"%(id,))
         img = cur.fetchone()[0]
@@ -47,7 +47,7 @@ def imgid(id):
 def getVideo(id):
     try:
         current_app.logger.debug('Called Video ID: '+id)
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select * from videos where id = %s;",(id,))
         # serialize results into JSON
@@ -70,7 +70,7 @@ def getVideo(id):
 def watched(id):
     try:
         current_app.logger.debug('Called Watched: '+id)
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("Update videos set watched = 1 where id = %s;",(id,))
         cur.execute("Update videos set timestamp = 0 where id = %s;",(id,))
@@ -85,7 +85,7 @@ def watched(id):
 def unwatched(id):
     try:
         current_app.logger.debug('Called UnWatched: '+id)
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("Update videos set watched = 0 where id = %s;",(id,))
         con.commit()
@@ -100,7 +100,7 @@ def set_timestamp(id,ts):
     try:
         current_app.logger.debug('Called Set Timestamp %s at %s'%(id,ts))
         ts = ts.split('.')[0]
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         sql = "Update videos set timestamp = '%s' where id = '%s';"%(ts,id)
         current_app.logger.info(sql)
@@ -116,7 +116,7 @@ def set_timestamp(id,ts):
 def list_resume():
     try:
         current_app.logger.debug("Called List Resume")
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select * from videos where not timestamp = 0 order by PublishedAt desc limit 40;")
         # serialize results into JSON
@@ -135,7 +135,7 @@ def list_resume():
 def api_download(ytid):
     try:
         url = "https://www.youtube.com/watch?v="+ytid
-        return single_download(url,current_app.logger,current_app.config['file'])
+        return single_download(url,current_app.logger)
     except Exception as e:
         current_app.logger.error("API Download Failed: %s"%e)
 
@@ -143,7 +143,7 @@ def api_download(ytid):
 def get_video_count():
     try:
         current_app.logger.debug('Called Get_Video_Count')
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select count(*) from videos;")
         count = cur.fetchone()[0]
@@ -156,7 +156,7 @@ def get_video_count():
 def channels(page):
     try:
         current_app.logger.debug("Called Channels %s"%(page,))
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select channels.*,count(*) as vidcount,max(PublishedAt) as lastvidtime from channels left outer join videos on channels.channelId = videos.channelId group by channelId order by channelname limit 40 offset %s;"%(page,))
         if(cur.rowcount):
@@ -181,7 +181,7 @@ def channels(page):
 def api_creator(creator,page):
     try:
         current_app.logger.debug("Called Creator %s %s"%(creator,page))
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select * from videos where channelId = '%s' order by PublishedAt desc limit 40 offset %s;"%(creator,page))
         # serialize results into JSON
@@ -200,7 +200,7 @@ def api_creator(creator,page):
 def subscribe(channelid):
     try:
         current_app.logger.debug('Called Subscribe: '+channelid)
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("Update channels set subscribed = 1 where channelid = %s;",(channelid,))
         con.commit()
@@ -214,7 +214,7 @@ def subscribe(channelid):
 def unsubscribe(channelid):
     try:
         current_app.logger.debug('Called Unsubscribe: '+channelid)
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("Update channels set subscribed = 0 where channelid = %s;",(channelid,))
         con.commit()
@@ -228,7 +228,7 @@ def unsubscribe(channelid):
 def get_unwatched(opt,page):
     try:
         current_app.logger.debug("Called Unwatched %s %s"%(opt,page))
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         if(opt == "PublishedAt"):
             cur.execute("select * from videos where watched = 0 order by PublishedAt desc limit 40 offset %s;"%(page,))
@@ -252,7 +252,7 @@ def get_unwatched(opt,page):
 def api_search(searchtxt,page):
     try:
         current_app.logger.debug("Called Creator %s %s"%(searchtxt,page))
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select * from videos where lower(json) like lower('%s') order by PublishedAt desc limit 40 offset %s;"%("%"+searchtxt+"%",page))
         # serialize results into JSON
@@ -271,12 +271,12 @@ def api_search(searchtxt,page):
 def sub_status(channelid):
     try:
         current_app.logger.debug('Called Sub_status: '+channelid)
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("Select subscribed from channels where channelid = %s;",(channelid,))
         if(not cur.rowcount):
             current_app.logger.error("sub_status: Channel not found")
-            process_channel('/videos/'+channelid,current_app.config['file'],current_app.logger)
+            process_channel('/videos/'+channelid,current_app.logger)
             return "0"
         else:
             data = cur.fetchone()[0]
@@ -291,7 +291,7 @@ def sub_status(channelid):
 def watch_status(vid):
     try:
         current_app.logger.debug('Called Watch Status: '+vid)
-        con = get_connection(current_app.config['file'],current_app.logger)
+        con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("Select watched from videos where id = %s;",(vid,))
         data = cur.fetchone()[0]
@@ -304,4 +304,4 @@ def watch_status(vid):
 
 @api_bp.route("/checkdb")
 def api_checkdb():
-    return str(checkdb(current_app.config["file"],current_app.logger))
+    return str(checkdb(current_app.logger))

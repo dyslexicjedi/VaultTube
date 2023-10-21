@@ -5,3 +5,4 @@ __pycache__
 chromedriver
 .coverage
 .pytest_cache
+*.sh

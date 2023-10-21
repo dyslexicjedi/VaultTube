@@ -1,4 +1,4 @@
-import logging,os,traceback,sys, threading, configparser
+import logging,os,traceback,sys, threading
 from logging.handlers import TimedRotatingFileHandler
 from flask import Flask,render_template,send_file,Blueprint,request
 from api import api_bp
@@ -31,19 +31,12 @@ def log_uncaught_exceptions(ex_cls,ex,tb):
 
 sys.excepthook = log_uncaught_exceptions
 
-#Load Config Data
-config = configparser.ConfigParser()
-config.read('config.ini')
-
 #Flask Startup
 app = Flask(__name__)
 app.debug = True
-app.config['dbconfig'] = config._sections['Database']
-app.config['VaultDIR'] = config['Vault']['DIR']
-app.config['file'] = config
 
 #Video static
-videos = Blueprint('videos',__name__,static_url_path='/videos',static_folder=config['Vault']['DIR'])
+videos = Blueprint('videos',__name__,static_url_path='/videos',static_folder=os.environ['VAULTTUBE_VAULTDIR'])
 
 #Register with Flask
 app.register_blueprint(videos)
@@ -76,12 +69,12 @@ def search():
 
 def startup():
     #Check Database
-    dbpass = checkdb(config,logger)
+    dbpass = checkdb(logger)
     if(dbpass):
         #Start Threads
-        be = threading.Thread(target=backend_thread,args=(config,logger))
+        be = threading.Thread(target=backend_thread,args=(logger,))
         be.start()
-        sc = threading.Thread(target=start_scanner,args=(config,logger))
+        sc = threading.Thread(target=start_scanner,args=(logger,))
         sc.start()
         #Begin
         logger.info("Starting VaultTube")

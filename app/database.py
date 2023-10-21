@@ -1,49 +1,49 @@
-import mariadb,requests,json
+import mariadb,requests,json,os
 
 #Perform database checks on startup
-def checkdb(config,logger):
+def checkdb(logger):
     logger.info("Startup Database Checks")
     try:
         logger.info("Testing connection to database")
-        dbcheck = get_connection(config,logger)
+        dbcheck = get_connection(logger)
         dbcheck.close()
     except Exception as e:
         logger.error("Unable to connect to database: %s"%e)
 
     #Create Database if doesn't exist
     try:
-        dbcheck = get_connection(config,logger)
+        dbcheck = get_connection(logger)
         dbcur = dbcheck.cursor()
-        dbcur.execute("CREATE DATABASE %s;"%(config['Database']['database']))
+        dbcur.execute("CREATE DATABASE %s;"%(os.environ['VAULTTUBE_DBNAME']))
     except Exception as e:
         logger.debug("Database already exists")
         pass
     #Create Tables if doesn't exist
     try:
-        con = get_connection(config,logger)
+        con = get_connection(logger)
         cur = con.cursor()
         #Images Table
-        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'images' LIMIT 1;"%(config['Database']['database']))
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'images' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
             logger.info("Images Table not created, creating...")
             cur.execute("CREATE TABLE `images` (`id` varchar(50) NOT NULL,`image` longblob DEFAULT NULL,PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
         #Tag Table
-        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'tags' LIMIT 1;"%(config['Database']['database']))
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'tags' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
             logger.info("Tags Table not created, creating...")
             cur.execute("CREATE TABLE `tags` (`id` varchar(25) NOT NULL,`tag` varchar(250) NOT NULL,PRIMARY KEY (`id`,`tag`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
         #Playlists
-        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'playlists' LIMIT 1;"%(config['Database']['database']))
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'playlists' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
             logger.info("Playlists Table not created, creating...")
             cur.execute("create table playlists (`playlist` varchar(100),`videoid` varchar(100),PRIMARY KEY(`playlist`,`videoid`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
         #Channels
-        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'channels' LIMIT 1;"%(config['Database']['database']))
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'channels' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
             logger.info("Channels Table not created, creating...")
             cur.execute("create table channels (`channelid` varchar(100),`channelname` varchar(100),`json` longtext,`subscribed` int(11) DEFAULT 0,PRIMARY KEY(`channelid`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
         #Videos
-        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'videos' LIMIT 1;"%(config['Database']['database']))
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'videos' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
             logger.info("Tags Videos not created, creating...")
             cur.execute("""CREATE TABLE `videos` (
@@ -65,11 +65,11 @@ def checkdb(config,logger):
         logger.error("Failed during table create: %s",e)
         return False
 
-def check_db_video(id,config,logger):
+def check_db_video(id,logger):
     logger.debug("Checking db for video id: %s",id)
     test = False
     try:
-        check = get_connection(config,logger)
+        check = get_connection(logger)
         cur = check.cursor()
         cur.execute("Select * FROM videos where id = '%s'"%id)
         if(not cur.fetchone()):
@@ -81,13 +81,13 @@ def check_db_video(id,config,logger):
     except Exception as e:
         logger.error("Error during check_db_video: %s"%e)
 
-def save_video(id,ret,img,config,logger):
+def save_video(id,ret,img,logger):
     try:
-        con = get_connection(config,logger)
+        con = get_connection(logger)
         cur = con.cursor()
         #Save Video Data
         sql = "Insert into videos(id,youtuber,json,filepath,PublishedAt,channelId) values(%s,%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(config['Vault']['DIR'],""),ret['PublishedAt'],ret['channelId']))
+        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId']))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))
@@ -96,11 +96,11 @@ def save_video(id,ret,img,config,logger):
     except Exception as e:
         logger.error("Error during save_video: %s"%e)
 
-def check_db_channel(id,config,logger):
+def check_db_channel(id,logger):
     logger.debug("Checking db for channel id: %s",id)
     test = False
     try:
-        check = get_connection(config,logger)
+        check = get_connection(logger)
         cur = check.cursor()
         cur.execute("Select * FROM channels where channelid = '%s'"%id)
         if(not cur.fetchone()):
@@ -112,9 +112,9 @@ def check_db_channel(id,config,logger):
     except Exception as e:
         logger.error("Error during check_db_channel: %s"%e)
 
-def save_channel(channelid,channelname,jdata,config,logger):
+def save_channel(channelid,channelname,jdata,logger):
     try:
-        con = get_connection(config,logger)
+        con = get_connection(logger)
         cur = con.cursor()
         #Save Video Data
         sql = "Insert into channels(channelid,channelname,json) values(%s,%s,%s);"
@@ -124,9 +124,9 @@ def save_channel(channelid,channelname,jdata,config,logger):
     except Exception as e:
         logger.error("Error during save_channel: %s"%e)
 
-def get_active_subscriptions(config,logger):
+def get_active_subscriptions(logger):
     try:
-        con = get_connection(config,logger)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("select channelid from channels where subscribed = 1;")
         rv = cur.fetchall()
@@ -135,9 +135,9 @@ def get_active_subscriptions(config,logger):
     except Exception as e:
         logger.error("Error during subscription poll")
 
-def get_connection(config,logger):
+def get_connection(logger):
     try:
-        con = mariadb.connect(host=config['Database']['host'],user=config['Database']['user'],password=config['Database']['password'],database=config['Database']['database'],autocommit=True,port=int(config['Database']['port']))
+        con = mariadb.connect(host=os.environ['VAULTTUBE_DBHOST'],user=os.environ['VAULTTUBE_DBUSER'],password=os.environ['VAULTTUBE_DBPASS'],database=os.environ['VAULTTUBE_DBNAME'],autocommit=True,port=int(os.environ['VAULTTUBE_DBPORT']))
         return con
     except Exception as e:
         logger.error("Unable to get connection: %s"%e)

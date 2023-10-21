@@ -16,38 +16,38 @@ def processing(stream,chunk,bytes_remaining):
     pct_completed = bytes_downloaded / total_size * 100
     print(f"Status: {round(pct_completed, 2)} %")
 
-def single_download(url,logger,config):
+def single_download(url,logger):
     try:
         global complete
         logger.debug("Starting Download: %s"%url)
         yt = YouTube(url,on_complete_callback=processComplete,on_progress_callback=processing)
-        if(not os.path.exists(config['Vault']['DIR']+"/"+yt.vid_info['videoDetails']['channelId'])):
-            os.mkdir(config['Vault']['DIR']+"/"+yt.vid_info['videoDetails']['channelId'])
-        ys = yt.streams.filter(progressive=True,file_extension='mp4').order_by('resolution').desc().first().download(filename=yt.vid_info['videoDetails']['videoId']+".mp4",output_path=config['Vault']['DIR']+"/"+yt.vid_info['videoDetails']['channelId']+"/")
+        if(not os.path.exists(os.environ['VAULTTUBE_VAULTDIR']+"/"+yt.vid_info['videoDetails']['channelId'])):
+            os.mkdir(os.environ['VAULTTUBE_VAULTDIR']+"/"+yt.vid_info['videoDetails']['channelId'])
+        ys = yt.streams.filter(progressive=True,file_extension='mp4').order_by('resolution').desc().first().download(filename=yt.vid_info['videoDetails']['videoId']+".mp4",output_path=os.environ['VAULTTUBE_VAULTDIR']+"/"+yt.vid_info['videoDetails']['channelId']+"/")
         while not complete:
             time.sleep(5)
         complete = False
-        get_video(config['Vault']['DIR']+"/"+yt.vid_info['videoDetails']['channelId']+"/"+yt.vid_info['videoDetails']['videoId']+".mp4",config,logger)
+        get_video(os.environ['VAULTTUBE_VAULTDIR']+"/"+yt.vid_info['videoDetails']['channelId']+"/"+yt.vid_info['videoDetails']['videoId']+".mp4",logger)
         return "True"
     except Exception as e:
         logger.error("YT Single Download Failed: %s"%e)
 
-def get_channel_video_list(channelid,config,logger):
+def get_channel_video_list(channelid,logger):
     try:
-        curl = "https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&id=%s&key=%s"%(channelid[0],config['YouTube']['KEY'])
+        curl = "https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&id=%s&key=%s"%(channelid[0],os.environ['VAULTTUBE_YTKEY'])
         r = requests.get(curl).json()
         pid = r['items'][0]['contentDetails']['relatedPlaylists']['uploads']
         #logger.info(json.dumps(r, indent=4))
 
-        curl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s"%(pid,config['YouTube']['KEY'])
+        curl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s"%(pid,os.environ['VAULTTUBE_YTKEY'])
         r = requests.get(curl).json()
         logger.debug(json.dumps(r, indent=4))
         for vid in r['items']:
             id = vid['contentDetails']['videoId']
-            if(check_db_video(id,config,logger)):
+            if(check_db_video(id,logger)):
                 logger.info("Already found: %s"%id)
             else:
                 logger.info("Processing: %s"%id)
-                single_download("https://www.youtube.com/watch?v=%s"%id,logger,config)
+                single_download("https://www.youtube.com/watch?v=%s"%id,logger)
     except Exception as e:
         logger.error("Scanning Channel Failed: %s"%e)

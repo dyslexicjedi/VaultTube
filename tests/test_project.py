@@ -1,6 +1,4 @@
-import pytest
-import json
-import mariadb,configparser
+import pytest,os,json,mariadb
 
 def test_home(client):
     response = client.get("/")
@@ -10,9 +8,7 @@ def test_empty_home(client):
     try:
         response = client.get("/api/checkdb")
         assert response.text == "True"
-        config = configparser.ConfigParser()
-        config.read('config.ini')
-        con = mariadb.connect(host=config['Database']['host'],user=config['Database']['user'],password=config['Database']['password'],database=config['Database']['database'],autocommit=True,port=int(config['Database']['port']))
+        con = mariadb.connect(host=os.environ['VAULTTUBE_DBHOST'],user=os.environ['VAULTTUBE_DBUSER'],password=os.environ['VAULTTUBE_DBPASS'],database=os.environ['VAULTTUBE_DBNAME'],autocommit=True,port=int(os.environ['VAULTTUBE_DBPORT']))
         cur = con.cursor()
         cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('Test123','Test123','Test123',0);")
         con.commit()
