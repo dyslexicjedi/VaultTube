@@ -9,12 +9,6 @@ function processdata(data){
     });
 }
 function pagination(id){
-    //var video_count = get_video_count();
-    // Find if Video Count is less than number of pages.
-    //ToDO
-    //Get Videos
-    //get_videos(id-1,opt);
-    //Set Pagination buttons
     $("#pagelist").empty();
     var txt = "";
     if(id == 1){

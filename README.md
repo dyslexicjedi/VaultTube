@@ -71,11 +71,11 @@ This is free software under the GPL 2.0 open source license.
 
 ## Video File Name:
 
-VaultTube only cares about the end of the file name, specifically the youtube id must be at the end of the file name with [ ] around it. Example:
+VaultTube only cares about the folder and file name, specifically the folder must have the ID of the Channel and the file must be the id of the video. Example:
 
-`some crazy test file video[abcdefghijk].mkv`
+`/UC_aabbbcccdddeeefffgggg/abcdefghijk.mkv`
 
-This means you can easily import already downloaded content, not just from the download.sh script.
+This means you can easily import already downloaded content by placing it in the folder structure and waiting. The periodic scan will pick it up and add it to the database.
 
 ## Issues
 
