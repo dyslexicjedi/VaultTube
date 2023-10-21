@@ -31,13 +31,13 @@ jobs:
               pip install pytest
           - name: Run Tests
             env:
-              VAULTTUBE_VAULTDIR: ${{ env.VAULTTUBE_VAULTDIR }}
-              VAULTTUBE_DBUSER: ${{ env.VAULTTUBE_DBUSER }}
-              VAULTTUBE_DBPASS: ${{ env.VAULTTUBE_DBPASS }}
-              VAULTTUBE_DBHOST: ${{ env.VAULTTUBE_DBHOST }}
-              VAULTTUBE_DBNAME: ${{ env.VAULTTUBE_DBNAME }}
-              VAULTTUBE_DBPORT: ${{ job.services.mariadb.ports[3306] }}
-              VAULTTUBE_YTKEY: ${{ secrets.VAULTTUBE_YTKEY }}
+              VAULTTUBE_VAULTDIR: /videos
+              VAULTTUBE_DBUSER: vaulttube
+              VAULTTUBE_DBPASS: SuperSecretPassword
+              VAULTTUBE_DBHOST: 127.0.0.1
+              VAULTTUBE_DBNAME: vaulttube
+              VAULTTUBE_DBPORT: 3306
+              VAULTTUBE_YTKEY: abcabcabcabc
             run: |
               python -m pytest -v tests
           - name: "docker hub login"
