@@ -2,7 +2,14 @@ function processdata(data){
     $("#carddeck").empty();
     $.each(data,function(i,item){
         var jobj = jQuery.parseJSON(data[i]["json"]);
-        var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"...\"><div class=\"card-body\"><h5 class=\"card-title\">"+jobj["items"][0]["snippet"]["title"]+"</h5>";
+        var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"...\"><div class=\"card-body\">";
+        if(data[i].watched == 0){
+            txt += "<div class=\"toprow\"><img src=\"/static/imgs/square.svg\" onclick=\"handlewatch(\'"+data[i].id+"\');\" />";
+        }
+        else{
+            txt += "<div class=\"toprow\"><img src=\"/static/imgs/check-square.svg\" onclick=\"handlewatch(\'"+data[i].id+"\');\" />";
+        }
+        txt += "<h5 class=\"card-title\">"+jobj["items"][0]["snippet"]["title"]+"</h5></div>";
         txt += "<p><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
         txt += "</div><div class=\"card-footer\"><small class=\"text-muted\">Published: "+data[i].PublishedAt+"</small></div></div></div>";
         $("#carddeck").append(txt);
@@ -102,12 +109,15 @@ function handlewatch(vid){
                 $("#watchstatus").attr('src','/static/imgs/check-square.svg');
             }});
             watch_status(vid);
+            contentChange();
         }
         else{
             $.ajax({url: "/api/unwatched/"+vid, success: function(result){
                 $("#watchstatus").attr('src','/static/imgs/square.svg');
             }});
             watch_status(vid);
+            contentChange();
         }
     });
+    event.stopPropagation();
 }

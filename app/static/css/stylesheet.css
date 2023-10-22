@@ -41,7 +41,7 @@
   max-height: 80vh;
   max-width: 100%;
 }
-#toprow{
+.toprow{
   display: flex;
   flex-direction: row;
 }

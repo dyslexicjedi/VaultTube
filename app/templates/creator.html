@@ -2,7 +2,7 @@
 {% block content %}
 
 
-<div id="toprow"><img id="subimg"><h3 id="creatorlabel"></h3></div>
+<div class="toprow"><img id="subimg"><h3 id="creatorlabel"></h3></div>
 <div class="row row-cols-3 row-cols-md-4 g-4" id="carddeck"></div>
 <nav aria-label="..." class="pt-4 pb-4">
     <ul id="pagelist" class="pagination"></ul>
@@ -13,9 +13,11 @@
 const querystring = window.location.search;
 const urlparams = new URLSearchParams(querystring);
 const creator = urlparams.get('creator');
+var currentId = 1;
 update(1);
 subscribe_status(creator);
 function update(id){
+    currentId = id;
     get_videos(id-1,creator);
     pagination(id);
 }
@@ -26,5 +28,8 @@ function get_videos(currentpage,creator){
             processdata(data);
         });
     }
+function contentChange(){
+    update(currentId);
+}
 </script>
 {% endblock %}
