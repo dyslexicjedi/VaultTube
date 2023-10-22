@@ -11,7 +11,10 @@ function processdata(data){
         }
         txt += "<h5 class=\"card-title\">"+jobj["items"][0]["snippet"]["title"]+"</h5></div>";
         txt += "<p><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
-        txt += "</div><div class=\"card-footer\"><small class=\"text-muted\">Published: "+data[i].PublishedAt+"</small></div></div></div>";
+        var d = data[i].PublishedAt.split(' ')[0]
+        txt += "</div><div class=\"card-footer\"><small class=\"text-muted\">Published: "+d+"</small></br>";
+        txt += "<small class=\"text-muted\">Length: "+data[i]['length'];
+        txt += "</small></div></div></div>";
         $("#carddeck").append(txt);
     });
 }

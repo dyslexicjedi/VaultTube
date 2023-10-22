@@ -56,6 +56,7 @@ def checkdb(logger):
                 `PublishedAt` TIMESTAMP DEFAULT NULL,
                 `watched` int(11) DEFAULT 0,
                 `timestamp` varchar(50) DEFAULT 0,
+                `length` varchar(50) DEFAULT 0,
                 PRIMARY KEY (`id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
                         """)
@@ -72,9 +73,7 @@ def check_db_video(id,logger):
         check = get_connection(logger)
         cur = check.cursor()
         cur.execute("Select * FROM videos where id = '%s'"%id)
-        if(not cur.fetchone()):
-            test = False
-        else:
+        if(cur.fetchone()):
             test = True
         check.close()
         return test
@@ -86,8 +85,8 @@ def save_video(id,ret,img,logger):
         con = get_connection(logger)
         cur = con.cursor()
         #Save Video Data
-        sql = "Insert into videos(id,youtuber,json,filepath,PublishedAt,channelId) values(%s,%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId']))
+        sql = "Insert into videos(id,youtuber,json,filepath,PublishedAt,channelId,length) values(%s,%s,%s,%s,%s,%s,%s);"
+        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length']))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))
@@ -141,3 +140,28 @@ def get_connection(logger):
         return con
     except Exception as e:
         logger.error("Unable to get connection: %s"%e)
+
+def check_db_video_length(id,logger):
+    logger.debug("Checking db for video length: %s",id)
+    test = False
+    try:
+        check = get_connection(logger)
+        cur = check.cursor()
+        cur.execute("Select length FROM videos where id = '%s'"%id)
+        data = cur.fetchone()[0]
+        if(not data == "0"):
+            test = True
+        check.close()
+        return test
+    except Exception as e:
+        logger.error("Error during check_db_video_length: %s"%e)
+
+def update_length(id,length,logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("Update videos set length = '%s' where id='%s';"%(length,id))
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.error("Error duing update_length: %s"%e)

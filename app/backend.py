@@ -1,6 +1,6 @@
-import glob,time,os,requests,datetime,json
+import glob,time,os,requests,datetime,json,cv2,logging
 from flask import current_app
-from database import check_db_video,save_video,check_db_channel,save_channel
+from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length
 
 def backend_thread(logger):
     logger.info("*Starting Backend")
@@ -8,11 +8,12 @@ def backend_thread(logger):
         logger.info("Scanning Vault")
         for filename in glob.iglob(os.environ['VAULTTUBE_VAULTDIR']+'/**/*', recursive=True):
             if(os.path.isfile(os.path.abspath(filename))):
+                logger.debug("Path is file: %s"%filename)
                 get_video(os.path.abspath(filename),logger)
-                time.sleep(5)
+                #time.sleep(5)
             else:
                 process_channel(filename,logger)
-                time.sleep(5)
+                #time.sleep(5)
         time.sleep(5000)
 
 def get_video(fpath,logger):
@@ -20,9 +21,18 @@ def get_video(fpath,logger):
         fname = os.path.basename(fpath)
         id = fname.split('.')[0]
         if(check_db_video(id,logger)):
-            pass
+            #In database
+            if(not check_db_video_length(id,logger)):
+                logger.info("Updating Length for id: %s"%id)
+                data = cv2.VideoCapture(os.environ['VAULTTUBE_VAULTDIR']+fpath)
+                frames = data.get(cv2.CAP_PROP_FRAME_COUNT) 
+                fps = data.get(cv2.CAP_PROP_FPS) 
+                # calculate duration of the video 
+                seconds = round(frames / fps) 
+                update_length(id,datetime.timedelta(seconds=seconds),logger)
         else:
-            logger.info("Processing New Video: %s"%id)
+            #Missing from database
+            logger.info("Processing New Video: %s"%fpath)
             process_new_video(id,fpath,logger)
     except Exception as e:
         logger.error("Error in get_video Failed: %s"%e)
@@ -37,6 +47,13 @@ def process_new_video(id,fpath,logger):
             ret['channelId'] = r["items"][0]["snippet"]["channelId"]
             ret['Json'] = r
             ret['Filepath'] = fpath
+            #Get Length
+            data = cv2.VideoCapture(os.environ['VAULTTUBE_VAULTDIR']+fpath)
+            frames = data.get(cv2.CAP_PROP_FRAME_COUNT) 
+            fps = data.get(cv2.CAP_PROP_FPS) 
+            # calculate duration of the video 
+            seconds = round(frames / fps) 
+            ret['length'] = datetime.timedelta(seconds=seconds) 
             if("high" in r["items"][0]["snippet"]["thumbnails"]):
                 ret['ImageURL'] = r["items"][0]["snippet"]["thumbnails"]["high"]["url"]
             elif("standard" in r["items"][0]["snippet"]["thumbnails"]):
@@ -49,7 +66,8 @@ def process_new_video(id,fpath,logger):
             else:
                 img = None
             save_video(id,ret,img,logger)
-
+        else:
+            logger.info("Unable to import video: %s"%str(r))
     except Exception as e:
         logger.error("Error in Process_new_video: %s"%e)
 
