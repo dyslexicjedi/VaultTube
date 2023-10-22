@@ -23,8 +23,8 @@ def get_video(fpath,logger):
         if(check_db_video(id,logger)):
             #In database
             if(not check_db_video_length(id,logger)):
-                logger.info("Updating Length for id: %s"%id)
-                data = cv2.VideoCapture(os.environ['VAULTTUBE_VAULTDIR']+fpath)
+                logger.info("Updating Length for id: %s"%fpath)
+                data = cv2.VideoCapture(fpath)
                 frames = data.get(cv2.CAP_PROP_FRAME_COUNT) 
                 fps = data.get(cv2.CAP_PROP_FPS) 
                 # calculate duration of the video 
@@ -48,7 +48,7 @@ def process_new_video(id,fpath,logger):
             ret['Json'] = r
             ret['Filepath'] = fpath
             #Get Length
-            data = cv2.VideoCapture(os.environ['VAULTTUBE_VAULTDIR']+fpath)
+            data = cv2.VideoCapture(fpath)
             frames = data.get(cv2.CAP_PROP_FRAME_COUNT) 
             fps = data.get(cv2.CAP_PROP_FPS) 
             # calculate duration of the video 

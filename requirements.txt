@@ -2,4 +2,4 @@ Flask
 mariadb
 requests
 pytube
-opencv-python
+opencv-python-headless
