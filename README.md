@@ -27,32 +27,21 @@ services:
   vaulttube:
     image: dyslexicjedi/vaulttube:<dev or latest>
     container_name: vaulttube
+    environment:
+      VAULTTUBE_VAULTDIR: <path to videos, generally will be /videos>
+      VAULTTUBE_DBUSER: <database user>
+      VAULTTUBE_DBPASS: <database password>
+      VAULTTUBE_DBPORT: <database port>
+      VAULTTUBE_DBHOST: <database ip>
+      VAULTTUBE_DBNAME: <database name>
+      VAULTTUBE_YTKEY: <YTKEY>
     ports:
       - 5000:5000
     volumes:
       - <path to videos>:/videos
-      - <path to config file>:/app/config.ini
     restart: unless-stopped
     depends_on:
       - db
-```
-
-## Config File
-Below is an example config file
-
-```
-[Database]
-host=<database IP>
-database=vaulttube
-user=vaulttube
-password=SuperSecretPassword
-autocommit=True
-
-[YouTube]
-KEY = <your youtube key>
-
-[Vault]
-DIR = /videos
 ```
 
 ## Info
