@@ -1,10 +1,11 @@
-import logging,os,traceback,sys, threading
+import logging,os,traceback,sys, threading, queue
 from logging.handlers import TimedRotatingFileHandler
 from flask import Flask,render_template,send_file,Blueprint,request
 from api import api_bp
 from backend import backend_thread
 from database import checkdb
 from scanner import start_scanner
+from downloader import start_dl_queue
 
 #Logging
 global logger
@@ -71,11 +72,15 @@ def startup():
     #Check Database
     dbpass = checkdb(logger)
     if(dbpass):
+        q = queue.Queue()
+        app.config['queue'] = q
         #Start Threads
         be = threading.Thread(target=backend_thread,args=(logger,))
         be.start()
         sc = threading.Thread(target=start_scanner,args=(logger,))
         sc.start()
+        dl = threading.Thread(target=start_dl_queue,args=(logger,q))
+        dl.start()
         #Begin
         logger.info("Starting VaultTube")
         app.run(host='0.0.0.0',use_reloader=False)

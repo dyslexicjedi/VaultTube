@@ -135,7 +135,8 @@ def list_resume():
 def api_download(ytid):
     try:
         url = "https://www.youtube.com/watch?v="+ytid
-        return single_download(url,current_app.logger)
+        current_app.config['queue'].put(url)
+        return "True"
     except Exception as e:
         current_app.logger.error("API Download Failed: %s"%e)
 

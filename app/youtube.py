@@ -2,6 +2,7 @@ from pytube import YouTube,Channel
 from database import check_db_video
 from backend import get_video
 import time,os,requests,json
+from flask import current_app
 
 complete = False
 
@@ -48,6 +49,6 @@ def get_channel_video_list(channelid,logger):
                 logger.info("Already found: %s"%id)
             else:
                 logger.info("Processing: %s"%id)
-                single_download("https://www.youtube.com/watch?v=%s"%id,logger)
+                current_app.config['queue'].put("https://www.youtube.com/watch?v=%s"%id)
     except Exception as e:
         logger.error("Scanning Channel Failed: %s"%e)
