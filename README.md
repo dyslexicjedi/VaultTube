@@ -35,6 +35,7 @@ services:
       VAULTTUBE_DBHOST: <database ip>
       VAULTTUBE_DBNAME: <database name>
       VAULTTUBE_YTKEY: <YTKEY>
+      VAULTTUBE_YTCOOKIE: <location to cookies.txt file>
     ports:
       - 5000:5000
     volumes:

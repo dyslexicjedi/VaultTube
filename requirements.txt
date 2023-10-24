@@ -1,5 +1,5 @@
 Flask
 mariadb
 requests
-pytube
+yt_dlp
 opencv-python-headless
