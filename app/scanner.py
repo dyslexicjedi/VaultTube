@@ -1,6 +1,7 @@
 import time
 from database import get_active_subscriptions
 from youtube import get_channel_video_list
+from flask import current_app
 
 def start_scanner(logger):
     logger.info("*Starting Scanner")
