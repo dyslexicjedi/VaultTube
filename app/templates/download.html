@@ -7,9 +7,15 @@
         <button class="btn btn-outline-secondary" type="button" id="button-addon2" onclick="processdownload();">Download</button>
       </div>
 </div>
+<hr>
+<h4 class="toprow">Download Queue Length: <div id="queuelength"></div></h4>
+<div id="downloadProgressBar"></div>
 <div id="spinner" class="lds-ring"><div></div><div></div><div></div><div></div></div>
 <div id="dlpush" style="height: 200px;"></div>
 <script>
+    function isNumeric(n) {
+        return !isNaN(parseFloat(n)) && isFinite(n);
+    }
     function processdownload(){
         $("#spinner").show();
         var yturl = $("#yturl").val();
@@ -22,5 +28,31 @@
             
         }
     }
+    async function getStatus(){
+        let queueSize;
+        let downloadProgress;
+        try{
+            const r = await fetch("/api/status/download/");
+            downloadProgress = await r.text();
+            const q = await fetch("/api/status/queue/");
+            queueSize = await q.text();
+            $("#queuelength").text(queueSize);
+            if(isNumeric(downloadProgress)){
+                $("#downloadProgressBar").empty();
+            }
+            else{
+                var dp = /^.* (\d+).*$/g;
+                var idp = dp.exec(downloadProgress);
+                $("#downloadProgressBar").empty();
+                $("#downloadProgressBar").html("<div class=\"progress\"><div class=\"progress-bar progress-bar-striped\" role=\"progressbar\" style=\"width: "+idp[1]+"%\" aria-valuenow=\"25\" aria-valuemin=\"0\" aria-valuemax=\"100\"></div></div>");
+            }
+        }
+        catch(e){
+            console.error("Polling Error",e);
+        }
+        //Do stuff here
+        setTimeout(getStatus,3000);
+    }
+    getStatus();
 </script>
 {% endblock %}

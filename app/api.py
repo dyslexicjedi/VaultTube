@@ -1,6 +1,6 @@
 from flask import Blueprint,current_app,send_file,Response
 import mariadb,json,io,math
-from youtube import *
+from youtube import get_dl_status,get_video,get_channel_video_list
 from backend import process_channel
 from database import checkdb,get_connection
 
@@ -306,3 +306,11 @@ def watch_status(vid):
 @api_bp.route("/checkdb")
 def api_checkdb():
     return str(checkdb(current_app.logger))
+
+@api_bp.route('/status/download/')
+def download_status():
+    return str(get_dl_status())
+
+@api_bp.route('/status/queue/')
+def queue_status():
+    return str(current_app.config['queue'].qsize())
