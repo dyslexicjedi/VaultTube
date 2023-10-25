@@ -38,13 +38,12 @@ def single_download(url,logger):
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             data = ydl.extract_info(url,download=False)
-            channel_id = data['channel_id']
             videoID = data['id']
             videoTitle = data['title']
             if(not os.path.exists(os.environ['VAULTTUBE_VAULTDIR']+"/"+data['channel_id'])):
                 os.mkdir(os.environ['VAULTTUBE_VAULTDIR']+"/"+data['channel_id'])
             ydl.download(url)
-        get_video(os.environ['VAULTTUBE_VAULTDIR']+"/"+channel_id+"/"+videoID+".mp4",logger)
+        get_video(os.environ['VAULTTUBE_VAULTDIR']+"/"+data['channel_id']+"/"+data['id']+".mp4",logger)
         return "True"
     except Exception as e:
         logger.error("YT Single Download Failed: %s"%e)
