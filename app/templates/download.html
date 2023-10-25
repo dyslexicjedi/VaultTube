@@ -17,15 +17,17 @@
         return !isNaN(parseFloat(n)) && isFinite(n);
     }
     function processdownload(){
-        $("#spinner").show();
         var yturl = $("#yturl").val();
-        if(yturl.includes("watch?v=")){
+        if(yturl.length == 11){
+            $.ajax({url: "/api/download/single/"+yturl, success: function(result){
+                $("#spinner").hide();
+            }});
+        }
+        else if(yturl.includes("watch?v=")){
             id = yturl.split('=')[1]
             $.ajax({url: "/api/download/single/"+id, success: function(result){
                 $("#spinner").hide();
-            //$("#watchstatus").html("<button class='btn btn-outline-secondary' onclick=\"markUnwatched()\">Watched</button>");
             }});
-            
         }
     }
     async function getStatus(){

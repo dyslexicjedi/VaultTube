@@ -64,12 +64,12 @@ function playvid(id){
     window.location.href='/player.html?id='+id;
 }
 function subscribe(channelid){
-    $.getJSON("/api/subscribe/"+channelid,function(data){
+    $.getJSON("/api/subscribe/channel/"+channelid,function(data){
         //To DO
     });
 }
 function unsubscribe(channelid){
-    $.getJSON("/api/unsubscribe/"+channelid,function(data){
+    $.getJSON("/api/unsubscribe/channel/"+channelid,function(data){
         //To DO
     });
 }

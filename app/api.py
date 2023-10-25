@@ -197,7 +197,7 @@ def api_creator(creator,page):
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
 
-@api_bp.route("/subscribe/<string:channelid>")
+@api_bp.route("/subscribe/channel/<string:channelid>")
 def subscribe(channelid):
     try:
         current_app.logger.debug('Called Subscribe: '+channelid)
@@ -211,7 +211,7 @@ def subscribe(channelid):
     except Exception as e:
         current_app.logger.error("Subscribe Failed: %s"%e)
 
-@api_bp.route("/unsubscribe/<string:channelid>")
+@api_bp.route("/unsubscribe/channel/<string:channelid>")
 def unsubscribe(channelid):
     try:
         current_app.logger.debug('Called Unsubscribe: '+channelid)
