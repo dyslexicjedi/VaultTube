@@ -2,19 +2,20 @@ import glob,time,os,requests,datetime,json,cv2,logging
 from flask import current_app
 from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length
 
-def backend_thread(logger):
+def backend_thread(logger,app):
     logger.info("*Starting Backend")
     while 1:
-        logger.info("Scanning Vault")
-        for filename in glob.iglob(os.environ['VAULTTUBE_VAULTDIR']+'/**/*', recursive=True):
-            if(os.path.isfile(os.path.abspath(filename))):
-                logger.debug("Path is file: %s"%filename)
-                get_video(os.path.abspath(filename),logger)
-                #time.sleep(5)
-            else:
-                process_channel(filename,logger)
-                #time.sleep(5)
-        time.sleep(5000)
+        with app.app_context():
+            logger.info("Scanning Vault")
+            for filename in glob.iglob(os.environ['VAULTTUBE_VAULTDIR']+'/**/*', recursive=True):
+                if(os.path.isfile(os.path.abspath(filename))):
+                    logger.debug("Path is file: %s"%filename)
+                    get_video(os.path.abspath(filename),logger)
+                    #time.sleep(5)
+                else:
+                    process_channel(filename,logger)
+                    #time.sleep(5)
+            time.sleep(5000)
 
 def get_video(fpath,logger):
     try:
