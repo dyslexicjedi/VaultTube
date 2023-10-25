@@ -9,9 +9,10 @@ def backend_thread(logger,app):
             logger.info("Scanning Vault")
             for filename in glob.iglob(os.environ['VAULTTUBE_VAULTDIR']+'/**/*', recursive=True):
                 if(os.path.isfile(os.path.abspath(filename))):
-                    logger.debug("Path is file: %s"%filename)
-                    get_video(os.path.abspath(filename),logger)
-                    #time.sleep(5)
+                    if(not ".mp4.part" in filename):
+                        logger.debug("Path is file: %s"%filename)
+                        get_video(os.path.abspath(filename),logger)
+                        #time.sleep(5)
                 else:
                     process_channel(filename,logger)
                     #time.sleep(5)
