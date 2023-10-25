@@ -10,14 +10,13 @@ def dl_progress_hook(d):
         global dl_progress
         global videoTitle
         global videoID
+        global channel_id
         if d["status"] == "downloading":
             dl_progress = d['_percent_str']
         if d["status"] == "finished":
-            dl_progress = 0
-            videoTitle = ""
-            videoID = ""
+            pass
     except Exception as e:
-        current_app.logger("dl_progress_hook Failed: %s"%e)
+        current_app.logger.error("dl_progress_hook Failed: %s"%e)
         
 
 def single_download(url,logger):
@@ -25,6 +24,7 @@ def single_download(url,logger):
         global dl_progress
         global videoID
         global videoTitle
+        global channel_id
         dl_progress = 0
         logger.debug("Starting Download: %s"%url)
         #Set Cookie
@@ -38,12 +38,17 @@ def single_download(url,logger):
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             data = ydl.extract_info(url,download=False)
+            channel_id = data['channel_id']
             videoID = data['id']
             videoTitle = data['title']
             if(not os.path.exists(os.environ['VAULTTUBE_VAULTDIR']+"/"+data['channel_id'])):
                 os.mkdir(os.environ['VAULTTUBE_VAULTDIR']+"/"+data['channel_id'])
             ydl.download(url)
-        get_video(os.environ['VAULTTUBE_VAULTDIR']+"/"+data['channel_id']+"/"+data['id']+".mp4",logger)
+        get_video(os.environ['VAULTTUBE_VAULTDIR']+"/"+channel_id+"/"+videoID+".mp4",current_app.logger)
+        dl_progress = 0
+        videoTitle = ""
+        videoID = ""
+        channel_id = ""
         return "True"
     except Exception as e:
         logger.error("YT Single Download Failed: %s"%e)
