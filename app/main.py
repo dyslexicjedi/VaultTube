@@ -77,7 +77,7 @@ def startup():
         #Start Threads
         be = threading.Thread(target=backend_thread,args=(logger,))
         be.start()
-        sc = threading.Thread(target=start_scanner,args=(logger,))
+        sc = threading.Thread(target=start_scanner,args=(logger,app))
         sc.start()
         dl = threading.Thread(target=start_dl_queue,args=(logger,q))
         dl.start()
