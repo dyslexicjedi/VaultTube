@@ -1,4 +1,4 @@
-from database import check_db_video
+from database import check_db_video,check_pl2vid_info,insert_pl2vid_info
 from backend import get_video
 import time,os,requests,json,traceback
 from flask import current_app
@@ -102,3 +102,23 @@ def get_playlist_info(playlistid,logger):
         #logger.info(json.dumps(r, indent=4))
     except Exception as e:
         logger.error("Failed to get playlist info: %s"%e)
+
+def get_playlist_video_list(playlistid,logger):
+    try:
+        curl = "https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s"%(playlistid[0],os.environ['VAULTTUBE_YTKEY'])
+        r = requests.get(curl).json()
+        logger.debug(json.dumps(r, indent=4))
+        for vid in r['items']:
+            id = vid['contentDetails']['videoId']
+            if(check_db_video(id,logger)):
+                logger.info("Already found: %s"%id)
+                if(check_pl2vid_info(playlistid[0],id,logger)):
+                    logger.info("Found pl2vid info, nothing to do here.")
+                else:
+                    insert_pl2vid_info(playlistid[0],id,logger)
+            else:
+                logger.info("Processing: %s"%id)
+                current_app.config['queue'].put("https://www.youtube.com/watch?v=%s"%id)
+                insert_pl2vid_info(playlistid[0],id,logger)
+    except Exception as e:
+        logger.error("get_playlist_video_list failed: %s"%e)

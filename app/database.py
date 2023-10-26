@@ -42,6 +42,11 @@ def checkdb(logger):
         if(not cur.fetchone()):
             logger.info("Channels Table not created, creating...")
             cur.execute("create table channels (`channelid` varchar(100),`channelname` varchar(100),`json` longtext,`subscribed` int(11) DEFAULT 0,PRIMARY KEY(`channelid`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
+        #Pl2VID
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'pl2vid' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
+        if(not cur.fetchone()):
+            logger.info("pl2vid Table not created, creating...")
+            cur.execute("create table pl2vid (`playlistId` varchar(100),`videoId` varchar(100),PRIMARY KEY(`playlistId`,`videoId`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
         #Videos
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'videos' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
@@ -177,3 +182,40 @@ def insert_playlist(plinfo,logger):
         con.close()
     except Exception as e:
         logger.error("Error during insert_playlist: %s"%e)
+
+def get_active_playlist_subs(logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("select playlistId from playlists where subscribed = 1;")
+        rv = cur.fetchall()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during playlist subscription poll")
+
+def check_pl2vid_info(pl,vid,logger):
+    logger.debug("Checking pl2vid for playlists %s and video %s"%(pl,vid))
+    test = False
+    try:
+        check = get_connection(logger)
+        cur = check.cursor()
+        cur.execute("Select * FROM pl2vid where playlistId = '%s' and videoId = '%s'"%(pl,vid))
+        if(cur.fetchone()):
+            test = True
+        check.close()
+        return test
+    except Exception as e:
+        logger.error("Error during check_pl2vid_info: %s"%e)
+
+def insert_pl2vid_info(pl,vid,logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        #Save Video Data
+        sql = "Insert into pl2vid(playlistId,videoId) values(%s,%s);"
+        cur.execute(sql,(pl,vid))
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.error("Error during insert_pl2vid_info: %s"%e)

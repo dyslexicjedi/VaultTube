@@ -268,19 +268,27 @@ def api_search(searchtxt,page):
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
 
-@api_bp.route("/sub_status/<string:channelid>")
-def sub_status(channelid):
+@api_bp.route("/sub_status/<string:type>/<string:value>")
+def sub_status(type,value):
     try:
-        current_app.logger.debug('Called Sub_status: '+channelid)
+        current_app.logger.debug('Called Sub_status: %s %s'%(type,value))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("Select subscribed from channels where channelid = %s;",(channelid,))
-        if(not cur.rowcount):
-            current_app.logger.error("sub_status: Channel not found")
-            process_channel('/videos/'+channelid,current_app.logger)
-            return "0"
-        else:
-            data = cur.fetchone()[0]
+        if(type == "channel"):
+            cur.execute("Select subscribed from channels where channelid = %s;",(value,))
+            if(not cur.rowcount):
+                current_app.logger.error("sub_status: Channel not found")
+                process_channel('/videos/'+value,current_app.logger)
+                data = ""
+            else:
+                data = cur.fetchone()[0]
+        elif(type == "playlist"):
+            cur.execute("Select subscribed from playlists where playlistId = %s;",(value,))
+            if(not cur.rowcount):
+                current_app.logger.error("sub_status: playlist not found")
+                data = ""
+            else:
+                data = cur.fetchone()[0]
         con.commit()
         con.close()
         # return the results!
@@ -377,3 +385,22 @@ def playlists(page):
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
+
+@api_bp.route('/playlist/<string:playlist>/<string:page>')
+def api_playlist(playlist,page):
+    try:
+        current_app.logger.debug("Called playlist %s %s"%(playlist,page))
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select videos.*,playlistName from videos left outer join pl2vid on videos.id = pl2vid.videoId left outer join playlists on pl2vid.playlistId = playlists.playlistId where pl2vid.playlistId = '%s' order by PublishedAt desc limit 40 offset %s;"%(playlist,page))
+        # serialize results into JSON
+        row_headers=[x[0] for x in cur.description]
+        rv = cur.fetchall()
+        json_data=[]
+        for result in rv:
+            json_data.append(dict(zip(row_headers,result)))
+        con.close()
+        # return the results!
+        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API Playlist Failed: %s"%e)

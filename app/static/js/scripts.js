@@ -74,7 +74,7 @@ function unsubscribe(channelid){
     });
 }
 function subscribe_status(channelId){
-    $.getJSON("/api/sub_status/"+creator,function(data){
+    $.getJSON("/api/sub_status/channel/"+creator,function(data){
         if(data == 0){
             $("#subimg").attr('src','/static/imgs/square.svg');
         }
@@ -85,7 +85,7 @@ function subscribe_status(channelId){
     });
 }
 function handlesub(channelId){
-    $.getJSON("/api/sub_status/"+creator,function(data){
+    $.getJSON("/api/sub_status/channel/"+creator,function(data){
         if(data == 0){
             subscribe(channelId);
         }
@@ -123,4 +123,15 @@ function handlewatch(vid){
         }
     });
     event.stopPropagation();
+}
+function playlist_sub_status(playlistid){
+    $.getJSON("/api/sub_status/playlist/"+playlistid,function(data){
+        if(data == 0){
+            $("#subimg").attr('src','/static/imgs/square.svg');
+        }
+        else{
+            $("#subimg").attr('src','/static/imgs/check-square.svg');
+        }
+        $("#subimg").attr('onclick','handlesub(\''+playlist+'\');');
+    });
 }

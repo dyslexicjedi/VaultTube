@@ -31,15 +31,15 @@ def test_subscribe(client):
     data = json.loads(response.get_data(as_text=True))
     if(len(data) > 0):
         id = data[0]['channelid']
-        response = client.get("/api/sub_status/%s"%id)
+        response = client.get("/api/sub_status/channel/%s"%id)
         assert response.text == '0'
         response = client.get("/api/subscribe/channel/%s"%id)
         assert response.text == "True"
-        response = client.get("/api/sub_status/%s"%id)
+        response = client.get("/api/sub_status/channel/%s"%id)
         assert response.text == '1'
         response = client.get("/api/unsubscribe/channel/%s"%id)
         assert response.text == "True"
-        response = client.get("/api/sub_status/%s"%id)
+        response = client.get("/api/sub_status/channel/%s"%id)
         assert response.text == '0'
     else:
         assert False == True

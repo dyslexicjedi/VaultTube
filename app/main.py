@@ -72,6 +72,10 @@ def search():
 def playlists():
     return render_template("/playlists.html")
 
+@app.route("/playlist.html")
+def playlist():
+    return render_template("/playlist.html")
+
 def startup():
     #Check Database
     dbpass = checkdb(logger)
