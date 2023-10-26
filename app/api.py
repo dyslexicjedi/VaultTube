@@ -277,6 +277,7 @@ def api_subscribe(type,value):
         elif(type == "channel"):
             current_app.logger.debug('Called Channel Subscribe: '+value)
             cur.execute("Update channels set subscribed = 1 where channelid = %s;",(value,))
+            ret = True
         con.commit()
         con.close()
         # return the results!
