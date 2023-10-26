@@ -36,7 +36,7 @@ def checkdb(logger):
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'playlists' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
             logger.info("Playlists Table not created, creating...")
-            cur.execute("create table playlists (`playlist` varchar(100),`videoid` varchar(100),PRIMARY KEY(`playlist`,`videoid`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
+            cur.execute("create table playlists (`playlistId` varchar(100),`playlistName` varchar(100),`channelId` varchar(100),`json` longtext,`subscribed` int(11),PRIMARY KEY(`playlistId`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
         #Channels
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'channels' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
@@ -165,3 +165,15 @@ def update_length(id,length,logger):
         con.close()
     except Exception as e:
         logger.error("Error duing update_length: %s"%e)
+
+def insert_playlist(plinfo,logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        #Save Video Data
+        sql = "Insert into playlists(playlistId,playlistName,channelId,json,subscribed) values(%s,%s,%s,%s,%s);"
+        cur.execute(sql,(plinfo['items'][0]['id'],plinfo['items'][0]['snippet']['title'],plinfo['items'][0]['snippet']['channelId'],json.dumps(plinfo),0))
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.error("Error during insert_playlist: %s"%e)

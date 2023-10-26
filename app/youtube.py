@@ -93,3 +93,12 @@ def get_cur_videoTitle():
         return videoTitle
     except NameError:
         return ""
+
+def get_playlist_info(playlistid,logger):
+    try:
+        curl = "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&id=%s&key=%s"%(playlistid,os.environ['VAULTTUBE_YTKEY'])
+        r = requests.get(curl).json()
+        return r
+        #logger.info(json.dumps(r, indent=4))
+    except Exception as e:
+        logger.error("Failed to get playlist info: %s"%e)

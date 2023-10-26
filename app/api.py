@@ -1,8 +1,8 @@
 from flask import Blueprint,current_app,send_file,Response
 import mariadb,json,io,math
-from youtube import get_dl_status,get_video,get_channel_video_list,get_cur_videoID,get_cur_videoTitle
+from youtube import get_dl_status,get_video,get_channel_video_list,get_cur_videoID,get_cur_videoTitle,get_playlist_info
 from backend import process_channel
-from database import checkdb,get_connection
+from database import checkdb,get_connection,insert_playlist
 
 api_bp = Blueprint('api',__name__)
 
@@ -57,9 +57,9 @@ def getVideo(id):
         for result in rv:
             json_data.append(dict(zip(row_headers,result)))
         json_data[0]['filepath'] = '/videos/'+json_data[0]['filepath']
-        cur.execute("Select distinct playlist from playlists p where videoid = '%s'"%id)
-        results = cur.fetchall()
-        json_data[0]['playlists'] = [x[0] for x in results]
+        # cur.execute("Select distinct playlist from playlists p where videoid = '%s'"%id)
+        # results = cur.fetchall()
+        # json_data[0]['playlists'] = [x[0] for x in results]
         con.close()
         # return the results!
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
@@ -316,3 +316,64 @@ def queue_status():
     data['cur_id'] = get_cur_videoID()
     data['cur_title'] = get_cur_videoTitle()
     return json.dumps(data, indent=4, sort_keys=True, default=str)
+
+@api_bp.route("/subscribe/playlist/<string:playlistid>")
+def subscribe_playlist(playlistid):
+    ret = False
+    try:
+        current_app.logger.debug('Called Playlist Subscribe: '+playlistid)
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("Select * from playlists where playlistId = '%s'"%(playlistid))
+        if(not cur.rowcount):
+            #Create Playlist Item
+            plinfo = get_playlist_info(playlistid,current_app.logger)
+            insert_playlist(plinfo,current_app.logger)
+            ret = True
+        else:
+            cur.execute("Update playlists set subscribed = 1 where playlistId = %s;",(playlistid,))
+            ret = True
+        con.commit()
+        con.close()
+        # return the results!
+        return str(ret)
+    except Exception as e:
+        current_app.logger.error("Playlist Subscribe Failed: %s"%e)
+
+@api_bp.route("/unsubscribe/playlist/<string:playlistid>")
+def unsubscribe_playlist(playlistid):
+    try:
+        current_app.logger.debug('Called Playlist Unsubscribe: '+playlistid)
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("Update playlists set subscribed = 0 where playlistId = %s;",(playlistid,))
+        con.commit()
+        con.close()
+        # return the results!
+        return "True"
+    except Exception as e:
+        current_app.logger.error("Playlist Unsubscribe Failed: %s"%e)
+
+@api_bp.route('/playlists/<string:page>')
+def playlists(page):
+    try:
+        current_app.logger.debug("Called Playlists %s"%(page,))
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select * from playlists order by playlistName limit 40 offset %s;"%(page,))
+        if(cur.rowcount):
+            current_app.logger.debug("Found %s results"%cur.rowcount)
+            # serialize results into JSON
+            row_headers=[x[0] for x in cur.description]
+            rv = cur.fetchall()
+            json_data=[]
+            for result in rv:
+                json_data.append(dict(zip(row_headers,result)))
+        else:
+            current_app.logger.debug("Found no data, empty json response")
+            json_data=[]
+        con.close()
+        # return the results!
+        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API Channel Failed: %s"%e)
