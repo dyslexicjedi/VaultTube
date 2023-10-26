@@ -76,6 +76,10 @@ def playlists():
 def playlist():
     return render_template("/playlist.html")
 
+@app.route("/random.html")
+def random():
+    return render_template("/random.html")
+
 def startup():
     #Check Database
     dbpass = checkdb(logger)

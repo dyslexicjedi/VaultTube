@@ -6,6 +6,19 @@ from database import checkdb,get_connection,insert_playlist
 
 api_bp = Blueprint('api',__name__)
 
+def parse_response(cur,con):
+    if(not cur.rowcount):
+        return "[]"
+    # serialize results into JSON
+    row_headers=[x[0] for x in cur.description]
+    rv = cur.fetchall()
+    json_data=[]
+    for result in rv:
+        json_data.append(dict(zip(row_headers,result)))
+    con.close()
+    # return the results!
+    return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+
 @api_bp.route('/latest/<string:opt>/<string:page>')
 def latest(opt,page):
     try:
@@ -18,15 +31,7 @@ def latest(opt,page):
             cur.execute("select * from videos order by AddedAt desc limit 40 offset %s;"%(page,))
         else:
             cur.execute("select * from videos order by PublishedAt desc limit 40 offset %s;"%(page,))
-        # serialize results into JSON
-        row_headers=[x[0] for x in cur.description]
-        rv = cur.fetchall()
-        json_data=[]
-        for result in rv:
-            json_data.append(dict(zip(row_headers,result)))
-        con.close()
-        # return the results!
-        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+        parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Latest Failed: %s"%e)
 
@@ -119,15 +124,7 @@ def list_resume():
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select * from videos where not timestamp = 0 order by PublishedAt desc limit 40;")
-        # serialize results into JSON
-        row_headers=[x[0] for x in cur.description]
-        rv = cur.fetchall()
-        json_data=[]
-        for result in rv:
-            json_data.append(dict(zip(row_headers,result)))
-        con.close()
-        # return the results!
-        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+        return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API List Resume Failed: %s"%e)
 
@@ -160,20 +157,7 @@ def channels(page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select channels.*,count(*) as vidcount,max(PublishedAt) as lastvidtime from channels left outer join videos on channels.channelId = videos.channelId group by channelId order by channelname limit 40 offset %s;"%(page,))
-        if(cur.rowcount):
-            current_app.logger.debug("Found %s results"%cur.rowcount)
-            # serialize results into JSON
-            row_headers=[x[0] for x in cur.description]
-            rv = cur.fetchall()
-            json_data=[]
-            for result in rv:
-                json_data.append(dict(zip(row_headers,result)))
-        else:
-            current_app.logger.debug("Found no data, empty json response")
-            json_data=[]
-        con.close()
-        # return the results!
-        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+        return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
 
@@ -185,45 +169,9 @@ def api_creator(creator,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select * from videos where channelId = '%s' order by PublishedAt desc limit 40 offset %s;"%(creator,page))
-        # serialize results into JSON
-        row_headers=[x[0] for x in cur.description]
-        rv = cur.fetchall()
-        json_data=[]
-        for result in rv:
-            json_data.append(dict(zip(row_headers,result)))
-        con.close()
-        # return the results!
-        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+        return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
-
-@api_bp.route("/subscribe/channel/<string:channelid>")
-def subscribe(channelid):
-    try:
-        current_app.logger.debug('Called Subscribe: '+channelid)
-        con = get_connection(current_app.logger)
-        cur = con.cursor()
-        cur.execute("Update channels set subscribed = 1 where channelid = %s;",(channelid,))
-        con.commit()
-        con.close()
-        # return the results!
-        return "True"
-    except Exception as e:
-        current_app.logger.error("Subscribe Failed: %s"%e)
-
-@api_bp.route("/unsubscribe/channel/<string:channelid>")
-def unsubscribe(channelid):
-    try:
-        current_app.logger.debug('Called Unsubscribe: '+channelid)
-        con = get_connection(current_app.logger)
-        cur = con.cursor()
-        cur.execute("Update channels set subscribed = 0 where channelid = %s;",(channelid,))
-        con.commit()
-        con.close()
-        # return the results!
-        return "True"
-    except Exception as e:
-        current_app.logger.error("Unsubscribe Failed: %s"%e)
 
 @api_bp.route('/unwatched/<string:opt>/<string:page>')
 def get_unwatched(opt,page):
@@ -237,15 +185,7 @@ def get_unwatched(opt,page):
             cur.execute("select * from videos order watched = 0 by AddedAt desc limit 40 offset %s;"%(page,))
         else:
             cur.execute("select * from videos order watched = 0 by PublishedAt desc limit 40 offset %s;"%(page,))
-        # serialize results into JSON
-        row_headers=[x[0] for x in cur.description]
-        rv = cur.fetchall()
-        json_data=[]
-        for result in rv:
-            json_data.append(dict(zip(row_headers,result)))
-        con.close()
-        # return the results!
-        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+        return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Unwatched Failed: %s"%e)
 
@@ -256,15 +196,7 @@ def api_search(searchtxt,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select * from videos where lower(json) like lower('%s') order by PublishedAt desc limit 40 offset %s;"%("%"+searchtxt+"%",page))
-        # serialize results into JSON
-        row_headers=[x[0] for x in cur.description]
-        rv = cur.fetchall()
-        json_data=[]
-        for result in rv:
-            json_data.append(dict(zip(row_headers,result)))
-        con.close()
-        # return the results!
-        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+        return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
 
@@ -325,22 +257,26 @@ def queue_status():
     data['cur_title'] = get_cur_videoTitle()
     return json.dumps(data, indent=4, sort_keys=True, default=str)
 
-@api_bp.route("/subscribe/playlist/<string:playlistid>")
-def subscribe_playlist(playlistid):
+@api_bp.route("/subscribe/<string:type>/<string:value>")
+def api_subscribe(type,value):
     ret = False
     try:
-        current_app.logger.debug('Called Playlist Subscribe: '+playlistid)
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("Select * from playlists where playlistId = '%s'"%(playlistid))
-        if(not cur.rowcount):
-            #Create Playlist Item
-            plinfo = get_playlist_info(playlistid,current_app.logger)
-            insert_playlist(plinfo,current_app.logger)
-            ret = True
-        else:
-            cur.execute("Update playlists set subscribed = 1 where playlistId = %s;",(playlistid,))
-            ret = True
+        if(type == "playlist"):
+            current_app.logger.debug('Called Playlist Subscribe: '+value)
+            cur.execute("Select * from playlists where playlistId = '%s'"%(value))
+            if(not cur.rowcount):
+                #Create Playlist Item
+                plinfo = get_playlist_info(value,current_app.logger)
+                insert_playlist(plinfo,current_app.logger)
+                ret = True
+            else:
+                cur.execute("Update playlists set subscribed = 1 where playlistId = %s;",(value,))
+                ret = True
+        elif(type == "channel"):
+            current_app.logger.debug('Called Channel Subscribe: '+value)
+            cur.execute("Update channels set subscribed = 1 where channelid = %s;",(value,))
         con.commit()
         con.close()
         # return the results!
@@ -348,13 +284,17 @@ def subscribe_playlist(playlistid):
     except Exception as e:
         current_app.logger.error("Playlist Subscribe Failed: %s"%e)
 
-@api_bp.route("/unsubscribe/playlist/<string:playlistid>")
-def unsubscribe_playlist(playlistid):
+@api_bp.route("/unsubscribe/<string:type>/<string:value>")
+def api_unsubscribe(type,value):
     try:
-        current_app.logger.debug('Called Playlist Unsubscribe: '+playlistid)
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("Update playlists set subscribed = 0 where playlistId = %s;",(playlistid,))
+        if(type == "playlist"):
+            current_app.logger.debug('Called Playlist Unsubscribe: '+value)
+            cur.execute("Update playlists set subscribed = 0 where playlistId = %s;",(value,))
+        elif(type == "channel"):
+            current_app.logger.debug('Called Channel Unsubscribe: '+value)
+            cur.execute("Update channels set subscribed = 0 where channelid = %s;",(value,))
         con.commit()
         con.close()
         # return the results!
@@ -369,20 +309,7 @@ def playlists(page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select * from playlists order by playlistName limit 40 offset %s;"%(page,))
-        if(cur.rowcount):
-            current_app.logger.debug("Found %s results"%cur.rowcount)
-            # serialize results into JSON
-            row_headers=[x[0] for x in cur.description]
-            rv = cur.fetchall()
-            json_data=[]
-            for result in rv:
-                json_data.append(dict(zip(row_headers,result)))
-        else:
-            current_app.logger.debug("Found no data, empty json response")
-            json_data=[]
-        con.close()
-        # return the results!
-        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+        return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
 
@@ -393,14 +320,17 @@ def api_playlist(playlist,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select videos.*,playlistName from videos left outer join pl2vid on videos.id = pl2vid.videoId left outer join playlists on pl2vid.playlistId = playlists.playlistId where pl2vid.playlistId = '%s' order by PublishedAt desc limit 40 offset %s;"%(playlist,page))
-        # serialize results into JSON
-        row_headers=[x[0] for x in cur.description]
-        rv = cur.fetchall()
-        json_data=[]
-        for result in rv:
-            json_data.append(dict(zip(row_headers,result)))
-        con.close()
-        # return the results!
-        return json.dumps(json_data, indent=4, sort_keys=True, default=str)
+        return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Playlist Failed: %s"%e)
+
+@api_bp.route('/random')
+def api_random():
+    try:
+        current_app.logger.debug("Called Random")
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select * from videos order by RAND() LIMIT 40;")
+        return parse_response(cur,con)
+    except Exception as e:
+        current_app.logger.error("API Random Fail: %s"%e)
