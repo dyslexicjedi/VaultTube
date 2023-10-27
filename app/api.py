@@ -26,11 +26,11 @@ def latest(opt,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         if(opt == "PublishedAt"):
-            cur.execute("select * from videos order by PublishedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos order by PublishedAt desc limit 40 offset %s;"%(page,))
         elif(opt == "AddedAt"):
-            cur.execute("select * from videos order by AddedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos order by AddedAt desc limit 40 offset %s;"%(page,))
         else:
-            cur.execute("select * from videos order by PublishedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos order by PublishedAt desc limit 40 offset %s;"%(page,))
         parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Latest Failed: %s"%e)
@@ -54,7 +54,7 @@ def getVideo(id):
         current_app.logger.debug('Called Video ID: '+id)
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select * from videos where id = %s;",(id,))
+        cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where id = %s;",(id,))
         # serialize results into JSON
         row_headers=[x[0] for x in cur.description]
         rv = cur.fetchall()
@@ -123,7 +123,7 @@ def list_resume():
         current_app.logger.debug("Called List Resume")
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select * from videos where not timestamp = 0 order by PublishedAt desc limit 40;")
+        cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where not timestamp = 0 order by PublishedAt desc limit 40;")
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API List Resume Failed: %s"%e)
@@ -168,7 +168,7 @@ def api_creator(creator,page):
         current_app.logger.debug("Called Creator %s %s"%(creator,page))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select * from videos where channelId = '%s' order by PublishedAt desc limit 40 offset %s;"%(creator,page))
+        cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where channelId = '%s' order by PublishedAt desc limit 40 offset %s;"%(creator,page))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
@@ -180,11 +180,11 @@ def get_unwatched(opt,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         if(opt == "PublishedAt"):
-            cur.execute("select * from videos where watched = 0 order by PublishedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where watched = 0 order by PublishedAt desc limit 40 offset %s;"%(page,))
         elif(opt == "AddedAt"):
-            cur.execute("select * from videos order watched = 0 by AddedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos order watched = 0 by AddedAt desc limit 40 offset %s;"%(page,))
         else:
-            cur.execute("select * from videos order watched = 0 by PublishedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos order watched = 0 by PublishedAt desc limit 40 offset %s;"%(page,))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Unwatched Failed: %s"%e)
@@ -195,7 +195,7 @@ def api_search(searchtxt,page):
         current_app.logger.debug("Called Creator %s %s"%(searchtxt,page))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select * from videos where lower(json) like lower('%s') order by PublishedAt desc limit 40 offset %s;"%("%"+searchtxt+"%",page))
+        cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where lower(json) like lower('%s') order by PublishedAt desc limit 40 offset %s;"%("%"+searchtxt+"%",page))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
@@ -331,7 +331,7 @@ def api_random():
         current_app.logger.debug("Called Random")
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select * from videos order by RAND() LIMIT 40;")
+        cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos order by RAND() LIMIT 40;")
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Random Fail: %s"%e)
