@@ -4,7 +4,7 @@
 <script src="/static/js/video.min.js"></script>
 
 <div id="playerdiv" >
-    <video id="player" class="video-js vjs-default-skin vjs-big-play-centered videojs-overlay-player" data-setup='{}' controls preload="auto" width="auto" height="auto"></video>
+    <video id="player" class="video-js vjs-default-skin vjs-big-play-centered videojs-overlay-player" data-setup='{}' controls playsinline preload="auto" width="auto" height="auto"></video>
 </div>
 <script src="/static/js/scripts.js"></script>
 <div class="row">
@@ -20,7 +20,7 @@
     var tspoll;
     watch_status(id);
     vPlayer = videojs('player',{techOrder: ["html5"],autoplay: false});
-    $.getJSON("/api/video/"+id,function(data){
+    $.getJSON("/api/video/"+id+".mp4",function(data){
         var jobj = jQuery.parseJSON(data[0]["json"]);
         //Load Video
         vPlayer.src([{type: "video/webm",src: data[0]["filepath"]}]);

@@ -52,6 +52,8 @@ def imgid(id):
 def getVideo(id):
     try:
         current_app.logger.debug('Called Video ID: '+id)
+        if(".mp4" in id):
+            id = id.split(".")[0]
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where id = %s;",(id,))
