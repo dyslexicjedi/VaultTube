@@ -31,7 +31,7 @@ def latest(opt,page):
             cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos order by AddedAt desc limit 40 offset %s;"%(page,))
         else:
             cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos order by PublishedAt desc limit 40 offset %s;"%(page,))
-        parse_response(cur,con)
+        return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Latest Failed: %s"%e)
 

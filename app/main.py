@@ -80,19 +80,26 @@ def playlist():
 def random():
     return render_template("/random.html")
 
+def start_background_threads():
+    #Start Threads
+    be = threading.Thread(target=backend_thread,args=(logger,app))
+    be.start()
+    sc = threading.Thread(target=start_scanner,args=(logger,app))
+    sc.start()
+    dl = threading.Thread(target=start_dl_queue,args=(logger,app))
+    dl.start()
+
 def startup():
     #Check Database
     dbpass = checkdb(logger)
     if(dbpass):
         q = queue.Queue()
         app.config['queue'] = q
-        #Start Threads
-        be = threading.Thread(target=backend_thread,args=(logger,app))
-        be.start()
-        sc = threading.Thread(target=start_scanner,args=(logger,app))
-        sc.start()
-        dl = threading.Thread(target=start_dl_queue,args=(logger,app))
-        dl.start()
+        if("VAULTTUBE_DISABLEBACK" in os.environ):
+            if(os.environ['VAULTTUBE_DISABLEBACK'] == "False"):
+                start_background_threads()
+        else:
+            start_background_threads()
         #Begin
         logger.info("Starting VaultTube")
         app.run(host='0.0.0.0',use_reloader=False)
