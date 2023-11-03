@@ -103,9 +103,12 @@ def get_playlist_info(playlistid,logger):
     except Exception as e:
         logger.error("Failed to get playlist info: %s"%e)
 
-def get_playlist_video_list(playlistid,logger):
+def get_playlist_video_list(playlistid,logger,pageToken='0'):
     try:
-        curl = "https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s"%(playlistid[0],os.environ['VAULTTUBE_YTKEY'])
+        if(pageToken == '0'):
+            curl = "https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s"%(playlistid[0],os.environ['VAULTTUBE_YTKEY'])
+        else:
+            curl = "https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s&pageToken=%s"%(playlistid[0],os.environ['VAULTTUBE_YTKEY'],pageToken)
         r = requests.get(curl).json()
         logger.debug(json.dumps(r, indent=4))
         for vid in r['items']:
@@ -120,5 +123,8 @@ def get_playlist_video_list(playlistid,logger):
                 logger.info("Processing: %s"%id)
                 current_app.config['queue'].put("https://www.youtube.com/watch?v=%s"%id)
                 insert_pl2vid_info(playlistid[0],id,logger)
+        if("nextPageToken" in r):
+            logger.info("Processing Next Page for %s"%playlistid)
+            get_playlist_video_list(playlistid,logger,r['nextPageToken'])
     except Exception as e:
         logger.error("get_playlist_video_list failed: %s"%e)

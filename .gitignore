@@ -6,3 +6,4 @@ chromedriver
 .coverage
 .pytest_cache
 *.sh
+yt_cookies.txt
