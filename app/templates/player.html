@@ -11,6 +11,8 @@
     <div class="toprow" class="pl-3 pt-2 w-100"><img id="watchstatus" class="pe-1"><h3 id="title"></h3></div>
     <div><h5 id="creator"></h5></div>
     <div><p id="desc"></p></div>
+    <div><p id="nextvideo"></p></div>
+    <div><p id="prevvideo"></p></div>
 </div>
 <script>
     const querystring = window.location.search;
@@ -28,7 +30,7 @@
         //Adding Info to Player
         $("#title").text(jobj['items'][0]["snippet"]['title']);
         $("#desc").html(jobj['items'][0]["snippet"]['description'].replace('\n','<br>').replace('\r','<br>'));
-        $("#creator").html("<a href='/creator.html?creator="+data[0]['channelId']+"'>"+data[0]['youtuber']+"</a>")
+        $("#creator").html("<a href='/creator.html?creator="+data[0]['channelId']+"'>"+data[0]['youtuber']+"</a>");
         //Set Timestamp if non-0
         if(!data[0]['timestamp'] == 0){
             vPlayer.currentTime(data[0]['timestamp']);
@@ -59,8 +61,11 @@
             console.log("Suspected Vertical Video, changing player height");
         }
     });
-    function contentChange(){
-        
-    }
+    $.getJSON("/api/find_next_previous/"+id,function(data){
+        $("#nextvideo").html("Next Up: <a href='/player.html?id="+data["NextID"]+"'>"+data["NextTitle"]+"</a>");
+        $("#prevvideo").html("Previous: <a href='/player.html?id="+data["PreviousID"]+"'>"+data["PreviousTitle"]+"</a>");
+    });
+    function contentChange(){}
+
 </script>
 {% endblock %}

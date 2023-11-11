@@ -1,4 +1,5 @@
 import mariadb,requests,json,os
+from difflib import SequenceMatcher
 
 #Perform database checks on startup
 def checkdb(logger):
@@ -219,3 +220,41 @@ def insert_pl2vid_info(pl,vid,logger):
         con.close()
     except Exception as e:
         logger.error("Error during insert_pl2vid_info: %s"%e)
+
+def find_next_previous(vid,logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        #Get Video
+        sql = "Select youtuber,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where id = %s;"
+        cur.execute(sql,(vid,))
+        cur_data = cur.fetchone()
+        creator = cur_data[0]
+        title = cur_data[1]
+        #Get Other Videos by Same Creator
+        sql = "Select id,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where youtuber = %s order by PublishedAt desc;"
+        cur.execute(sql,(creator,))
+        np_data = cur.fetchall()
+        l = []
+        ret = {}
+        for index,row in enumerate(np_data):
+            np_title = row[1]
+            s = SequenceMatcher(None,title,np_title)
+            if(s.ratio() > 0.9):
+                l.append(row)
+        for index,row in enumerate(l):
+            np_title = row[1]
+            if(title == np_title):
+                if(len(l) > index+1):
+                    ret['PreviousID'] = l[index+1][0]
+                    ret['PreviousTitle'] = l[index+1][1].replace('"','')
+                if(index-1 > -1):
+                    ret['NextID'] = l[index-1][0]
+                    ret['NextTitle'] = l[index-1][1].replace('"','')
+        con.commit()
+        con.close()
+        return ret
+    except Exception as e:
+        logger.error("Error during find_next_previous: %s"%e)
+
+

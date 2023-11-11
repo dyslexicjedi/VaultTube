@@ -2,7 +2,7 @@ from flask import Blueprint,current_app,send_file,Response
 import mariadb,json,io,math
 from youtube import get_dl_status,get_video,get_channel_video_list,get_cur_videoID,get_cur_videoTitle,get_playlist_info
 from backend import process_channel
-from database import checkdb,get_connection,insert_playlist
+from database import checkdb,get_connection,insert_playlist,find_next_previous
 
 api_bp = Blueprint('api',__name__)
 
@@ -337,3 +337,12 @@ def api_random():
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Random Fail: %s"%e)
+
+@api_bp.route("/find_next_previous/<string:vid>")
+def api_fnp(vid):
+    try:
+        current_app.logger.debug("Called FNP")
+        ret = find_next_previous(vid,current_app.logger)
+        return json.dumps(ret, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API FNP Fail: %s"%e)
