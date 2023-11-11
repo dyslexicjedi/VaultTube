@@ -1,3 +1,4 @@
+[![Dev Build](https://github.com/dyslexicjedi/VaultTube/actions/workflows/docker.yml/badge.svg?branch=dev)](https://github.com/dyslexicjedi/VaultTube/actions/workflows/docker.yml)
 # VaultTube
 
 VaultTube is a video archive and player application written in Python/Flask/Bootstrap5/HTML5
