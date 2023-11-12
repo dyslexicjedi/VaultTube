@@ -62,8 +62,12 @@
         }
     });
     $.getJSON("/api/find_next_previous/"+id,function(data){
-        $("#nextvideo").html("Next Up: <a href='/player.html?id="+data["NextID"]+"'>"+data["NextTitle"]+"</a>");
-        $("#prevvideo").html("Previous: <a href='/player.html?id="+data["PreviousID"]+"'>"+data["PreviousTitle"]+"</a>");
+        if(data["NextID"] !== undefined){
+            $("#nextvideo").html("Next Up: <a href='/player.html?id="+data["NextID"]+"'>"+data["NextTitle"]+"</a>");
+        }
+        if(data["PreviousID"] !== undefined){
+            $("#prevvideo").html("Previous: <a href='/player.html?id="+data["PreviousID"]+"'>"+data["PreviousTitle"]+"</a>");
+        }
     });
     function contentChange(){}
 
