@@ -274,4 +274,11 @@ def find_next_previous(vid,logger):
     except Exception as e:
         logger.error("Error during find_next_previous: %s"%e)
 
-
+def insert_not_found(vid,logger):
+    con = get_connection(logger)
+    cur = con.cursor()
+    sql = "insert into videos(id,youtuber,channelId,json,filepath,watched,timestamp,length) values(%s,'404','404','404','404',1,0,'0');"
+    cur.execute(sql,(vid,))
+    con.commit()
+    cur.close()
+    con.close()

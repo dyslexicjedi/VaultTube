@@ -1,6 +1,6 @@
 import glob,time,os,requests,datetime,json,cv2,logging
 from flask import current_app
-from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length
+from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found
 
 def backend_thread(logger,app):
     logger.info("*Starting Backend")
@@ -45,7 +45,7 @@ def process_new_video(id,fpath,logger):
         r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'])
         retj = r.json()
         r.close()
-        if(retj['pageInfo']['totalResults'] == 1):
+        if(retj['pageInfo']['totalResults'] > 0):
             ret["PublishedAt"] = datetime.datetime.strptime(retj["items"][0]["snippet"]["publishedAt"], '%Y-%m-%dT%H:%M:%SZ')
             ret['Youtuber'] = retj["items"][0]["snippet"]["channelTitle"]
             ret['channelId'] = retj["items"][0]["snippet"]["channelId"]
@@ -72,6 +72,8 @@ def process_new_video(id,fpath,logger):
             save_video(id,ret,img,logger)
         else:
             logger.info("Unable to import video: %s"%str(retj))
+            insert_not_found(id,logger)
+            
     except Exception as e:
         logger.error("Error in Process_new_video: %s"%e)
 

@@ -1,4 +1,4 @@
-from database import check_db_video,check_pl2vid_info,insert_pl2vid_info
+from database import check_db_video,check_pl2vid_info,insert_pl2vid_info,insert_not_found
 from backend import get_video
 import time,os,requests,json,traceback
 from flask import current_app
@@ -21,38 +21,47 @@ def dl_progress_hook(d):
 
 def single_download(url,logger):
     try:
-        global dl_progress
-        global videoID
-        global videoTitle
-        global channel_id
-        dl_progress = 0
-        logger.debug("Starting Download: %s"%url)
-        #Set Cookie
-        f = open(os.environ['VAULTTUBE_YTCOOKIE'])
-        contents = f.read()
-        f.close()
-        cookies = StringIO(contents)
-        ydl_opts = {
-            'cookiefile': cookies,
-            'outtmpl': os.environ['VAULTTUBE_VAULTDIR']+"/%(channel_id)s/%(id)s.mp4",
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            "progress_hooks": [dl_progress_hook],
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            data = ydl.extract_info(url,download=False)
-            channel_id = data['channel_id']
-            videoID = data['id']
-            videoTitle = data['title']
-            if(not os.path.exists(os.environ['VAULTTUBE_VAULTDIR']+"/"+data['channel_id'])):
-                os.mkdir(os.environ['VAULTTUBE_VAULTDIR']+"/"+data['channel_id'])
-            ydl.download(url)
-        get_video(os.environ['VAULTTUBE_VAULTDIR']+"/"+channel_id+"/"+videoID+".mp4",current_app.logger)
-        dl_progress = 0
-        videoTitle = ""
-        videoID = ""
-        channel_id = ""
-        cookies.close()
-        return "True"
+        vid = url.split('=')[1]
+        r = requests.get("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=%s&key=%s"%(vid,os.environ['VAULTTUBE_YTKEY']))
+        retj = r.json()
+        r.close()
+        if(retj['pageInfo']['totalResults'] > 0):
+            global dl_progress
+            global videoID
+            global videoTitle
+            global channel_id
+            dl_progress = 0
+            logger.debug("Starting Download: %s"%url)
+            #Set Cookie
+            f = open(os.environ['VAULTTUBE_YTCOOKIE'])
+            contents = f.read()
+            f.close()
+            cookies = StringIO(contents)
+            ydl_opts = {
+                'cookiefile': cookies,
+                'outtmpl': os.environ['VAULTTUBE_VAULTDIR']+"/%(channel_id)s/%(id)s.mp4",
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                "progress_hooks": [dl_progress_hook],
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                data = ydl.extract_info(url,download=False)
+                channel_id = data['channel_id']
+                videoID = data['id']
+                videoTitle = data['title']
+                if(not os.path.exists(os.environ['VAULTTUBE_VAULTDIR']+"/"+data['channel_id'])):
+                    os.mkdir(os.environ['VAULTTUBE_VAULTDIR']+"/"+data['channel_id'])
+                ydl.download(url)
+            get_video(os.environ['VAULTTUBE_VAULTDIR']+"/"+channel_id+"/"+videoID+".mp4",current_app.logger)
+            dl_progress = 0
+            videoTitle = ""
+            videoID = ""
+            channel_id = ""
+            cookies.close()
+            return "True"
+        else:
+            insert_not_found(vid,logger)
+            logger.error("Unable to download: %s, content was not found."%vid)
+            return "False"
     except Exception as e:
         logger.error("YT Single Download Failed: %s"%e)
 
