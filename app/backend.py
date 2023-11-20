@@ -42,12 +42,14 @@ def get_video(fpath,logger):
 def process_new_video(id,fpath,logger):
     ret = {}
     try:
-        r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY']).json()
-        if(r['pageInfo']['totalResults'] == 1):
-            ret["PublishedAt"] = datetime.datetime.strptime(r["items"][0]["snippet"]["publishedAt"], '%Y-%m-%dT%H:%M:%SZ')
-            ret['Youtuber'] = r["items"][0]["snippet"]["channelTitle"]
-            ret['channelId'] = r["items"][0]["snippet"]["channelId"]
-            ret['Json'] = r
+        r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'])
+        retj = r.json()
+        r.close()
+        if(retj['pageInfo']['totalResults'] == 1):
+            ret["PublishedAt"] = datetime.datetime.strptime(retj["items"][0]["snippet"]["publishedAt"], '%Y-%m-%dT%H:%M:%SZ')
+            ret['Youtuber'] = retj["items"][0]["snippet"]["channelTitle"]
+            ret['channelId'] = retj["items"][0]["snippet"]["channelId"]
+            ret['Json'] = retj
             ret['Filepath'] = fpath
             #Get Length
             data = cv2.VideoCapture(fpath)
@@ -56,10 +58,10 @@ def process_new_video(id,fpath,logger):
             # calculate duration of the video 
             seconds = round(frames / fps) 
             ret['length'] = datetime.timedelta(seconds=seconds) 
-            if("high" in r["items"][0]["snippet"]["thumbnails"]):
-                ret['ImageURL'] = r["items"][0]["snippet"]["thumbnails"]["high"]["url"]
-            elif("standard" in r["items"][0]["snippet"]["thumbnails"]):
-                ret['ImageURL'] = r["items"][0]["snippet"]["thumbnails"]["standard"]["url"]
+            if("high" in retj["items"][0]["snippet"]["thumbnails"]):
+                ret['ImageURL'] = retj["items"][0]["snippet"]["thumbnails"]["high"]["url"]
+            elif("standard" in retj["items"][0]["snippet"]["thumbnails"]):
+                ret['ImageURL'] = retj["items"][0]["snippet"]["thumbnails"]["standard"]["url"]
             else:
                 logger.error("Unable to find Thumbnail")
             if('ImageURL' in ret):
@@ -69,7 +71,7 @@ def process_new_video(id,fpath,logger):
                 img = None
             save_video(id,ret,img,logger)
         else:
-            logger.info("Unable to import video: %s"%str(r))
+            logger.info("Unable to import video: %s"%str(retj))
     except Exception as e:
         logger.error("Error in Process_new_video: %s"%e)
 

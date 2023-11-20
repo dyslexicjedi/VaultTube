@@ -15,6 +15,7 @@ def parse_response(cur,con):
     json_data=[]
     for result in rv:
         json_data.append(dict(zip(row_headers,result)))
+    cur.close()
     con.close()
     # return the results!
     return json.dumps(json_data, indent=4, sort_keys=True, default=str)
@@ -43,6 +44,7 @@ def imgid(id):
         cur = con.cursor()
         cur.execute("select image from images where id = '%s';"%(id,))
         img = cur.fetchone()[0]
+        cur.close()
         con.close()
         return send_file(io.BytesIO(img),mimetype='image/jpeg',as_attachment=True,download_name='%s.jpg' % id)
     except Exception as e:
@@ -67,6 +69,7 @@ def getVideo(id):
         # cur.execute("Select distinct playlist from playlists p where videoid = '%s'"%id)
         # results = cur.fetchall()
         # json_data[0]['playlists'] = [x[0] for x in results]
+        cur.close()
         con.close()
         # return the results!
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
@@ -82,6 +85,7 @@ def watched(id):
         cur.execute("Update videos set watched = 1 where id = %s;",(id,))
         cur.execute("Update videos set timestamp = 0 where id = %s;",(id,))
         con.commit()
+        cur.close()
         con.close()
         # return the results!
         return "True"
@@ -96,6 +100,7 @@ def unwatched(id):
         cur = con.cursor()
         cur.execute("Update videos set watched = 0 where id = %s;",(id,))
         con.commit()
+        cur.close()
         con.close()
         # return the results!
         return "True"
@@ -113,6 +118,7 @@ def set_timestamp(id,ts):
         current_app.logger.info(sql)
         cur.execute(sql)
         con.commit()
+        cur.close()
         con.close()
         # return the results!
         return "True"
@@ -147,6 +153,7 @@ def get_video_count():
         cur = con.cursor()
         cur.execute("select count(*) from videos;")
         count = cur.fetchone()[0]
+        cur.close()
         con.close()
         return str(count)
     except Exception as e:
@@ -224,6 +231,7 @@ def sub_status(type,value):
             else:
                 data = cur.fetchone()[0]
         con.commit()
+        cur.close()
         con.close()
         # return the results!
         return str(data)
@@ -239,6 +247,7 @@ def watch_status(vid):
         cur.execute("Select watched from videos where id = %s;",(vid,))
         data = cur.fetchone()[0]
         con.commit()
+        cur.close()
         con.close()
         # return the results!
         return str(data)
@@ -281,6 +290,7 @@ def api_subscribe(type,value):
             cur.execute("Update channels set subscribed = 1 where channelid = %s;",(value,))
             ret = True
         con.commit()
+        cur.close()
         con.close()
         # return the results!
         return str(ret)
@@ -299,6 +309,7 @@ def api_unsubscribe(type,value):
             current_app.logger.debug('Called Channel Unsubscribe: '+value)
             cur.execute("Update channels set subscribed = 0 where channelid = %s;",(value,))
         con.commit()
+        cur.close()
         con.close()
         # return the results!
         return "True"

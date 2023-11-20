@@ -16,6 +16,7 @@ def checkdb(logger):
         dbcheck = get_connection(logger)
         dbcur = dbcheck.cursor()
         dbcur.execute("CREATE DATABASE %s;"%(os.environ['VAULTTUBE_DBNAME']))
+        dbcur.close()
     except Exception as e:
         logger.debug("Database already exists")
         pass
@@ -66,6 +67,7 @@ def checkdb(logger):
                 PRIMARY KEY (`id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
                         """)
+        cur.close()
         con.close()
         return True
     except Exception as e:
@@ -81,6 +83,7 @@ def check_db_video(id,logger):
         cur.execute("Select * FROM videos where id = '%s'"%id)
         if(cur.fetchone()):
             test = True
+        cur.close()
         check.close()
         return test
     except Exception as e:
@@ -97,6 +100,7 @@ def save_video(id,ret,img,logger):
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))
         con.commit()
+        cur.close()
         con.close()
     except Exception as e:
         logger.error("Error during save_video: %s"%e)
@@ -112,6 +116,7 @@ def check_db_channel(id,logger):
             test = False
         else:
             test = True
+        cur.close()
         check.close()
         return test
     except Exception as e:
@@ -125,6 +130,7 @@ def save_channel(channelid,channelname,jdata,logger):
         sql = "Insert into channels(channelid,channelname,json) values(%s,%s,%s);"
         cur.execute(sql,(channelid,channelname,json.dumps(jdata)))
         con.commit()
+        cur.close()
         con.close()
     except Exception as e:
         logger.error("Error during save_channel: %s"%e)
@@ -135,6 +141,7 @@ def get_active_subscriptions(logger):
         cur = con.cursor()
         cur.execute("select channelid from channels where subscribed = 1;")
         rv = cur.fetchall()
+        cur.close()
         con.close()
         return rv
     except Exception as e:
@@ -157,6 +164,7 @@ def check_db_video_length(id,logger):
         data = cur.fetchone()[0]
         if(not data == "0"):
             test = True
+        cur.close()
         check.close()
         return test
     except Exception as e:
@@ -168,6 +176,7 @@ def update_length(id,length,logger):
         cur = con.cursor()
         cur.execute("Update videos set length = '%s' where id='%s';"%(length,id))
         con.commit()
+        cur.close()
         con.close()
     except Exception as e:
         logger.error("Error duing update_length: %s"%e)
@@ -180,6 +189,7 @@ def insert_playlist(plinfo,logger):
         sql = "Insert into playlists(playlistId,playlistName,channelId,json,subscribed) values(%s,%s,%s,%s,%s);"
         cur.execute(sql,(plinfo['items'][0]['id'],plinfo['items'][0]['snippet']['title'],plinfo['items'][0]['snippet']['channelId'],json.dumps(plinfo),0))
         con.commit()
+        cur.close()
         con.close()
     except Exception as e:
         logger.error("Error during insert_playlist: %s"%e)
@@ -190,6 +200,7 @@ def get_active_playlist_subs(logger):
         cur = con.cursor()
         cur.execute("select playlistId from playlists where subscribed = 1;")
         rv = cur.fetchall()
+        cur.close()
         con.close()
         return rv
     except Exception as e:
@@ -204,6 +215,7 @@ def check_pl2vid_info(pl,vid,logger):
         cur.execute("Select * FROM pl2vid where playlistId = '%s' and videoId = '%s'"%(pl,vid))
         if(cur.fetchone()):
             test = True
+        cur.close()
         check.close()
         return test
     except Exception as e:
@@ -217,9 +229,13 @@ def insert_pl2vid_info(pl,vid,logger):
         sql = "Insert into pl2vid(playlistId,videoId) values(%s,%s);"
         cur.execute(sql,(pl,vid))
         con.commit()
+        cur.close()
         con.close()
     except Exception as e:
         logger.error("Error during insert_pl2vid_info: %s"%e)
+    finally:
+        cur.close()
+        con.close()
 
 def find_next_previous(vid,logger):
     try:
@@ -252,6 +268,7 @@ def find_next_previous(vid,logger):
                     ret['NextID'] = l[index-1][0]
                     ret['NextTitle'] = l[index-1][1].replace('"','')
         con.commit()
+        cur.close()
         con.close()
         return ret
     except Exception as e:

@@ -28,7 +28,9 @@ def single_download(url,logger):
         dl_progress = 0
         logger.debug("Starting Download: %s"%url)
         #Set Cookie
-        contents = open(os.environ['VAULTTUBE_YTCOOKIE']).read()
+        f = open(os.environ['VAULTTUBE_YTCOOKIE'])
+        contents = f.read()
+        f.close()
         cookies = StringIO(contents)
         ydl_opts = {
             'cookiefile': cookies,
@@ -49,6 +51,7 @@ def single_download(url,logger):
         videoTitle = ""
         videoID = ""
         channel_id = ""
+        cookies.close()
         return "True"
     except Exception as e:
         logger.error("YT Single Download Failed: %s"%e)
@@ -56,22 +59,30 @@ def single_download(url,logger):
 def get_channel_video_list(channelid,logger):
     try:
         curl = "https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&id=%s&key=%s"%(channelid[0],os.environ['VAULTTUBE_YTKEY'])
-        r = requests.get(curl).json()
-        pid = r['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+        r = requests.get(curl)
+        retj = r.json()
+        r.close()
+        pid = retj['items'][0]['contentDetails']['relatedPlaylists']['uploads']
         #logger.info(json.dumps(r, indent=4))
+    except Exception as e:
+        logger.error("Scanning Channel Failed")
 
+    try:
         curl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s"%(pid,os.environ['VAULTTUBE_YTKEY'])
-        r = requests.get(curl).json()
-        logger.debug(json.dumps(r, indent=4))
-        for vid in r['items']:
+        r = requests.get(curl)
+        retj = r.json()
+        r.close()
+        logger.debug(json.dumps(retj, indent=4))
+        for vid in retj['items']:
             id = vid['contentDetails']['videoId']
             if(check_db_video(id,logger)):
                 logger.info("Already found: %s"%id)
             else:
                 logger.info("Processing: %s"%id)
                 current_app.config['queue'].put("https://www.youtube.com/watch?v=%s"%id)
+        
     except Exception as e:
-        logger.error("Scanning Channel Failed: %s"%e)
+        logger.error("Scanning Channel Playlist Failed: %s"%e)
 
 def get_dl_status():
     global dl_progress
@@ -97,8 +108,10 @@ def get_cur_videoTitle():
 def get_playlist_info(playlistid,logger):
     try:
         curl = "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&id=%s&key=%s"%(playlistid,os.environ['VAULTTUBE_YTKEY'])
-        r = requests.get(curl).json()
-        return r
+        r = requests.get(curl)
+        retj = r.json()
+        r.close()
+        return retj
         #logger.info(json.dumps(r, indent=4))
     except Exception as e:
         logger.error("Failed to get playlist info: %s"%e)
@@ -109,9 +122,11 @@ def get_playlist_video_list(playlistid,logger,pageToken='0'):
             curl = "https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s"%(playlistid[0],os.environ['VAULTTUBE_YTKEY'])
         else:
             curl = "https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s&pageToken=%s"%(playlistid[0],os.environ['VAULTTUBE_YTKEY'],pageToken)
-        r = requests.get(curl).json()
-        logger.debug(json.dumps(r, indent=4))
-        for vid in r['items']:
+        r = requests.get(curl)
+        retj = r.json()
+        r.close()
+        logger.debug(json.dumps(retj, indent=4))
+        for vid in retj['items']:
             id = vid['contentDetails']['videoId']
             if(check_db_video(id,logger)):
                 logger.info("Already found: %s"%id)
@@ -123,8 +138,8 @@ def get_playlist_video_list(playlistid,logger,pageToken='0'):
                 logger.info("Processing: %s"%id)
                 current_app.config['queue'].put("https://www.youtube.com/watch?v=%s"%id)
                 insert_pl2vid_info(playlistid[0],id,logger)
-        if("nextPageToken" in r):
+        if("nextPageToken" in retj):
             logger.info("Processing Next Page for %s"%playlistid)
-            get_playlist_video_list(playlistid,logger,r['nextPageToken'])
+            get_playlist_video_list(playlistid,logger,retj['nextPageToken'])
     except Exception as e:
         logger.error("get_playlist_video_list failed: %s"%e)
