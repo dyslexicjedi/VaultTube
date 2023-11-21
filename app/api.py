@@ -263,7 +263,7 @@ def queue_status():
     data = {}
     data['dl_status'] = get_dl_status()
     data['queue_size'] = current_app.config['queue'].qsize()
-    data['queue_value'] = current_app.config['queue']
+    data['queue_value'] = list(current_app.config['queue'].queue)
     data['cur_id'] = get_cur_videoID()
     data['cur_title'] = get_cur_videoTitle()
     return json.dumps(data, indent=4, sort_keys=True, default=str)
