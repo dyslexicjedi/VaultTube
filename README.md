@@ -4,6 +4,8 @@
 VaultTube is a video archive and player application written in Python/Flask/Bootstrap5/HTML5
 
 ## Status: 
+[![Build Docker](https://github.com/dyslexicjedi/VaultTube/actions/workflows/docker.yml/badge.svg?branch=dev)](https://github.com/dyslexicjedi/VaultTube/actions/workflows/docker.yml)
+
 VaultTube is current pre-alpha (hot code!), expect bugs, crashes and similar issues. Treat it like hot code, because it is, use at your own risk.
 
 Who should use this: Alpha testers, people who don't mind "early-access" to help improve software.
