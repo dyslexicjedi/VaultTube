@@ -73,10 +73,7 @@ def get_channel_video_list(channelid,logger):
         r.close()
         pid = retj['items'][0]['contentDetails']['relatedPlaylists']['uploads']
         #logger.info(json.dumps(r, indent=4))
-    except Exception as e:
-        logger.error("Scanning Channel Failed")
 
-    try:
         curl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s"%(pid,os.environ['VAULTTUBE_YTKEY'])
         r = requests.get(curl)
         retj = r.json()
@@ -88,10 +85,9 @@ def get_channel_video_list(channelid,logger):
                 logger.info("Already found: %s"%id)
             else:
                 logger.info("Processing: %s"%id)
-                current_app.config['queue'].put("https://www.youtube.com/watch?v=%s"%id)
-        
+                current_app.config['queue'].put("https://www.youtube.com/watch?v=%s"%id)   
     except Exception as e:
-        logger.error("Scanning Channel Playlist Failed: %s"%e)
+        logger.error("Scanning Channel Failed on ChannelID: %s"%channelid[0])
 
 def get_dl_status():
     global dl_progress

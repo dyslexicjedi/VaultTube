@@ -3,3 +3,4 @@ mariadb
 requests
 yt_dlp
 opencv-python-headless
+python-dotenv

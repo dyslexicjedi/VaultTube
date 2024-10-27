@@ -9,7 +9,11 @@ function processdata(data){
         else{
             txt += "<div class=\"toprow\"><img src=\"/static/imgs/check-square.svg\" onclick=\"handlewatch(\'"+data[i].id+"\');\" />";
         }
-        txt += "<h5 class=\"card-title\">"+jobj["items"][0]["snippet"]["title"]+"</h5></div>";
+        if(!jobj){
+            txt += "<h5 class=\"card-title\">"+data[i].title+"</h5></div>";
+        } else {
+            txt += "<h5 class=\"card-title\">"+jobj["items"][0]["snippet"]["title"]+"</h5></div>";
+        }
         txt += "<p><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
         var d = data[i].PublishedAt.split(' ')[0]
         txt += "</div><div class=\"card-footer\"><small class=\"text-muted\">Published: "+d+"</small></br>";

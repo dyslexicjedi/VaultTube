@@ -67,6 +67,11 @@ def checkdb(logger):
                 PRIMARY KEY (`id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
                         """)
+        #Ignore
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'IgnoreVid' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
+        if(not cur.fetchone()):
+            logger.info("IgnoreVid Table not created, creating...")
+            cur.execute("create table IgnoreVid (`id` varchar(50) COLLATE utf8mb4_bin NOT NULL,PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
         cur.close()
         con.close()
         return True
@@ -81,6 +86,9 @@ def check_db_video(id,logger):
         check = get_connection(logger)
         cur = check.cursor()
         cur.execute("Select * FROM videos where id = '%s'"%id)
+        if(cur.fetchone()):
+            test = True
+        cur.execute("Select * FROM IgnoreVid where id = '%s'"%id)
         if(cur.fetchone()):
             test = True
         cur.close()

@@ -1,5 +1,5 @@
 from flask import Blueprint,current_app,send_file,Response
-import mariadb,json,io,math
+import mariadb,json,io,math,os
 from youtube import get_dl_status,get_video,get_channel_video_list,get_cur_videoID,get_cur_videoTitle,get_playlist_info
 from backend import process_channel
 from database import checkdb,get_connection,insert_playlist,find_next_previous
@@ -357,3 +357,26 @@ def api_fnp(vid):
         return json.dumps(ret, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API FNP Fail: %s"%e)
+
+@api_bp.route("/delete/<string:vid>")
+def api_delete(vid):
+    try:
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select filepath from videos where id = %s",(vid,))
+        filepath = cur.fetchone()[0]
+        filepath = '/videos'+filepath
+        try:
+            os.remove(filepath)
+        except Exception as e:
+            current_app.logger.error("API Delete File Missing: %s"%e)
+        cur.execute("Delete from videos where id = %s",(vid,))
+        cur.execute("Delete from images where id = %s",(vid,))
+        cur.execute("Insert ignore into IgnoreVid(id) values('%s')"%vid)
+        con.commit()
+        cur.close()
+        current_app.logger.info("Deleted Video %s"%vid)
+        return "True"
+    except Exception as e:
+        current_app.logger.error("API Delete: %s"%e)
+        return "False"

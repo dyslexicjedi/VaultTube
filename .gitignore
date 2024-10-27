@@ -7,3 +7,5 @@ chromedriver
 .pytest_cache
 *.sh
 yt_cookies.txt
+*.log*
+.env

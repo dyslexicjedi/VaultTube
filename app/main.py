@@ -6,21 +6,28 @@ from backend import backend_thread
 from database import checkdb
 from scanner import start_scanner
 from downloader import start_dl_queue
+from dotenv import load_dotenv
+
+load_dotenv()
 
 #Logging
+logging.getLogger('werkzeug').setLevel(logging.WARN)
 global logger
-logger = logging.getLogger()
+logger = logging.getLogger('main')
 logger.setLevel(logging.INFO)
 formatter = logging.Formatter("%(asctime)s.%(msecs)03d %(name)-14s %(levelname)-12s msg=%(message)s","%Y-%m-%d %H:%M:%S")
 
 #StreamHandler
 streamHandler = logging.StreamHandler()
 streamHandler.setFormatter(formatter)
+streamHandler.setLevel(logging.INFO)
 logger.addHandler(streamHandler)
 
 #File
 logfile = os.path.abspath(os.curdir)+"VaultTube.log"
 timedHandler = TimedRotatingFileHandler(logfile,when="d",interval=1,backupCount=7)
+timedHandler.setFormatter(formatter)
+timedHandler.setLevel(logging.INFO)
 logger.addHandler(timedHandler)
 
 #Exception Handling
