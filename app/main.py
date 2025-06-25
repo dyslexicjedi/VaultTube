@@ -87,6 +87,10 @@ def playlist():
 def random():
     return render_template("/random.html")
 
+@app.route("/stats.html")
+def stats():
+    return render_template("/stats.html")
+
 def start_background_threads():
     #Start Threads
     be = threading.Thread(target=backend_thread,args=(logger,app))

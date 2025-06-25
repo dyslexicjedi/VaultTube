@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Stats</h3>
+
+<div class="card g-4">
+  <h5>Total Videos:</h5>
+  <p id="totalcount"></p>
+</div>
+<div class="card">
+    <h5>Breakdown:</h5>
+     <canvas id="chart" style="width:100%;max-width:700px"></canvas> 
+</div>
+<script src=" https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js "></script>
+<script src="/static/js/scripts.js"></script>
+<script>
+get_stats();
+function get_stats(){
+        $.getJSON("/api/stats",function(data){
+            drawChart(data);
+            $("#totalcount").html(data.totalcount)
+        });
+    }
+function drawChart(data) {
+  var ctx = document.getElementById('chart').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar', // Changed from pie to bar for better visualization
+    data: {
+      labels: data.countbyyoutuber.map(item => item[0]), // Use channel names
+      datasets: [{
+        label: '# of Videos',
+        data: data.countbyyoutuber.map(item => item[1]), // Use video counts
+        backgroundColor: [
+          'rgba(255, 99, 132, 0.2)',
+          'rgba(54, 162, 235, 0.2)',
+          'rgba(255, 206, 86, 0.2)'
+        ],
+        borderColor: [
+          'rgba(255, 99, 132, 1)',
+          'rgba(54, 162, 235, 1)',
+          'rgba(255, 206, 86, 1)'
+        ],
+        borderWidth: 1
+      }]
+    },
+    options: {
+      title: {
+        display: true,
+        text: 'Video Breakdown by Channel'
+      }
+    }
+  });
+}
+</script>
+
+
+
+{% endblock %}

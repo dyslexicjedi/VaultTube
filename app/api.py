@@ -380,3 +380,19 @@ def api_delete(vid):
     except Exception as e:
         current_app.logger.error("API Delete: %s"%e)
         return "False"
+    
+@api_bp.route("/stats")
+def api_stats():
+    try:
+        data = {}
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("Select Youtuber,count(*) from vaulttube.videos Group By Youtuber Having count(*) > 1 and not Youtuber = '404'")
+        data['countbyyoutuber'] = cur.fetchall()
+        cur.execute("Select count(*) from vaulttube.videos Where not youtuber = '404'")
+        data['totalcount'] = cur.fetchall()
+        cur.close()
+        return json.dumps(data, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API Stats Error: %s"%e)
+        return "False"
