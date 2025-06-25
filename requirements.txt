@@ -1,6 +1,6 @@
 Flask
 mariadb
 requests
-yt_dlp
+yt-dlp[default]
 opencv-python-headless
 python-dotenv
