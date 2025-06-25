@@ -45,6 +45,12 @@ def process_new_video(id,fpath,logger):
         r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'])
         retj = r.json()
         r.close()
+        if "error" in retj:
+            if "code" in retj['error']:
+                if retj['error']['code'] == 403:
+                    logger.error("Quota limit reached, sleeping for 1 hour.")
+                    time.sleep(3600)
+                    return
         if(retj['pageInfo']['totalResults'] > 0):
             ret["PublishedAt"] = datetime.datetime.strptime(retj["items"][0]["snippet"]["publishedAt"], '%Y-%m-%dT%H:%M:%SZ')
             ret['Youtuber'] = retj["items"][0]["snippet"]["channelTitle"]
