@@ -290,3 +290,25 @@ def insert_not_found(vid,logger):
     con.commit()
     cur.close()
     con.close()
+
+def get_oldest_video_check(logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("Select * from vaulttube.videos where source = 'youtube' order by lastScanned asc limit 1000;")
+        rv = cur.fetchall()
+        cur.close()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during oldest video check")
+
+def update_video_deleted(vid,isDeleted,logger):
+    con = get_connection(logger)
+    cur = con.cursor()
+    sql = "update videos set isDeleted=%s,lastScanned=now()  where id=%s;"
+    cur.execute(sql,(isDeleted,vid))
+    con.commit()
+    cur.close()
+    con.close()
+    logger.info("Updated video deleted status %s for vid %s",isDeleted,vid)

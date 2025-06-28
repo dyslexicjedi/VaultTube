@@ -1,5 +1,6 @@
-from flask import Blueprint,current_app,send_file,Response
+from flask import Blueprint,current_app,send_file,Response,abort
 import mariadb,json,io,math,os
+import subprocess
 from youtube import get_dl_status,get_video,get_channel_video_list,get_cur_videoID,get_cur_videoTitle,get_playlist_info
 from backend import process_channel
 from database import checkdb,get_connection,insert_playlist,find_next_previous
@@ -43,7 +44,12 @@ def imgid(id):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select image from images where id = '%s';"%(id,))
-        img = cur.fetchone()[0]
+        if cur.rowcount > 0:
+            img = cur.fetchone()[0]
+        else:
+            #Cannot find image, Send Default Image
+            cur.execute("select image from images where id = '-1';")
+            img = cur.fetchone()[0]
         cur.close()
         con.close()
         return send_file(io.BytesIO(img),mimetype='image/jpeg',as_attachment=True,download_name='%s.jpg' % id)
@@ -396,3 +402,46 @@ def api_stats():
     except Exception as e:
         current_app.logger.error("API Stats Error: %s"%e)
         return "False"
+    
+@api_bp.route('/transcode/<path:videopath>')
+def transcode(videopath):
+    # locate the source file
+    source_path = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], videopath)
+    if not os.path.isfile(source_path):
+        abort(404)
+
+    # Build FFmpeg command
+    #   -i input
+    #   -c:v libx264        use H.264 for video
+    #   -preset veryfast    speed/quality tradeoff
+    #   -movflags +frag_keyframe+empty_moov 
+    #                       allow streaming before file is fully generated
+    #   -f mp4              force MP4 container
+    #   pipe:1              write output to stdout
+    cmd = [
+        "ffmpeg",
+        "-i", source_path,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-movflags", "+frag_keyframe+empty_moov",
+        "-f", "mp4",
+        "pipe:1"
+    ]
+
+    # launch FFmpeg as a subprocess
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    # generator that yields chunks of transcoded data
+    def generate():
+        try:
+            while True:
+                chunk = process.stdout.read(8192)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            process.stdout.close()
+            process.wait()
+
+    # return streaming response
+    return Response(generate(), mimetype="video/mp4")

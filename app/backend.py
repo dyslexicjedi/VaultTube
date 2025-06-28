@@ -1,6 +1,6 @@
 import glob,time,os,requests,datetime,json,cv2,logging
 from flask import current_app
-from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found
+from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted
 
 def backend_thread(logger,app):
     logger.info("*Starting Backend")
@@ -98,3 +98,31 @@ def process_channel(fname,logger):
     except Exception as e:
         logger.error("Error in Channel: %s"%e)
         logger.error(json.dumps(r, indent=4))
+
+
+def deleted_check_thread(logger,app):
+    logger.info("*Starting Deleted Check")
+    while 1:
+        with app.app_context():
+            logger.info("Getting Video List for deletion check")
+            videos = get_oldest_video_check(logger)
+            for video in videos:
+                r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+video[0]+'&key='+os.environ['VAULTTUBE_YTKEY'])
+                retj = r.json()
+                r.close()
+                if "error" in retj:
+                    logger.info("Found error: %s",retj['error'])
+                    #Error handling
+                    pass
+                else:
+                    if(retj['pageInfo']['totalResults'] > 0):
+                        #Video is still there
+                        update_video_deleted(video[0],0,logger)
+                        logger.info("Updating video as not deleted. Video ID: %s" %video[0])
+                        pass
+                    else:
+                        #Video has been deleted
+                        update_video_deleted(video[0],1,logger)
+                        logger.info("Updating video as deleted. Video ID: %s" %video[0])
+                        pass
+        time.sleep(86400)

@@ -9,3 +9,4 @@ chromedriver
 yt_cookies.txt
 *.log*
 .env
+manual

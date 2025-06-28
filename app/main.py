@@ -2,13 +2,13 @@ import logging,os,traceback,sys, threading, queue
 from logging.handlers import TimedRotatingFileHandler
 from flask import Flask,render_template,send_file,Blueprint,request
 from api import api_bp
-from backend import backend_thread
+from backend import backend_thread,deleted_check_thread
 from database import checkdb
 from scanner import start_scanner
 from downloader import start_dl_queue
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 #Logging
 logging.getLogger('werkzeug').setLevel(logging.WARN)
@@ -92,6 +92,7 @@ def stats():
     return render_template("/stats.html")
 
 def start_background_threads():
+    logger.info("Starting Background Threads")
     #Start Threads
     be = threading.Thread(target=backend_thread,args=(logger,app))
     be.start()
@@ -99,6 +100,8 @@ def start_background_threads():
     sc.start()
     dl = threading.Thread(target=start_dl_queue,args=(logger,app))
     dl.start()
+    dc = threading.Thread(target=deleted_check_thread,args=(logger,app))
+    dc.start()
 
 def startup():
     #Check Database
@@ -107,6 +110,7 @@ def startup():
         q = queue.Queue()
         app.config['queue'] = q
         if("VAULTTUBE_DISABLEBACK" in os.environ):
+            logger.info("Found Disable Backend variable of %s",os.environ['VAULTTUBE_DISABLEBACK'])
             if(os.environ['VAULTTUBE_DISABLEBACK'] == "False"):
                 start_background_threads()
         else:
