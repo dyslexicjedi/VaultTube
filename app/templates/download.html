@@ -1,10 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="container-lg">
-    <h3>Download</h3>
+    <h3>YT Download</h3>
     <div class="input-group mb-3">
         <input id="yturl" type="text" class="form-control" placeholder="Youtube URL" aria-label="Youtube URL" aria-describedby="button-addon2">
         <button class="btn btn-outline-secondary" type="button" id="button-addon2" onclick="processdownload();">Download</button>
+      </div>
+</div>
+<hr>
+<div class="container-lg">
+    <h3>Patreon Download</h3>
+    <div class="input-group mb-3">
+        <input id="patreonurl" type="text" class="form-control" placeholder="Patreon URL" aria-label="Patreon URL" aria-describedby="button-addon2"><br/>
+        <input id="patreonchannelid" type="text" class="form-control" placeholder="Destination Channel ID" aria-label="Destination Channel ID" aria-describedby="button-addon2">
+        <button class="btn btn-outline-secondary" type="button" id="button-addon2" onclick="processPatreonDownload();">Download</button>
       </div>
 </div>
 <hr>
@@ -30,6 +39,19 @@
                 $("#spinner").hide();
             }});
         }
+    }
+    function processPatreonDownload(){
+        var patreonurl = $("#patreonurl").val();
+        if(patreonurl.includes("patreon.com/posts/")){
+            patreonurl = patreonurl.split('/')[4];
+            patreonchannelid = $("#patreonchannelid").val();
+            $.ajax({url: "/api/download/patreon/"+patreonchannelid+"/"+patreonurl, success: function(result){
+                $("#spinner").hide();
+            }});
+        }
+    }
+    function processDLQueue(){
+
     }
     async function getStatus(){
         let queueSize;
@@ -58,7 +80,7 @@
             if(queueValue.length > 0){
                 for(i in queueValue){
                     var li = document.createElement('li');
-                    li.appendChild(document.createTextNode(queueValue[i]));
+                    li.appendChild(document.createTextNode(queueValue[i].url));
                     $("#queuelist").append(li);
                 }
             }

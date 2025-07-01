@@ -39,6 +39,7 @@ def log_uncaught_exceptions(ex_cls,ex,tb):
 
 sys.excepthook = log_uncaught_exceptions
 
+
 #Flask Startup
 app = Flask(__name__)
 app.debug = True
@@ -117,7 +118,11 @@ def startup():
             start_background_threads()
         #Begin
         logger.info("Starting VaultTube")
-        app.run(host='0.0.0.0',use_reloader=False)
+        if "VAULTTUBE_PORT" in os.environ:
+            app.run(host='0.0.0.0',use_reloader=False,port=os.environ['VAULTTUBE_PORT'])
+        else:
+            app.run(host='0.0.0.0',use_reloader=False)
+        
     else:
         logger.error("DB failed to start correctly, exiting")
         exit()

@@ -5,6 +5,8 @@ from youtube import get_dl_status,get_video,get_channel_video_list,get_cur_video
 from backend import process_channel
 from database import checkdb,get_connection,insert_playlist,find_next_previous
 
+from QueueObject import QueueObject
+
 api_bp = Blueprint('api',__name__)
 
 def parse_response(cur,con):
@@ -146,10 +148,12 @@ def list_resume():
 def api_download(ytid):
     try:
         url = "https://www.youtube.com/watch?v="+ytid
-        current_app.config['queue'].put(url)
+        i = QueueObject(url,"","youtube",0,"")
+        current_app.config['queue'].put(i)
         return "True"
     except Exception as e:
         current_app.logger.error("API Download Failed: %s"%e)
+        return "False"
 
 @api_bp.route("/stats/video/count")
 def get_video_count():
@@ -269,7 +273,10 @@ def queue_status():
     data = {}
     data['dl_status'] = get_dl_status()
     data['queue_size'] = current_app.config['queue'].qsize()
-    data['queue_value'] = list(current_app.config['queue'].queue)
+    data['queue_value'] = [
+        {'url': q.url}  # Modified code to include url object in each queue item
+        for q in current_app.config['queue'].queue
+    ]
     data['cur_id'] = get_cur_videoID()
     data['cur_title'] = get_cur_videoTitle()
     return json.dumps(data, indent=4, sort_keys=True, default=str)
@@ -445,3 +452,14 @@ def transcode(videopath):
 
     # return streaming response
     return Response(generate(), mimetype="video/mp4")
+
+@api_bp.route("/download/patreon/<string:patreonchannelid>/<string:patreonurl>")
+def api_patreon_download(patreonchannelid,patreonurl):
+    try:
+        url = "https://www.patreon.com/posts/"+patreonurl
+        i = QueueObject(url,patreonchannelid,"patreon",0,"")
+        current_app.config['queue'].put(i)
+        return "True"
+    except Exception as e:
+        current_app.logger.error("API Download Failed: %s"%e)
+        return "False"
