@@ -11,14 +11,14 @@ def start_dl_queue(logger,app):
             if(q.qsize() > 0):
                 logger.info("*Found Queue Items")
                 while q.qsize() > 0:
-                    q = QueueObject(q.get())
-                    logger.info("Downloading %s"%q.url)
-                    if "youtube.com" in q.url:
+                    qo = q.get()
+                    logger.info("Downloading %s"%qo.url)
+                    if "youtube.com" in qo.url:
                         logger.info("*Found Youtube URL")
-                        single_download(q.url,logger)
-                    elif "patreon.com" in q.url:
+                        single_download(qo.url,logger)
+                    elif "patreon.com" in qo.url:
                         logger.info("*Found Patreon URL")
-                        patreon_download(q,logger)
+                        patreon_download(qo,logger)
             else:
                 logger.debug("No Items in Queue")
             time.sleep(60)
