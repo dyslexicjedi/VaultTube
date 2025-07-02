@@ -4,6 +4,7 @@ import time,os,requests,json,traceback
 from flask import current_app
 from io import StringIO
 import yt_dlp
+from QueueObject import QueueObject
 
 def dl_progress_hook(d):
     try:
@@ -85,7 +86,9 @@ def get_channel_video_list(channelid,logger):
                 logger.info("Already found: %s"%id)
             else:
                 logger.info("Processing: %s"%id)
-                current_app.config['queue'].put("https://www.youtube.com/watch?v=%s"%id)   
+                url = "https://www.youtube.com/watch?v=%s"%id
+                i = QueueObject(url,"","youtube",0,"")
+                current_app.config['queue'].put(i) 
     except Exception as e:
         logger.error("Scanning Channel Failed on ChannelID: %s"%channelid[0])
 
@@ -141,7 +144,9 @@ def get_playlist_video_list(playlistid,logger,pageToken='0'):
                     insert_pl2vid_info(playlistid[0],id,logger)
             else:
                 logger.info("Processing: %s"%id)
-                current_app.config['queue'].put("https://www.youtube.com/watch?v=%s"%id)
+                url = "https://www.youtube.com/watch?v=%s"%id
+                i = QueueObject(url,"","youtube",0,"")
+                current_app.config['queue'].put(i)
                 insert_pl2vid_info(playlistid[0],id,logger)
         if("nextPageToken" in retj):
             logger.info("Processing Next Page for %s"%playlistid)
