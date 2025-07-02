@@ -1,5 +1,5 @@
 class QueueObject:
-    def __init__(self, url, channel_id, source, dl_progress=0, dl_status=""):
+    def __init__(self, url, channel_id="", source="youtube", dl_progress=0, dl_status=""):
         self.url = url
         self.channel_id = channel_id
         self.dl_progress = dl_progress
