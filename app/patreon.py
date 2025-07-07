@@ -51,7 +51,7 @@ def patreon_download(q,logger):
 
 def patreon_screenshot(videoid,channelid,logger):
     #print(t)
-    input_video = "/Volumes/TubeArchivist/"+channelid+"/"+str(videoid)+".mp4"
+    input_video = os.environ['VAULTTUBE_VAULTDIR']+"/"+channelid+"/"+str(videoid)+".mp4"
     output_img = videoid+".jpg"
     subprocess.call(['ffmpeg', '-i', input_video, '-ss', '00:00:01.000', '-vframes', '1', output_img])
     img = open(videoid+".jpg",'rb').read()
