@@ -404,6 +404,12 @@ def api_stats():
         data['countbyyoutuber'] = cur.fetchall()
         cur.execute("Select count(*) from vaulttube.videos Where not youtuber = '404'")
         data['totalcount'] = cur.fetchall()
+        cur.execute("select videos.watched,count(*) from vaulttube.videos where not youtuber = '404' group by videos.watched")
+        data['watched'] = cur.fetchall()
+        cur.execute("select round(avg(TIME_TO_SEC(videos.length)),0) from vaulttube.videos where not youtuber = '404'")
+        data['avg_length_seconds'] = cur.fetchall()
+        cur.execute("select isDeleted,count(*) from vaulttube.videos where source='youtube' group by isDeleted ")
+        data['deleted'] = cur.fetchall()
         cur.close()
         return json.dumps(data, indent=4, sort_keys=True, default=str)
     except Exception as e:

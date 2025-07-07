@@ -3,53 +3,169 @@
 
 <h3>Stats</h3>
 
-<div class="card g-4">
+
+
+<style>
+  .chart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+  .chart-container {
+    max-height: 300px;
+    min-height: 280px;
+  }
+  .chart-text {
+    max-height: 70px;
+  }
+</style>
+<div class="chart-grid">
+<div class="card chart-text">
   <h5>Total Videos:</h5>
-  <p id="totalcount"></p>
+  <p id="totalcount">Loading...</p>
 </div>
-<div class="card">
-    <h5>Breakdown:</h5>
-     <canvas id="chart" style="width:100%;max-width:700px"></canvas> 
+<div class="card chart-text">
+  <h5>Average Video Length:</h5>
+  <p id="avglength">Loading...</p>
 </div>
+<div class="card chart-container">
+  <h5>Watched vs Unwatched Videos</h5>
+  <canvas id="watchedChart" style="width:100%"></canvas>
+</div>
+
+<div class="card chart-container">
+  <h5>Deleted vs Active Videos</h5>
+  <canvas id="deletedChart" style="width:100%"></canvas>
+</div>
+
+<div class="card chart-container" style="grid-column: span 2;">
+  <h5>Video Breakdown by Youtuber:</h5>
+  <canvas id="channelChart" style="width:100%"></canvas> 
+</div>
+
+
+</div>
+
 <script src=" https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js "></script>
 <script src="/static/js/scripts.js"></script>
 <script>
 get_stats();
 function get_stats(){
         $.getJSON("/api/stats",function(data){
-            drawChart(data);
             $("#totalcount").html(data.totalcount)
+            $("#avglength").text(secondsToHms(data.avg_length_seconds));
+            // watched: [[0, countUnwatched], [1, countWatched]]
+            const watchedCounts = unpackFlagCount(data.watched);
+            drawWatchedChart(watchedCounts[1] || 0, watchedCounts[0] || 0);
+
+            // deleted: [[0, countActive], [1, countDeleted]]
+            const deletedCounts = unpackFlagCount(data.deleted);
+            drawDeletedChart(deletedCounts[1] || 0, deletedCounts[0] || 0);
+
+            // countbyyoutuber is array of [name, count]
+            drawChannelChart(data.countbyyoutuber);
         });
     }
-function drawChart(data) {
-  var ctx = document.getElementById('chart').getContext('2d');
+// Unwrap arrays like [[value]] to value
+function unwrapSingleValue(nestedArr) {
+  if(Array.isArray(nestedArr) && nestedArr.length > 0) {
+    let val = nestedArr[0];
+    if(Array.isArray(val)) return val[0];
+    return val;
+  }
+  return null;
+}
+
+// Convert [[flag, count], ...] to {flag: count}
+function unpackFlagCount(arr) {
+  const obj = {};
+  if(Array.isArray(arr)) {
+    arr.forEach(pair => {
+      if(Array.isArray(pair) && pair.length === 2) {
+        obj[pair[0]] = pair[1];
+      }
+    });
+  }
+  return obj;
+}
+
+function drawChannelChart(data) {
+  var ctx = document.getElementById('channelChart').getContext('2d');
   new Chart(ctx, {
-    type: 'bar', // Changed from pie to bar for better visualization
+    type: 'bar',
     data: {
-      labels: data.countbyyoutuber.map(item => item[0]), // Use channel names
+      labels: data.map(item => item[0]),
       datasets: [{
         label: '# of Videos',
-        data: data.countbyyoutuber.map(item => item[1]), // Use video counts
-        backgroundColor: [
-          'rgba(255, 99, 132, 0.2)',
-          'rgba(54, 162, 235, 0.2)',
-          'rgba(255, 206, 86, 0.2)'
-        ],
-        borderColor: [
-          'rgba(255, 99, 132, 1)',
-          'rgba(54, 162, 235, 1)',
-          'rgba(255, 206, 86, 1)'
-        ],
+        data: data.map(item => item[1]),
+        backgroundColor: 'rgba(54, 162, 235, 0.7)',
+        borderColor: 'rgba(54, 162, 235, 1)',
         borderWidth: 1
       }]
     },
     options: {
-      title: {
-        display: true,
-        text: 'Video Breakdown by Channel'
-      }
+      plugins: { legend: { display: false }},
+      scales: {
+        y: { beginAtZero: true }
+      },
+      responsive: true,
+      maintainAspectRatio: false
     }
   });
+}
+
+function drawWatchedChart(watched, unwatched) {
+  var ctx = document.getElementById('watchedChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels: ['Watched', 'Unwatched'],
+      datasets: [{
+        label: 'Videos',
+        data: [watched, unwatched],
+        backgroundColor: ['rgba(75, 192, 192, 0.7)', 'rgba(255, 99, 132, 0.7)'],
+        borderColor: ['rgba(75, 192, 192, 1)', 'rgba(255, 99, 132, 1)'],
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom' }}
+    }
+  });
+}
+
+function drawDeletedChart(deleted, active) {
+  var ctx = document.getElementById('deletedChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Deleted', 'Active'],
+      datasets: [{
+        label: 'Videos',
+        data: [deleted, active],
+        backgroundColor: ['rgba(255, 159, 64, 0.7)', 'rgba(153, 102, 255, 0.7)'],
+        borderColor: ['rgba(255, 159, 64, 1)', 'rgba(153, 102, 255, 1)'],
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom' }}
+    }
+  });
+}
+
+// Convert seconds into HH:MM:SS format
+function secondsToHms(d) {
+  if(isNaN(d) || d <= 0) return "Unknown";
+  const h = Math.floor(d / 3600);
+  const m = Math.floor((d % 3600) / 60);
+  const s = Math.floor(d % 60);
+  const hDisplay = h > 0 ? h + ":" : "";
+  const mDisplay = (m < 10 ? "0" : "") + m + ":";
+  const sDisplay = (s < 10 ? "0" : "") + s;
+  return hDisplay + mDisplay + sDisplay;
 }
 </script>
 
