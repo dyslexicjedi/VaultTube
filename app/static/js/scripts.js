@@ -2,7 +2,7 @@ function processdata(data){
     $("#carddeck").empty();
     $.each(data,function(i,item){
         var jobj = jQuery.parseJSON(data[i]["json"]);
-        var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"...\"><div class=\"card-body\">";
+        var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"...\" style=\"width: 320px; height: 180px; object-fit: cover;\"><div class=\"card-body\">";
         if(data[i].watched == 0){
             txt += "<div class=\"toprow\"><img src=\"/static/imgs/square.svg\" onclick=\"handlewatch(\'"+data[i].id+"\');\" />";
         }

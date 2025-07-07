@@ -50,7 +50,7 @@
             $("#resumelabel").text("Resume");
             $.each(data,function(i,item){
                 var jobj = jQuery.parseJSON(data[i]["json"]);
-                var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"...\">";
+                var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"...\" style=\"width: 320px; height: 180px; object-fit: cover;\">";
                 //Progress Bar Math
                 var s = data[i]['length'].split(":")
                 var total = (+s[0]) * 60 * 60 + (+s[1]) * 60 + (+s[2]);
