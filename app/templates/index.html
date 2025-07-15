@@ -1,16 +1,23 @@
 {% extends "base.html" %}
 {% block content %}
 
-
 <div><h5 id="resumelabel"></h5></div>
-<div class="row row-cols-3 row-cols-md-4 g-4" id="resumedeck"></div>
+<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4" id="resumedeck"></div>
 <hr>
-<div class="row">
+<div class="row mb-3 align-items-center">
     <div class="col"><h5 id="latestlabel">Latest</h5></div>
-    <div class="col"><div class="d-flex content-switch"><div class="form-text text-1">Unwatched</div><div class="form-check form-switch form-check-inline"><input class="form-check-input form-check-inline" type="checkbox" role="switch" id="contentToggle" onclick="contentChange();"></div><div class="form-text text-2">All</div></div></div>
+    <div class="col-auto">
+        <div class="d-flex content-switch">
+            <div class="form-text text-1">Unwatched</div>
+            <div class="form-check form-switch form-check-inline mx-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="contentToggle" onclick="contentChange();" aria-label="Toggle content filter">
+            </div>
+            <div class="form-text text-2">All</div>
+        </div>
+    </div>
 </div>
-<div class="row row-cols-3 row-cols-md-4 g-4" id="carddeck"></div>
-<nav aria-label="..." class="pt-4 pb-4">
+<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4" id="carddeck"></div>
+<nav aria-label="Page navigation example" class="pt-4 pb-4 d-flex justify-content-center">
     <ul id="pagelist" class="pagination"></ul>
 </nav>
 
@@ -27,11 +34,6 @@
     $.getJSON("/api/list/resume/",function(data){
         processresume(data);
     });
-    // function get_video_count(){
-    //     $.getJSON("/api/stats/video/count",function(data){
-    //         videocount = data;
-    //     });
-    // }
     function get_videos(currentpage){
         if($("#contentToggle").prop('checked')){
             $.getJSON("/api/latest/PublishedAt/"+(currentpage*40),function(data){
@@ -48,15 +50,16 @@
     function processresume(data){
         if(data.length > 0){
             $("#resumelabel").text("Resume");
+            $("#resumedeck").empty();
             $.each(data,function(i,item){
                 var jobj = jQuery.parseJSON(data[i]["json"]);
-                var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"...\" style=\"width: 320px; height: 180px; object-fit: cover;\">";
+                var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\" role=\"button\" tabindex=\"0\" aria-label=\"Play video: "+jobj["items"][0]["snippet"]["title"]+"\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"Thumbnail\">";
                 //Progress Bar Math
                 var s = data[i]['length'].split(":")
                 var total = (+s[0]) * 60 * 60 + (+s[1]) * 60 + (+s[2]);
                 var current = parseInt(data[i]['timestamp']);
                 var p = parseInt((current / total)*100);
-                txt += "<div class=\"progress\"><div class=\"progress-bar progress-bar-striped\" role=\"progressbar\" style=\"width: "+p+"%\" aria-valuenow=\"25\" aria-valuemin=\"0\" aria-valuemax=\"100\"></div></div>";
+                txt += "<div class=\"progress\"><div class=\"progress-bar progress-bar-striped bg-info\" role=\"progressbar\" style=\"width: "+p+"%\" aria-valuenow=\""+p+"\" aria-valuemin=\"0\" aria-valuemax=\"100\"></div></div>";
                 txt +="<div class=\"card-body\"><h5 class=\"card-title\">"+jobj["items"][0]["snippet"]["title"]+"</h5>";
                 txt += "<p><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
                 txt += "</div><div class=\"card-footer\"><small class=\"text-muted\">Published: "+data[i].PublishedAt+"</small></div></div></div>";

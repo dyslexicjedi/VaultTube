@@ -45,3 +45,77 @@
   display: flex;
   flex-direction: row;
 }
+#resumelabel, #latestlabel {
+  font-weight: 700;
+  margin-bottom: 1rem;
+  color: #343a40;
+}
+#resumedeck .card, #carddeck .card {
+  box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+  border: none;
+  border-radius: 10px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+  background: #fff;
+}
+#resumedeck .card:hover, #carddeck .card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+}
+#resumedeck .card-img-top, #carddeck .card-img-top {
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+  object-fit: cover;
+  height: 180px;
+  width: 100%;
+}
+.card-body h5.card-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #212529;
+  margin-bottom: 0.3rem;
+}
+.card-body p a {
+  color: #007bff;
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+.card-body p a:hover {
+  text-decoration: underline;
+}
+.card-footer {
+  background: transparent;
+  font-size: 0.8rem;
+  color: #6c757d;
+}
+.progress {
+  height: 5px;
+  border-radius: 5px;
+  margin-bottom: 0.5rem;
+}
+.content-switch .form-text {
+  font-weight: 600;
+  color: #495057;
+  user-select: none;
+}
+.content-switch {
+  align-items: center;
+  gap: 8px;
+}
+#pagelist .page-link {
+  color: #007bff;
+  border-radius: 5px;
+  border: 1px solid #dee2e6;
+  transition: background-color 0.15s ease;
+}
+#pagelist .page-link:hover {
+  background-color: #e9f5ff;
+}
+#pagelist .active > .page-link {
+  background-color: #007bff;
+  border-color: #007bff;
+  color: white;
+}
+.content-switch .form-switch {
+  margin: 3px 0 0 15px;
+}
