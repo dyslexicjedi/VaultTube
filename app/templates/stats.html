@@ -3,47 +3,97 @@
 
 <h3>Stats</h3>
 
-
-
 <style>
   .chart-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 1.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 2rem;
   }
-  .chart-container {
-    max-height: 300px;
-    min-height: 280px;
+  .card {
+    background: #fff;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+    border: none;
+    border-radius: 10px;
+    padding: 1.25rem 1rem 1.5rem 1rem;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+  .card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 15px 30px rgba(0,0,0,0.12);
   }
   .chart-text {
-    max-height: 70px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: 100%;
+    color: #495057;
+  }
+  .chart-text h5 {
+    font-weight: 700;
+    font-size: 1.15rem;
+    margin-bottom: 0.5rem;
+    color: #212529;
+  }
+  .chart-text p {
+    font-weight: 600;
+    font-size: 1.6rem;
+    margin: 0;
+    color: #007bff;
+  }
+  .chart-container {
+    position: relative;
+    height: 300px;
+  }
+  .chart-container h5 {
+    font-weight: 700;
+    font-size: 1.05rem;
+    margin-bottom: 0.8rem;
+    color: #212529;
+  }
+  .chart-container canvas {
+    border-radius: 10px;
+    background: #f8f9fa;
+    padding: 1rem;
+    box-shadow: inset 0 0 8px rgba(0,0,0,0.03);
+  }
+    .chart-container {
+    position: relative;
+    /* increased height to match the canvas size with padding */
+    height: 350px;
+  }
+
+  .chart-container canvas {
+    border-radius: 10px;
+    background: #f8f9fa;
+    padding: 1rem;
+    box-shadow: inset 0 0 8px rgba(0,0,0,0.03);
+    height: 100% !important;
+    width: 100% !important;
+    object-fit: contain;
   }
 </style>
+
 <div class="chart-grid">
-<div class="card chart-text">
-  <h5>Total Videos:</h5>
-  <p id="totalcount">Loading...</p>
-</div>
-<div class="card chart-text">
-  <h5>Average Video Length:</h5>
-  <p id="avglength">Loading...</p>
-</div>
-<div class="card chart-container">
-  <h5>Watched vs Unwatched Videos</h5>
-  <canvas id="watchedChart" style="width:100%"></canvas>
-</div>
-
-<div class="card chart-container">
-  <h5>Deleted vs Active Videos</h5>
-  <canvas id="deletedChart" style="width:100%"></canvas>
-</div>
-
-<div class="card chart-container" style="grid-column: span 2;">
-  <h5>Video Breakdown by Youtuber:</h5>
-  <canvas id="channelChart" style="width:100%"></canvas> 
-</div>
-
-
+  <div class="card chart-text">
+    <h5>Total Videos:</h5>
+    <p id="totalcount">Loading...</p>
+  </div>
+  <div class="card chart-text">
+    <h5>Average Video Length:</h5>
+    <p id="avglength">Loading...</p>
+  </div>
+  <div class="card chart-container">
+    <h5>Watched vs Unwatched Videos</h5>
+    <canvas id="watchedChart"></canvas>
+  </div>
+  <div class="card chart-container">
+    <h5>Deleted vs Active Videos</h5>
+    <canvas id="deletedChart"></canvas>
+  </div>
+  <div class="card chart-container" style="grid-column: span 4;">
+    <h5>Video Breakdown by Youtuber:</h5>
+    <canvas id="channelChart"></canvas> 
+  </div>
 </div>
 
 <script src=" https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js "></script>
@@ -168,7 +218,5 @@ function secondsToHms(d) {
   return hDisplay + mDisplay + sDisplay;
 }
 </script>
-
-
 
 {% endblock %}

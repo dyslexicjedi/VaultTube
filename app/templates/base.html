@@ -7,38 +7,39 @@
         <!-- CSS -->
         <link href="/static/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
         <link href="/static/css/stylesheet.css" rel="stylesheet">
+        <title>VaultTube</title>
     </head>
     <body>
         <!-- Javascript -->
         <script src="/static/js/jquery.min.js"></script>
-        <div class="container-lg">
-            <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container-lg py-4">
+            <nav class="navbar navbar-expand-lg navbar-light bg-light rounded shadow-sm mb-4">
                 <div class="container-fluid">
-                  <a class="navbar-brand" href="/">VaultTube</a>
+                  <a class="navbar-brand fw-bold fs-4" href="/">VaultTube</a>
                   <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                   </button>
                   <div class="collapse navbar-collapse" id="navbarSupportedContent">
-                    <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <ul class="navbar-nav me-auto mb-2 mb-lg-0 fs-6">
                       <li class="nav-item">
-                        <a class="nav-link" href="/download.html">Download</a>
+                        <a class="nav-link px-3" href="/download.html">Download</a>
                       </li>
                       <li class="nav-item">
-                        <a class="nav-link" aria-current="page" href="/channels.html">Channels</a>
+                        <a class="nav-link px-3" href="/channels.html">Channels</a>
                       </li>
                       <li class="nav-item">
-                        <a class="nav-link" aria-current="page" href="/playlists.html">Playlists</a>
+                        <a class="nav-link px-3" href="/playlists.html">Playlists</a>
                       </li>
                       <li class="nav-item">
-                        <a class="nav-link" aria-current="page" href="/stats.html">Stats</a>
+                        <a class="nav-link px-3" href="/stats.html">Stats</a>
                       </li>
                       <li class="nav-item">
-                        <a class="nav-link" aria-current="page" href="/random.html">Random</a>
+                        <a class="nav-link px-3" href="/random.html">Random</a>
                       </li>
                     </ul>
                     <form class="d-flex" onsubmit="do_search(); return false;">
-                      <input class="form-control me-2" type="search" placeholder="Search" aria-label="Search" id="searchtext">
-                      <button class="btn btn-outline-primary" type="button" onclick="do_search();">Search</button>
+                      <input class="form-control me-2 rounded-pill border-2" type="search" placeholder="Search" aria-label="Search" id="searchtext">
+                      <button class="btn btn-outline-primary rounded-pill px-4" type="button" onclick="do_search();">Search</button>
                     </form>
                   </div>
                 </div>
@@ -46,16 +47,19 @@
         {% block content %}
         {% endblock %}
         </div>
-        <hr>
-        <div id="footer">
+        <hr class="my-4">
+        <footer id="footer" class="py-3 bg-light shadow-sm mt-auto">
             <div class="container text-center">
-                <p>VaultTube v1.0.0-alpha | <a href="https://github.com/jedihomelab/VaultTube" target="_blank"><img src="/static/imgs/github.svg" height="20" width="20" /></a> | <a href="https://hub.docker.com/repository/docker/dyslexicjedi/vaulttube/general" target="_blank"><img src="/static/imgs/package.svg" height="20" width="20" /></a></p>
+                <p class="mb-0 fst-italic text-secondary">VaultTube v1.0.0-alpha &nbsp;
+                  |&nbsp; <a href="https://github.com/jedihomelab/VaultTube" target="_blank" class="link-secondary"><img src="/static/imgs/github.svg" height="20" width="20" alt="GitHub" /></a>
+                  &nbsp;|&nbsp; <a href="https://hub.docker.com/repository/docker/dyslexicjedi/vaulttube/general" target="_blank" class="link-secondary"><img src="/static/imgs/package.svg" height="20" width="20" alt="Docker" /></a>
+                </p>
             </div>
-        </div>
+        </footer>
         <script>
           function do_search(){
             var searchterm = $("#searchtext").val();
-            window.location.href='/search.html?txt='+searchterm;
+            window.location.href='/search.html?txt='+encodeURIComponent(searchterm);
           }
         </script>
     </body>

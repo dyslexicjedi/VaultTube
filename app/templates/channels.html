@@ -1,11 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 
+<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-4 pt-4" id="carddeck"></div>
 
-<div class="row row-cols-3 row-cols-md-1 g-4 pt-4" id="carddeck"></div>
-
-<nav aria-label="..." class="pt-4 pb-4">
-    <ul id="pagelist" class="pagination"></ul>
+<nav aria-label="Channel pagination" class="pt-4 pb-4 d-flex justify-content-center">
+    <ul id="pagelist" class="pagination pagination-sm" style="gap: 0.5rem;"></ul>
 </nav>
 
 <script src="/static/js/scripts.js"></script>
@@ -24,17 +23,40 @@
         $("#carddeck").empty();
         $.each(data,function(i,item){
             var jobj = jQuery.parseJSON(data[i]["json"]);
-            var txt = "<div class=\"card\"><div class=\"card-body\"><a href=\"creator.html?creator="+data[i]['channelid']+"\">"+data[i]['channelname']+"</a></div><div><p>"+jobj['items'][0]['snippet']['description']+"</p></div>";
-            if(data[i]['subscribed']){
-                txt += "<div class=\"card-footer d-flex flex-row bd-highlight mb-3 btn-toolbar\" role=\"toolbar\"><div class=\"btn-group\"><button class=\"btn btn-secondary\" onclick=\"unsubscribe('"+data[i]['channelid']+"');\">Subscribed</button></div>";
-            }
-            else{
-                txt += "<div class=\"card-footer d-flex flex-row bd-highlight mb-3 btn-toolbar\" role=\"toolbar\"><div class=\"btn-group\"><button class=\"btn btn-primary\" onclick=\"subscribe('"+data[i]['channelid']+"');\">Subscribe</button></div>";
-            }
-            txt += "<div class=\"input-group-text\">Video Count: "+data[i]['vidcount']+"</div><div class=\"input-group-text\">Last Video Archived: "+data[i]['lastvidtime']+"</div></div>";
+            var desc = jobj['items'][0]['snippet']['description'] || '';
+            var txt = `
+                <div class="col">
+                  <div class="card h-100 shadow-sm border-0">
+                    <div class="card-body d-flex flex-column">
+                      <h5 class="card-title"><a href="creator.html?creator=${data[i]['channelid']}" class="stretched-link text-decoration-none">${data[i]['channelname']}</a></h5>
+                      <p class="card-text text-truncate-3">${desc}</p>
+                    </div>
+                    <div class="card-footer bg-transparent border-top d-flex justify-content-between align-items-center">
+                        <div>
+                          <button class="btn btn-${data[i]['subscribed'] ? 'outline-secondary' : 'primary'} btn-sm" onclick="${data[i]['subscribed'] ? `unsubscribe('${data[i]['channelid']}')` : `subscribe('${data[i]['channelid']}')`}">
+                            ${data[i]['subscribed'] ? 'Subscribed' : 'Subscribe'}
+                          </button>
+                        </div>
+                        <small class="text-muted">
+                          Videos: ${data[i]['vidcount']}<br>
+                          Last Archived: ${data[i]['lastvidtime']}
+                        </small>
+                    </div>
+                  </div>
+                </div>
+            `;
             $("#carddeck").append(txt);
         });
     }
 </script>
+
+<style>
+.text-truncate-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;  
+    overflow: hidden;
+}
+</style>
 
 {% endblock %}
