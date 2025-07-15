@@ -119,3 +119,100 @@
 .content-switch .form-switch {
   margin: 3px 0 0 15px;
 }
+
+:root.dark-mode {
+  background-color: #121212;
+  color: #e0e0e0;
+}
+:root.dark-mode body {
+  background-color: #121212;
+  color: #e0e0e0;
+}
+:root.dark-mode a {
+  color: #66aaff;
+}
+:root.dark-mode a:hover {
+  color: #99cfff;
+  text-decoration: underline;
+}
+:root.dark-mode .navbar,
+:root.dark-mode .footer,
+:root.dark-mode nav.navbar,
+:root.dark-mode footer#footer {
+  background-color: #1e1e1e !important;
+  color: #bbb !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+:root.dark-mode .navbar-brand,
+:root.dark-mode .navbar-nav .nav-link {
+  color: #e0e0e0 !important;
+}
+:root.dark-mode .navbar-nav .nav-link:hover,
+:root.dark-mode .navbar-nav .nav-link.active {
+  color: #66aaff !important;
+}
+:root.dark-mode .container-lg {
+  background-color: #121212;
+}
+:root.dark-mode .card {
+  background-color: #1e1e1e;
+  color: #ccc;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.9);
+}
+:root.dark-mode .card-body {
+  background-color: transparent;
+  color: #ccc;
+}
+:root.dark-mode .card-footer {
+  background: transparent;
+  color: #888;
+}
+:root.dark-mode .form-control {
+  background-color: #2a2a2a;
+  border-color: #444;
+  color: #eee;
+}
+:root.dark-mode .form-control::placeholder {
+  color: #bbb;
+}
+:root.dark-mode .btn-outline-primary {
+  color: #66aaff;
+  border-color: #66aaff;
+}
+:root.dark-mode .btn-outline-primary:hover {
+  background-color: #66aaff;
+  color: #121212;
+}
+:root.dark-mode .progress {
+  background-color: #272727;
+}
+:root.dark-mode .progress-bar {
+  background-color: #66aaff !important;
+}
+:root.dark-mode #pagelist .page-link {
+  color: #66aaff;
+  border-color: #444;
+  background-color: #1e1e1e;
+}
+:root.dark-mode #pagelist .page-link:hover {
+  background-color: #334466;
+}
+:root.dark-mode #pagelist .active > .page-link {
+  background-color: #66aaff;
+  border-color: #66aaff;
+  color: #121212;
+}
+
+:root.dark-mode .chart-text {
+  color: #ccc;
+}
+:root.dark-mode .chart-text h5 {
+  color: #eee;
+}
+:root.dark-mode .chart-text p {
+  color: #66aaff;
+}
+:root.dark-mode .chart-container h5 {
+  color: #eee;
+}
