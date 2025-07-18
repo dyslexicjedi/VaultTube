@@ -26,29 +26,23 @@
 </div>
 
 <hr class="my-5">
-
+<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4" id="carddeck"></div>
 <div class="container-lg pb-4">
     <h4 class="mb-3 fw-semibold d-flex align-items-center gap-2">
       Download Queue Length:
       <span id="queuelength" class="badge bg-secondary fs-5">0</span>
     </h4>
 
-    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4" id="carddeck"></div>
+    
 
     <ul id="queuelist" class="list-group shadow-sm mb-4" style="max-height: 220px; overflow-y: auto; border-radius: 0.375rem;"></ul>
     
-    <div id="spinner" class="lds-ring mx-auto d-block my-4" style="display:none;"><div></div><div></div><div></div><div></div></div>
+
 </div>
 
 <div id="dlpush" style="height: 150px;"></div>
 
 <style>
-    #spinner {
-        display: none;
-        width: 48px;
-        height: 48px;
-        position: relative;
-    }
     .lds-ring div {
         box-sizing: border-box;
         display: block;
@@ -78,6 +72,10 @@
             transform: rotate(360deg);
         }
     }
+    .progress, .progress-bar {
+        height: 2rem !important;
+        font-size: 1.2rem;
+    }
 </style>
 
 <script>
@@ -87,16 +85,12 @@
     function processdownload(){
         var yturl = $("#yturl").val().trim();
         if(yturl.length == 11){
-            $("#spinner").show();
             $.ajax({url: "/api/download/single/"+yturl, success: function(result){
-                $("#spinner").hide();
             }});
         }
         else if(yturl.includes("watch?v=")){
             id = yturl.split('=')[1]
-            $("#spinner").show();
             $.ajax({url: "/api/download/single/"+id, success: function(result){
-                $("#spinner").hide();
             }});
         }
         else {
@@ -112,44 +106,57 @@
                 alert("Please enter a Destination Channel ID.");
                 return;
             }
-            $("#spinner").show();
             $.ajax({url: "/api/download/patreon/"+patreonchannelid+"/"+patreonurl, success: function(result){
-                $("#spinner").hide();
             }});
         } else {
             alert("Please enter a valid Patreon Post URL.");
         }
     }
 
-    async function getStatus(){
-        try{
+    async function getStatus() {
+        try {
             $("#queuelist").empty();
             const q = await fetch("/api/status/queue/");
             const qdata = await q.json();
             const queueSize = qdata['queue_size'];
-            const downloadProgress = qdata['dl_status'];
             const queueValue = qdata['queue_value'];
-            const curid = qdata['cur_id'];
-            const curtitle = qdata['cur_title'];
-
+            const activeDownloads = qdata['active'] || [];
             $("#queuelength").text(queueSize);
 
-            if(isNumeric(downloadProgress)){
+            // Show each active download as a card with progress bar
                 $("#carddeck").empty();
-            } else {
-                var dp = /^.* (\d+).*$/g;
-                var idp = dp.exec(downloadProgress);
-                $("#downloadProgressBar").empty();
-                var txt = `<div class="card shadow-sm">
+            if (activeDownloads.length > 0) {
+                activeDownloads.forEach((dl) => {
+                    let pct = 0;
+                    if (dl.progress) {
+                        let cleaned = dl.progress.replace(/\x1b\[[0-9;]*m/g, "");
+                        let match = dl.progress.match(/([0-9\.]+)%/);  // <-- updated regex
+                        if (match) {
+                            pct = parseFloat(match[1]);
+                            pctText = match[1] + "%";
+                        }
+                    }
+                    $("#carddeck").append(`
+                        <div class="card shadow-sm mb-3">
                               <div class="card-body">
-                                <h5 class="card-title">${curtitle} (${curid})</h5>
+                                <h5 class="card-title">${dl.title || ''} (${dl.id})</h5>
+                                <p class="mb-1"><span class="badge bg-info">${dl.type || ''}</span></p>
                                 <div class="progress">
-                                  <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${idp[1]}%" aria-valuenow="${idp[1]}" aria-valuemin="0" aria-valuemax="100">${idp[1]}%</div>
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                        role="progressbar"
+                                        style="width: ${pct}%"
+                                        aria-valuenow="${pct}"
+                                        aria-valuemin="0"
+                                        aria-valuemax="100"
+                                    >${pct+"%" || '0%'}</div>
                                 </div>
-                              </div>
-                            </div>`;
-                $("#carddeck").html(txt);
+                            </div>
+                        </div>
+                    `);
+                });
             }
+
+            // Show the rest of the waiting queue as a simple list
             if(queueValue.length > 0){
                 for(let i in queueValue){
                     let li = document.createElement('li');

@@ -10,19 +10,24 @@ from flask import current_app
 
 from QueueObject import QueueObject
 
+dl_status_map = {}  # videoID -> dict(progress, title, channel, type, etc.)
+
 def dl_progress_hook(d):
     try:
-        global dl_progress
-        global videoTitle
-        global videoID
-        global channel_id
+        video_id = d.get('info_dict', {}).get('id', None)
+        if not video_id:
+            # fallback to global, if needed
+            video_id = globals().get('videoID', '')
+        status_obj = dl_status_map.setdefault(video_id, {})
         if d["status"] == "downloading":
-            dl_progress = d['_percent_str']
-        if d["status"] == "finished":
-            pass
-        # updated_dl_progress(d.get('id'),d['_percent_str'],d["status"])
+            status_obj['progress'] = d['_percent_str']
+            status_obj['title'] = d.get('info_dict', {}).get('title', "")
+            status_obj['type'] = 'patreon'
+        elif d["status"] == "finished":
+            status_obj['progress'] = "100%"
+        # Optionally add more info (like ETA, speed) here
     except Exception as e:
-        current_app.logger.error("dl_progress_hook Failed: %s"%e)
+        current_app.logger.error("dl_progress_hook Failed: %s" % e)
 
 def patreon_download(q,logger):
     logger.debug("Starting Patreon Download: %s"%q.url)
@@ -42,6 +47,7 @@ def patreon_download(q,logger):
         videoid = data['id']
         title = data['title']
         PublishedAt = datetime.datetime.strptime(data['upload_date'], '%Y%m%d')
+        dl_status_map[videoid] = {'progress': '0%', 'title': title, 'type': 'patreon'}
         ydl.download(q.url)
     patreon_screenshot(videoid,q.channel_id,logger)
     patreon_db_info(videoid,q.channel_id,PublishedAt,title,logger)

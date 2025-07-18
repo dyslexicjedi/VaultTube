@@ -1,7 +1,8 @@
 from flask import Blueprint,current_app,send_file,Response,abort
 import mariadb,json,io,math,os
 import subprocess
-from youtube import get_dl_status,get_video,get_channel_video_list,get_cur_videoID,get_cur_videoTitle,get_playlist_info
+from youtube import get_dl_status,get_video,get_channel_video_list,get_cur_videoID,get_cur_videoTitle,get_playlist_info,dl_status_map as yt_dl_map
+from patreon import dl_status_map as patreon_dl_map   
 from backend import process_channel
 from database import checkdb,get_connection,insert_playlist,find_next_previous
 
@@ -274,11 +275,20 @@ def queue_status():
     data['dl_status'] = get_dl_status()
     data['queue_size'] = current_app.config['queue'].qsize()
     data['queue_value'] = [
-        {'url': q.url}  # Modified code to include url object in each queue item
+        {'url': q.url}
         for q in current_app.config['queue'].queue
     ]
     data['cur_id'] = get_cur_videoID()
     data['cur_title'] = get_cur_videoTitle()
+
+    # Add active or all current download statuses for youtube and optionally patreon
+    yt_active_ids = list(yt_dl_map.keys())
+    data['active'] = [
+        {'id': k, **yt_dl_map[k]} for k in yt_active_ids
+    ]
+    patreon_active_ids = list(patreon_dl_map.keys())
+    data['active'].extend([{'id': k, **patreon_dl_map[k]} for k in patreon_active_ids])
+
     return json.dumps(data, indent=4, sort_keys=True, default=str)
 
 @api_bp.route("/subscribe/<string:type>/<string:value>")
@@ -422,15 +432,6 @@ def transcode(videopath):
     source_path = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], videopath)
     if not os.path.isfile(source_path):
         abort(404)
-
-    # Build FFmpeg command
-    #   -i input
-    #   -c:v libx264        use H.264 for video
-    #   -preset veryfast    speed/quality tradeoff
-    #   -movflags +frag_keyframe+empty_moov 
-    #                       allow streaming before file is fully generated
-    #   -f mp4              force MP4 container
-    #   pipe:1              write output to stdout
     cmd = [
         "ffmpeg",
         "-i", source_path,
