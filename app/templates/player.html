@@ -77,5 +77,25 @@
             }});
         }
     }
+    // Keyboard arrow left/right => seek +/- 15s
+    document.addEventListener('keydown', function(event) {
+    if (event.target.tagName.toLowerCase() !== 'input' && event.target.tagName.toLowerCase() !== 'textarea') {
+        if (event.key === "ArrowRight") {
+            vPlayer.currentTime(vPlayer.currentTime() + 15);
+        }
+        if (event.key === "ArrowLeft") {
+            vPlayer.currentTime(Math.max(0, vPlayer.currentTime() - 15));
+        }
+        if (event.key === " " || event.key === "Spacebar") { // Spacebar for older browsers
+            event.preventDefault(); // Prevent page from scrolling
+            if (vPlayer.paused()) {
+                vPlayer.play();
+            } else {
+                vPlayer.pause();
+            }
+        }
+    }
+    });
+
 </script>
 {% endblock %}
