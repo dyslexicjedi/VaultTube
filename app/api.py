@@ -482,6 +482,7 @@ def api_upload_video():
         title = request.form.get('title', '').strip()
         channel_id = request.form.get('channelId', '').strip()
         published_at_str = request.form.get('publishedAt', '').strip()
+        source = request.form.get('source', 'youtube').strip().lower()
 
         if not video_file or not video_id or not title or not channel_id or not published_at_str:
             return "Missing required fields", 400
@@ -501,7 +502,7 @@ def api_upload_video():
 
         db_path = os.path.join(channel_id, f"{video_id}.mp4")
         # Save metadata & insert into DB via backend helper
-        save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path)
+        save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source)
 
         return "Upload successful", 200
     except Exception as e:

@@ -127,7 +127,7 @@ def deleted_check_thread(logger,app):
                         pass
         time.sleep(86400)
 
-def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path):
+def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source):
     """
     Save metadata about uploaded video to database. 
     """
@@ -175,7 +175,7 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         ret['channelId'] = channel_id
         ret['length'] = length_td
 
-        save_video(video_id,ret,thumbnail_img,current_app.logger)
+        save_video(video_id,ret,thumbnail_img,current_app.logger,source)
     except Exception as e:
         # Raise exception so api can log & handle
         current_app.logger.error("Error in Save_Uploaded_Video_Metadata: %s"%e)

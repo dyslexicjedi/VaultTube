@@ -97,13 +97,13 @@ def check_db_video(id,logger):
     except Exception as e:
         logger.error("Error during check_db_video: %s"%e)
 
-def save_video(id,ret,img,logger):
+def save_video(id,ret,img,logger,source='youtube'):
     try:
         con = get_connection(logger)
         cur = con.cursor()
         #Save Video Data
-        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length) values(%s,%s,%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length']))
+        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length,source) values(%s,%s,%s,%s,%s,%s,%s,%s);"
+        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))

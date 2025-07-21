@@ -21,6 +21,13 @@
             <input id="channelId" name="channelId" type="text" class="form-control" placeholder="Enter Channel ID" required>
         </div>
         <div class="mb-3">
+            <label for="source" class="form-label">Source</label>
+            <select id="source" name="source" class="form-select" required>
+                <option value="youtube" selected>YouTube</option>
+                <option value="patreon">Patreon</option>
+            </select>
+        </div>
+        <div class="mb-3">
             <label for="publishedAt" class="form-label">Published Date</label>
             <input id="publishedAt" name="publishedAt" type="date" class="form-control" required>
         </div>
