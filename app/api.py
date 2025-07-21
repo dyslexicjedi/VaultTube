@@ -334,6 +334,7 @@ def api_unsubscribe(type,value):
             cur.execute("Update playlists set subscribed = 0 where playlistId = %s;",(value,))
         elif(type == "channel"):
             current_app.logger.debug('Called Channel Unsubscribe: '+value)
+            cur.execute("Update channels set subscribed = 0 where channelid = %s;",(value,))
         con.commit()
         cur.close()
         con.close()
