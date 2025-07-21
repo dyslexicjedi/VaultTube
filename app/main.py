@@ -43,6 +43,7 @@ sys.excepthook = log_uncaught_exceptions
 #Flask Startup
 app = Flask(__name__)
 app.debug = True
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024  # 10GB max upload size
 
 #Video static
 videos = Blueprint('videos',__name__,static_url_path='/videos',static_folder=os.environ['VAULTTUBE_VAULTDIR'])
