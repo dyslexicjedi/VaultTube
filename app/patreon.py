@@ -51,6 +51,8 @@ def patreon_download(q,logger):
         ydl.download(q.url)
     patreon_screenshot(videoid,q.channel_id,logger)
     patreon_db_info(videoid,q.channel_id,PublishedAt,title,logger)
+    if videoid in dl_status_map:
+        del dl_status_map[videoid]
     #dl_progress = 0
     cookies.close()
     return "True"
