@@ -191,7 +191,8 @@ def api_creator(creator,page):
         current_app.logger.debug("Called Creator %s %s"%(creator,page))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where channelId = '%s' order by PublishedAt desc limit 40 offset %s;"%(creator,page))
+        offset = int(page) * 40  # fixed offset
+        cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where channelId = %s order by PublishedAt desc limit 40 offset %s;", (creator, offset))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
@@ -333,7 +334,6 @@ def api_unsubscribe(type,value):
             cur.execute("Update playlists set subscribed = 0 where playlistId = %s;",(value,))
         elif(type == "channel"):
             current_app.logger.debug('Called Channel Unsubscribe: '+value)
-            cur.execute("Update channels set subscribed = 0 where channelid = %s;",(value,))
         con.commit()
         cur.close()
         con.close()
@@ -508,3 +508,18 @@ def api_upload_video():
     except Exception as e:
         current_app.logger.error(f"API Upload Video Failed: {e}")
         return "Internal server error", 500
+
+@api_bp.route('/creator/count/<string:creator>')
+def api_creator_count(creator):
+    try:
+        current_app.logger.debug("Called Creator Count %s"%(creator,))
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select count(*) from videos where channelId = %s;", (creator,))
+        count = cur.fetchone()[0]
+        cur.close()
+        con.close()
+        return jsonify({'count': count})
+    except Exception as e:
+        current_app.logger.error("API Creator Count Failed: %s"%e)
+        return jsonify({'count': 0})

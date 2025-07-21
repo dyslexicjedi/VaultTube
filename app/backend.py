@@ -169,7 +169,7 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         # Insert video record
         ret = {}
         ret["Youtuber"] = ""
-        ret["Json"] = json.dumps(t)
+        ret["Json"] = t
         ret["Filepath"] = db_path
         ret['PublishedAt'] = published_at.isoformat()
         ret['channelId'] = channel_id

@@ -18,18 +18,25 @@ update(1);
 subscribe_status(creator);
 function update(id){
     currentId = id;
-    get_videos(id-1,creator);
-    pagination(id);
+    get_videos(id-1, creator).then(() => {
+        get_creator_count(creator).then(totalCount => {
+            const totalPages = Math.ceil(totalCount / 40);
+            pagination(id, totalPages);
+        });
+    });
 }
 $("#creatorlabel").text(creator);
-function get_videos(currentpage,creator){
-        $.getJSON("/api/creator/"+creator+"/"+(currentpage*40),function(data){
-            $("#creatorlabel").text(data[0]['youtuber']);
-            processdata(data);
-        });
-    }
+function get_videos(currentpage, creator){
+    return $.getJSON("/api/creator/" + creator + "/" + currentpage, function(data){
+        $("#creatorlabel").text(data[0]['youtuber']);
+        processdata(data);
+    });
+}
 function contentChange(){
     update(currentId);
+}
+function get_creator_count(creator) {
+    return $.getJSON('/api/creator/count/' + creator).then(data => data.count);
 }
 </script>
 {% endblock %}

@@ -22,46 +22,49 @@ function processdata(data){
         $("#carddeck").append(txt);
     });
 }
-function pagination(id){
+function pagination(current, total) {
     $("#pagelist").empty();
     var txt = "";
-    if(id == 1){
-        txt += "<li class=\"page-item disabled\"><a class=\"page-link\" href=\"#\">Previous</a></li>";
+
+    function pageItem(page, label = page, active = false, disabled = false) {
+        return `<li class="page-item${active ? ' active' : ''}${disabled ? ' disabled' : ''}">
+            <a class="page-link" href="#" onclick="update(${page});return false;">${label}</a>
+        </li>`;
     }
-    else{
-        txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update("+(id-1)+");\">Previous</a></li>";
+
+    // Previous
+    txt += current == 1 ? pageItem(current - 1, "Previous", false, true) : pageItem(current - 1, "Previous");
+
+    // Calculate start and end page for display (max 5 pages)
+    var startPage = Math.max(1, current - 2);
+    var endPage = Math.min(total, current + 2);
+
+    // Adjust if less than 5 pages visible
+    if (endPage - startPage < 4) {
+        if (startPage == 1) {
+            endPage = Math.min(total, startPage + 4);
+        } else if (endPage == total) {
+            startPage = Math.max(1, endPage - 4);
+        }
     }
-    if(id < 4){
-        if(id == 1){
-            txt += "<li class=\"page-item active\"><a class=\"page-link\" href=\"#\" onclick=\"update(1);\">1</a></li>";
-        }
-        else{
-            txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update(1);\">1</a></li>";
-        }
-        if(id == 2){
-            txt += "<li class=\"page-item active\"><a class=\"page-link\" href=\"#\" onclick=\"update(2);\">2</a></li>";
-        }
-        else{
-            txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update(2);\">2</a></li>";
-        }
-        if(id == 3){
-            txt += "<li class=\"page-item active\"><a class=\"page-link\" href=\"#\" onclick=\"update(3);\">3</a></li>";
-        }
-        else{
-            txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update(3);\">3</a></li>";
-        }
-        txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update(4);\">4</a></li>";
-        txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update(5);\">5</a></li>";
-        txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update("+(id+1)+");\">Next</a></li>";
+
+    if (startPage > 1) {
+        txt += pageItem(1);
+        if (startPage > 2) txt += '<li class="page-item disabled"><a class="page-link">...</a></li>';
     }
-    else{
-        txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update("+(id-2)+");\">"+(id-2)+"</a></li>";
-        txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update("+(id-1)+");\">"+(id-1)+"</a></li>";
-        txt += "<li class=\"page-item active\"><a class=\"page-link\" href=\"#\" onclick=\"update("+id+");\">"+id+"</a></li>";
-        txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update("+(id+1)+");\">"+(id+1)+"</a></li>";
-        txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update("+(id+2)+");\">"+(id+2)+"</a></li>";
-        txt += "<li class=\"page-item\"><a class=\"page-link\" href=\"#\" onclick=\"update("+(id+1)+");\">Next</a></li>";
+
+    for (var i = startPage; i <= endPage; i++) {
+        txt += pageItem(i, i, i === current);
     }
+
+    if (endPage < total) {
+        if (endPage < total - 1) txt += '<li class="page-item disabled"><a class="page-link">...</a></li>';
+        txt += pageItem(total);
+    }
+
+    // Next
+    txt += current == total ? pageItem(current + 1, "Next", false, true) : pageItem(current + 1, "Next");
+
     $("#pagelist").append(txt);
 }
 function playvid(id){
