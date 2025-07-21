@@ -92,6 +92,10 @@ def random():
 def stats():
     return render_template("/stats.html")
 
+@app.route("/upload.html")
+def upload():
+    return render_template("/upload.html")
+
 def start_background_threads():
     logger.info("Starting Background Threads")
     #Start Threads

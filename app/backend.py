@@ -126,3 +126,57 @@ def deleted_check_thread(logger,app):
                         logger.info("Updating video as deleted. Video ID: %s" %video[0])
                         pass
         time.sleep(86400)
+
+def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path):
+    """
+    Save metadata about uploaded video to database. 
+    """
+    try:
+        # For length, try to read video length as in get_video
+        try:
+            import cv2
+            data = cv2.VideoCapture(file_path)
+            frames = data.get(cv2.CAP_PROP_FRAME_COUNT)
+            fps = data.get(cv2.CAP_PROP_FPS)
+            length_seconds = round(frames / fps) if fps > 0 else 0
+            length_td = datetime.timedelta(seconds=length_seconds)
+        except Exception:
+            length_td = datetime.timedelta(seconds=0)
+
+
+        # Extract frame at 1 second (or nearest frame)
+        thumbnail_img = None
+        try:
+            if fps > 0 and frames > fps:
+                data.set(cv2.CAP_PROP_POS_FRAMES, int(fps))  # frame at 1s
+                ret, frame = data.read()
+                if ret:
+                    # Encode frame as JPEG bytes
+                    ret_jpg, buf = cv2.imencode('.jpg', frame)
+                    if ret_jpg:
+                        thumbnail_img = buf.tobytes()
+                data.release()
+        except Exception:
+            current_app.logger.error("Unable to Extract Frame")
+
+        t = json.loads(open('template','r').read())
+        t['items'][0]['snippet']['title'] = title
+        t['items'][0]['snippet']['channelId'] = channel_id
+        t['items'][0]['snippet']['channelTitle'] = ""
+        t['items'][0]['snippet']['publishedAt'] = published_at.isoformat()
+        t['items'][0]['id'] = video_id
+        
+        # Insert video record
+        ret = {}
+        ret["Youtuber"] = ""
+        ret["Json"] = json.dumps(t)
+        ret["Filepath"] = db_path
+        ret['PublishedAt'] = published_at.isoformat()
+        ret['channelID'] = channel_id
+        ret['length'] = length_td
+
+        save_video(video_id,ret,thumbnail_img,current_app.logger)
+    except Exception as e:
+        # Raise exception so api can log & handle
+        current_app.logger.error("Error in Save_Uploaded_Video_Metadata: %s"%e)
+        raise e

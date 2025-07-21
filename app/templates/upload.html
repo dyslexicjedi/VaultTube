@@ -1,0 +1,55 @@
+<!-- app/templates/upload.html -->
+{% extends "base.html" %}
+{% block content %}
+<div class="container-lg py-4">
+    <h2 class="mb-4 text-primary fw-bold">Upload Video</h2>
+    <form id="uploadForm" enctype="multipart/form-data" method="post" action="/api/upload/video">
+        <div class="mb-3">
+            <label for="videoFile" class="form-label">Select Video File</label>
+            <input id="videoFile" name="videoFile" type="file" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label for="videoId" class="form-label">Video ID</label>
+            <input id="videoId" name="videoId" type="text" class="form-control" placeholder="Enter Video ID" required>
+        </div>
+        <div class="mb-3">
+            <label for="title" class="form-label">Video Title</label>
+            <input id="title" name="title" type="text" class="form-control" placeholder="Enter Video Title" required>
+        </div>
+        <div class="mb-3">
+            <label for="channelId" class="form-label">Channel ID</label>
+            <input id="channelId" name="channelId" type="text" class="form-control" placeholder="Enter Channel ID" required>
+        </div>
+        <div class="mb-3">
+            <label for="publishedAt" class="form-label">Published Date</label>
+            <input id="publishedAt" name="publishedAt" type="date" class="form-control" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Upload</button>
+    </form>
+    <div id="uploadStatus" class="mt-3"></div>
+</div>
+
+<script>
+$(function() {
+    $('#uploadForm').on('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData(this);
+        $('#uploadStatus').html('Uploading...');
+        $.ajax({
+            url: '/api/upload/video',
+            type: 'POST',
+            data: formData,
+            contentType: false,
+            processData: false,
+            success: function(data) {
+                $('#uploadStatus').html('<div class="alert alert-success">Upload successful!</div>');
+                $('#uploadForm')[0].reset();
+            },
+            error: function(xhr, status, error) {
+                $('#uploadStatus').html('<div class="alert alert-danger">Upload failed: ' + xhr.responseText + '</div>');
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

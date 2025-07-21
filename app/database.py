@@ -102,7 +102,7 @@ def save_video(id,ret,img,logger):
         con = get_connection(logger)
         cur = con.cursor()
         #Save Video Data
-        sql = "Insert into videos(id,youtuber,json,filepath,PublishedAt,channelId,length) values(%s,%s,%s,%s,%s,%s,%s);"
+        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length) values(%s,%s,%s,%s,%s,%s,%s);"
         cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length']))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"

@@ -3,8 +3,11 @@ import mariadb,json,io,math,os
 import subprocess
 from youtube import get_dl_status,get_video,get_channel_video_list,get_cur_videoID,get_cur_videoTitle,get_playlist_info,dl_status_map as yt_dl_map
 from patreon import dl_status_map as patreon_dl_map   
-from backend import process_channel
+from backend import process_channel,save_uploaded_video_metadata
 from database import checkdb,get_connection,insert_playlist,find_next_previous
+from flask import request,jsonify
+import shutil
+import datetime
 
 from QueueObject import QueueObject
 
@@ -470,3 +473,37 @@ def api_patreon_download(patreonchannelid,patreonurl):
     except Exception as e:
         current_app.logger.error("API Download Failed: %s"%e)
         return "False"
+
+@api_bp.route("/upload/video", methods=["POST"])
+def api_upload_video():
+    try:
+        video_file = request.files.get('videoFile')
+        video_id = request.form.get('videoId', '').strip()
+        title = request.form.get('title', '').strip()
+        channel_id = request.form.get('channelId', '').strip()
+        published_at_str = request.form.get('publishedAt', '').strip()
+
+        if not video_file or not video_id or not title or not channel_id or not published_at_str:
+            return "Missing required fields", 400
+
+        try:
+            published_at = datetime.datetime.strptime(published_at_str, "%Y-%m-%d")
+        except Exception:
+            return "Invalid published date format", 400
+
+        # Save to vault directory
+        vault_dir = os.environ['VAULTTUBE_VAULTDIR']
+        file_path = os.path.join(vault_dir,channel_id, f"{video_id}.mp4")
+
+        # Ensure no overwrite, skip if exists
+        if not os.path.exists(file_path):
+            video_file.save(file_path)
+
+        db_path = os.path.join(channel_id, f"{video_id}.mp4")
+        # Save metadata & insert into DB via backend helper
+        save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path)
+
+        return "Upload successful", 200
+    except Exception as e:
+        current_app.logger.error(f"API Upload Video Failed: {e}")
+        return "Internal server error", 500
