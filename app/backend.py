@@ -172,7 +172,7 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         ret["Json"] = json.dumps(t)
         ret["Filepath"] = db_path
         ret['PublishedAt'] = published_at.isoformat()
-        ret['channelID'] = channel_id
+        ret['channelId'] = channel_id
         ret['length'] = length_td
 
         save_video(video_id,ret,thumbnail_img,current_app.logger)
