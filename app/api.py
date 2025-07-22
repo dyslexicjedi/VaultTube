@@ -204,14 +204,15 @@ def get_unwatched(opt,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         if(opt == "PublishedAt"):
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where watched = 0 order by PublishedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt desc limit 40 offset %s;"%(page,))
         elif(opt == "AddedAt"):
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where watched = 0 order by AddedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.AddedAt desc limit 40 offset %s;"%(page,))
         else:
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where watched = 0 order by PublishedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt desc limit 40 offset %s;"%(page,))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Unwatched Failed: %s"%e)
+        return "[]"
 
 @api_bp.route('/search/<string:searchtxt>/<string:page>')
 def api_search(searchtxt,page):
