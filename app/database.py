@@ -64,6 +64,9 @@ def checkdb(logger):
                 `watched` int(11) DEFAULT 0,
                 `timestamp` varchar(50) DEFAULT 0,
                 `length` varchar(50) DEFAULT 0,
+                `lastScanned` datetime DEFAULT CURRENT_TIMESTAMP,
+                `isDeleted` int(11) DEFAULT 0,
+                `source` varchar(100) DEFAULT 'youtube',
                 PRIMARY KEY (`id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
                         """)
