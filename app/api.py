@@ -524,3 +524,17 @@ def api_creator_count(creator):
     except Exception as e:
         current_app.logger.error("API Creator Count Failed: %s"%e)
         return jsonify({'count': 0})
+
+@api_bp.route("/stats/video/unwatched")
+def get_video_unwatched_count():
+    try:
+        current_app.logger.debug('Called Get_Video_Unwatched_Count')
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select count(*) from videos where watched = 0;")
+        count = cur.fetchone()[0]
+        cur.close()
+        con.close()
+        return str(count)
+    except Exception as e:
+        current_app.logger.error("API Image Failed: %s"%e)

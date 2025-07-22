@@ -28,25 +28,33 @@
     var currentId = 1;
     function update(id){
         currentId = id;
-        get_videos(id-1);
-        pagination(id);
+        let totalCount = 0;
+        if($("#contentToggle").prop('checked')){
+            // All videos count
+            $.get("/api/stats/video/count",function(data){
+                totalCount = parseInt(data);
+                let totalPages = Math.ceil(totalCount / 40);
+                pagination(id, totalPages);
+            });
+            $.getJSON("/api/latest/PublishedAt/"+((id-1)*40),function(data){
+                processdata(data);
+            });
+        } else {
+            // Unwatched videos count
+            $.get("/api/stats/video/unwatched",function(data){
+                totalCount = parseInt(data);
+                let totalPages = Math.ceil(totalCount / 40);
+                pagination(id, totalPages);
+            });
+            $.getJSON("/api/unwatched/PublishedAt/"+((id-1)*40),function(data){
+                processdata(data);
+            });
+        }
+
     }
     $.getJSON("/api/list/resume/",function(data){
         processresume(data);
     });
-    function get_videos(currentpage){
-        if($("#contentToggle").prop('checked')){
-            $.getJSON("/api/latest/PublishedAt/"+(currentpage*40),function(data){
-                processdata(data);
-            });
-
-        }
-        else{
-            $.getJSON("/api/unwatched/PublishedAt/"+(currentpage*40),function(data){
-                processdata(data);
-            });
-        }
-    }
     function processresume(data){
         if(data.length > 0){
             $("#resumelabel").text("Resume");
