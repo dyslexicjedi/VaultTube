@@ -192,7 +192,7 @@ def api_creator(creator,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         offset = int(page) * 40  # fixed offset
-        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where channelId = %s order by PublishedAt desc limit 40 offset %s;", (creator, offset))
+        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.channelId = %s order by v.PublishedAt desc limit 40 offset %s;", (creator, offset))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
