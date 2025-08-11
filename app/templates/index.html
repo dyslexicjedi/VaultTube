@@ -61,14 +61,14 @@
             $("#resumedeck").empty();
             $.each(data,function(i,item){
                 var jobj = jQuery.parseJSON(data[i]["json"]);
-                var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\" role=\"button\" tabindex=\"0\" aria-label=\"Play video: "+jobj["items"][0]["snippet"]["title"]+"\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"Thumbnail\">";
+                var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\" role=\"button\" tabindex=\"0\" aria-label=\"Play video: "+data[i].title+"\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"Thumbnail\">";
                 //Progress Bar Math
                 var s = data[i]['length'].split(":")
                 var total = (+s[0]) * 60 * 60 + (+s[1]) * 60 + (+s[2]);
                 var current = parseInt(data[i]['timestamp']);
                 var p = parseInt((current / total)*100);
                 txt += "<div class=\"progress\"><div class=\"progress-bar progress-bar-striped bg-info\" role=\"progressbar\" style=\"width: "+p+"%\" aria-valuenow=\""+p+"\" aria-valuemin=\"0\" aria-valuemax=\"100\"></div></div>";
-                txt +="<div class=\"card-body\"><h5 class=\"card-title\">"+jobj["items"][0]["snippet"]["title"]+"</h5>";
+                txt +="<div class=\"card-body\"><h5 class=\"card-title\">"+data[i].title+"</h5>";
                 txt += "<p><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
                 txt += "</div><div class=\"card-footer\"><small class=\"text-muted\">Published: "+data[i].PublishedAt+"</small></div></div></div>";
                 $("#resumedeck").append(txt);

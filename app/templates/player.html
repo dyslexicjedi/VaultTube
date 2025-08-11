@@ -28,7 +28,7 @@
         vPlayer.src([{type: "video/webm",src: data[0]["filepath"]}]);
         vPlayer.fluid(true);
         //Adding Info to Player
-        $("#title").text(jobj['items'][0]["snippet"]['title']);
+        $("#title").text(data[0]['title']);
         $("#desc").html(jobj['items'][0]["snippet"]['description'].replace('\n','<br>').replace('\r','<br>'));
         $("#creator").html("<a href='/creator.html?creator="+data[0]['channelId']+"'>"+data[0]['youtuber']+"</a>");
         //Set Timestamp if non-0

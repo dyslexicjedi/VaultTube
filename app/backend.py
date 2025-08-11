@@ -55,6 +55,7 @@ def process_new_video(id,fpath,logger):
             ret["PublishedAt"] = datetime.datetime.strptime(retj["items"][0]["snippet"]["publishedAt"], '%Y-%m-%dT%H:%M:%SZ')
             ret['Youtuber'] = retj["items"][0]["snippet"]["channelTitle"]
             ret['channelId'] = retj["items"][0]["snippet"]["channelId"]
+            ret['title'] = retj["items"][0]["snippet"]["title"]
             ret['Json'] = retj
             ret['Filepath'] = fpath
             #Get Length
@@ -174,6 +175,7 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         ret['PublishedAt'] = published_at.isoformat()
         ret['channelId'] = channel_id
         ret['length'] = length_td
+        ret['title'] = title
 
         save_video(video_id,ret,thumbnail_img,current_app.logger,source)
     except Exception as e:

@@ -34,11 +34,11 @@ def latest(opt,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         if(opt == "PublishedAt"):
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by PublishedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by PublishedAt desc limit 40 offset %s;"%(page,))
         elif(opt == "AddedAt"):
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by AddedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by AddedAt desc limit 40 offset %s;"%(page,))
         else:
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by PublishedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by PublishedAt desc limit 40 offset %s;"%(page,))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Latest Failed: %s"%e)
@@ -70,7 +70,7 @@ def getVideo(id):
             id = id.split(".")[0]
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where id = %s;",(id,))
+        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where id = %s;",(id,))
         # serialize results into JSON
         row_headers=[x[0] for x in cur.description]
         rv = cur.fetchall()
@@ -143,7 +143,7 @@ def list_resume():
         current_app.logger.debug("Called List Resume")
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where not timestamp = 0 order by PublishedAt desc limit 40;")
+        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where not timestamp = 0 order by PublishedAt desc limit 40;")
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API List Resume Failed: %s"%e)
@@ -192,7 +192,7 @@ def api_creator(creator,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         offset = int(page) * 40  # fixed offset
-        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.channelId = %s order by v.PublishedAt desc limit 40 offset %s;", (creator, offset))
+        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.channelId = %s order by v.PublishedAt desc limit 40 offset %s;", (creator, offset))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
@@ -204,11 +204,11 @@ def get_unwatched(opt,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         if(opt == "PublishedAt"):
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt desc limit 40 offset %s;"%(page,))
         elif(opt == "AddedAt"):
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.AddedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.AddedAt desc limit 40 offset %s;"%(page,))
         else:
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt desc limit 40 offset %s;"%(page,))
+            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt desc limit 40 offset %s;"%(page,))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Unwatched Failed: %s"%e)
@@ -220,7 +220,7 @@ def api_search(searchtxt,page):
         current_app.logger.debug("Called Creator %s %s"%(searchtxt,page))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select *,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where lower(json) like lower('%s') order by PublishedAt desc limit 40 offset %s;"%("%"+searchtxt+"%",page))
+        cur.execute("select * from videos where lower(json) like lower('%s') order by PublishedAt desc limit 40 offset %s;"%("%"+searchtxt+"%",page))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
@@ -372,7 +372,7 @@ def api_random():
         current_app.logger.debug("Called Random")
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,JSON_EXTRACT(v.json,'$.items[0].snippet.title') as title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by RAND() LIMIT 40;")
+        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by RAND() LIMIT 40;")
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Random Fail: %s"%e)

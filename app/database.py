@@ -67,6 +67,7 @@ def checkdb(logger):
                 `lastScanned` datetime DEFAULT CURRENT_TIMESTAMP,
                 `isDeleted` int(11) DEFAULT 0,
                 `source` varchar(100) DEFAULT 'youtube',
+                `title` varchar(2000) DEFAULT NULL,
                 PRIMARY KEY (`id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
                         """)
@@ -105,8 +106,8 @@ def save_video(id,ret,img,logger,source='youtube'):
         con = get_connection(logger)
         cur = con.cursor()
         #Save Video Data
-        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length,source) values(%s,%s,%s,%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source))
+        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length,source,title) values(%s,%s,%s,%s,%s,%s,%s,%s,%s);"
+        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title']))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))

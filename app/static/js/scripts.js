@@ -12,7 +12,7 @@ function processdata(data){
         if(!jobj){
             txt += "<h5 class=\"card-title\">"+data[i].title+"</h5></div>";
         } else {
-            txt += "<h5 class=\"card-title\">"+jobj["items"][0]["snippet"]["title"]+"</h5></div>";
+            txt += "<h5 class=\"card-title\">"+data[i].title+"</h5></div>";
         }
         txt += "<p><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
         var d = data[i].PublishedAt.split(' ')[0]
