@@ -89,10 +89,10 @@ def check_db_video(id,logger):
     try:
         check = get_connection(logger)
         cur = check.cursor()
-        cur.execute("Select * FROM videos where id = '%s'"%id)
+        cur.execute("Select * FROM videos where id = ?", (id,))
         if(cur.fetchone()):
             test = True
-        cur.execute("Select * FROM IgnoreVid where id = '%s'"%id)
+        cur.execute("Select * FROM IgnoreVid where id = ?",(id,))
         if(cur.fetchone()):
             test = True
         cur.close()

@@ -30,11 +30,21 @@ timedHandler.setFormatter(formatter)
 timedHandler.setLevel(logging.INFO)
 logger.addHandler(timedHandler)
 
+required_vars = ['VAULTTUBE_VAULTDIR', 'VAULTTUBE_DBHOST', 'VAULTTUBE_DBUSER', 
+                  'VAULTTUBE_DBPASS', 'VAULTTUBE_DBNAME', 'VAULTTUBE_YTKEY']
+for var in required_vars:
+    if var not in os.environ:
+        logger.error(f"Required environment variable {var} not set")
+        exit(1)
+
+
 #Exception Handling
-def log_uncaught_exceptions(ex_cls,ex,tb):
+def log_uncaught_exceptions(ex_cls, ex, tb):
     logger.critical(''.join(traceback.format_tb(tb)))
-    logger.critical('{0}: {1}'.format(ex_cls,ex))
+    logger.critical('{0}: {1}'.format(ex_cls, ex))
     logger.critical('END PROCESS')
+    # Also log system information for debugging
+    logger.critical(f"System info - Python: {sys.version}, OS: {os.name}")
     logger.handlers = []
 
 sys.excepthook = log_uncaught_exceptions
@@ -106,8 +116,9 @@ def start_background_threads():
     sc.start()
     dl = threading.Thread(target=start_dl_queue,args=(logger,app))
     dl.start()
-    dc = threading.Thread(target=deleted_check_thread,args=(logger,app))
-    dc.start()
+    #Removed - Too Noisy
+    # dc = threading.Thread(target=deleted_check_thread,args=(logger,app))
+    # dc.start()
 
 def startup():
     #Check Database
@@ -135,8 +146,3 @@ def startup():
 #Main
 if __name__ == "__main__":
     startup()
-
-
-
-    
-  

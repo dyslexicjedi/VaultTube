@@ -7,12 +7,23 @@
 <div class="row mb-3 align-items-center">
     <div class="col"><h5 id="latestlabel">Latest</h5></div>
     <div class="col-auto">
-        <div class="d-flex content-switch">
-            <div class="form-text text-1">Unwatched</div>
-            <div class="form-check form-switch form-check-inline mx-2">
+        <div class="d-flex align-items-center">
+            <span class="form-text me-2">Unwatched</span>
+            <div class="form-check form-switch">
                 <input class="form-check-input" type="checkbox" role="switch" id="contentToggle" onclick="contentChange();" aria-label="Toggle content filter">
+                <label class="form-check-label" for="contentToggle"></label>
             </div>
-            <div class="form-text text-2">All</div>
+            <span class="form-text ms-2">All</span>
+        </div>
+    </div>
+    <div class="col-auto">
+        <div class="d-flex align-items-center">
+            <span class="form-text me-2">Published</span>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="dateToggle" onclick="contentChange();" aria-label="Toggle content filter">
+                <label class="form-check-label" for="dateToggle"></label>
+            </div>
+            <span class="form-text ms-2">Added</span>
         </div>
     </div>
 </div>
@@ -25,10 +36,16 @@
 <script>
 
     update(1);
-    var currentId = 1;
     function update(id){
         currentId = id;
         let totalCount = 0;
+        if($("#dateToggle").prop('checked')){
+            sortRelease='AddedAt'
+        }
+        else{
+            sortRelease='PublishedAt'
+        }
+        
         if($("#contentToggle").prop('checked')){
             // All videos count
             $.get("/api/stats/video/count",function(data){
@@ -36,7 +53,7 @@
                 let totalPages = Math.ceil(totalCount / 40);
                 pagination(id, totalPages);
             });
-            $.getJSON("/api/latest/PublishedAt/"+((id-1)*40),function(data){
+            $.getJSON("/api/getvids/all/"+sortRelease+"/desc/"+((id-1)*40),function(data){
                 processdata(data);
             });
         } else {
@@ -46,7 +63,7 @@
                 let totalPages = Math.ceil(totalCount / 40);
                 pagination(id, totalPages);
             });
-            $.getJSON("/api/unwatched/PublishedAt/"+((id-1)*40),function(data){
+            $.getJSON("/api/getvids/unwatched/"+sortRelease+"/desc/"+((id-1)*40),function(data){
                 processdata(data);
             });
         }

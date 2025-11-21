@@ -27,18 +27,20 @@ def parse_response(cur,con):
     # return the results!
     return json.dumps(json_data, indent=4, sort_keys=True, default=str)
 
-@api_bp.route('/latest/<string:opt>/<string:page>')
-def latest(opt,page):
+@api_bp.route('/getvids/<string:status>/<string:opt>/<string:direction>/<string:page>')
+def getvids(status,opt,direction,page):
     try:
-        current_app.logger.debug("Called Latest %s %s"%(opt,page))
+        current_app.logger.info("Called Latest %s %s %s"%(opt,direction,page))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        if(opt == "PublishedAt"):
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by PublishedAt desc limit 40 offset %s;"%(page,))
-        elif(opt == "AddedAt"):
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by AddedAt desc limit 40 offset %s;"%(page,))
+        page_num = int(page) if page.isdigit() else 0
+        if status == "unwatched":
+            status = "where v.watched = 0"
         else:
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by PublishedAt desc limit 40 offset %s;"%(page,))
+            status = ""
+        sql = f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid {status} order by {opt} {direction} limit 40 offset {page_num}"
+        current_app.logger.info(sql)
+        cur.execute(sql)
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Latest Failed: %s"%e)
@@ -197,22 +199,34 @@ def api_creator(creator,page):
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
 
-@api_bp.route('/unwatched/<string:opt>/<string:page>')
-def get_unwatched(opt,page):
-    try:
-        current_app.logger.debug("Called Unwatched %s %s"%(opt,page))
-        con = get_connection(current_app.logger)
-        cur = con.cursor()
-        if(opt == "PublishedAt"):
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt desc limit 40 offset %s;"%(page,))
-        elif(opt == "AddedAt"):
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.AddedAt desc limit 40 offset %s;"%(page,))
-        else:
-            cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt desc limit 40 offset %s;"%(page,))
-        return parse_response(cur,con)
-    except Exception as e:
-        current_app.logger.error("API Unwatched Failed: %s"%e)
-        return "[]"
+#Removed 11/20/25
+# @api_bp.route('/unwatched/<string:opt>/<string:page>')
+# def get_unwatched(opt,page):
+#     try:
+#         current_app.logger.debug("Called Unwatched %s %s"%(opt,page))
+#         con = get_connection(current_app.logger)
+#         cur = con.cursor()
+        
+#         # Get sort parameters from query string
+#         sort_release = request.args.get('sort_release', 'desc')
+#         sort_added = request.args.get('sort_added', 'desc')
+        
+#         # Validate sort parameters
+#         if sort_release not in ['asc', 'desc']:
+#             sort_release = 'desc'
+#         if sort_added not in ['asc', 'desc']:
+#             sort_added = 'desc'
+        
+#         if(opt == "PublishedAt"):
+#             cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt %s limit 40 offset %s;"%(sort_release, page))
+#         elif(opt == "AddedAt"):
+#             cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.AddedAt %s limit 40 offset %s;"%(sort_added, page))
+#         else:
+#             cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt %s limit 40 offset %s;"%(sort_release, page))
+#         return parse_response(cur,con)
+#     except Exception as e:
+#         current_app.logger.error("API Unwatched Failed: %s"%e)
+#         return "[]"
 
 @api_bp.route('/search/<string:searchtxt>/<string:page>')
 def api_search(searchtxt,page):
@@ -350,7 +364,7 @@ def playlists(page):
         current_app.logger.debug("Called Playlists %s"%(page,))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select * from playlists order by playlistName limit 40 offset %s;"%(page,))
+        cur.execute("select * from playlists order by playlistName desc limit 40 offset %s;"%(page,))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
