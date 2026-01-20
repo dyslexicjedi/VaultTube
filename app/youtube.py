@@ -44,6 +44,7 @@ def single_download(url, logger):
                 'outtmpl': os.environ['VAULTTUBE_VAULTDIR'] + "/%(channel_id)s/%(id)s.mp4",
                 'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
                 "progress_hooks": [dl_progress_hook],
+                'js_runtimes': {'deno': {'path': '/root/.deno/bin/deno'}, 'node': {'path': '/root/.nvm/versions/node/v24.13.0/bin/node'}},
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 data = ydl.extract_info(url, download=False)
