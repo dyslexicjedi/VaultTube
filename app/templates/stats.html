@@ -1,98 +1,141 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h3>Stats</h3>
-
 <style>
-  .chart-grid {
+  .st-page {
+    position: relative;
+    z-index: 1;
+    animation: fade-up 0.45s ease both;
+  }
+  .st-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #e8e8f0;
+    margin-bottom: 1.75rem;
+    letter-spacing: -0.01em;
+  }
+  .st-header svg { opacity: 0.75; }
+
+  /* Grid */
+  .st-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 2rem;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.25rem;
   }
-  .card {
-    background: #fff;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.08);
-    border: none;
-    border-radius: 10px;
-    padding: 1.25rem 1rem 1.5rem 1rem;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  @media (max-width: 900px) {
+    .st-grid { grid-template-columns: repeat(2, 1fr); }
+    .st-span { grid-column: span 2 !important; }
   }
-  .card:hover {
-    transform: translateY(-6px);
-    box-shadow: 0 15px 30px rgba(0,0,0,0.12);
+  @media (max-width: 540px) {
+    .st-grid { grid-template-columns: 1fr; }
+    .st-span { grid-column: span 1 !important; }
   }
-  .chart-text {
+
+  /* Base card */
+  .st-card {
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 16px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
+  }
+  .st-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 14px 36px rgba(124,58,237,0.2);
+  }
+
+  /* Stat cards */
+  .st-stat {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    height: 100%;
-    color: #495057;
+    gap: 0.4rem;
   }
-  .chart-text h5 {
-    font-weight: 700;
-    font-size: 1.15rem;
-    margin-bottom: 0.5rem;
-    color: #212529;
-  }
-  .chart-text p {
+  .st-stat-label {
+    font-size: 0.75rem;
     font-weight: 600;
-    font-size: 1.6rem;
-    margin: 0;
-    color: #007bff;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #9090a8;
   }
-  .chart-container {
-    position: relative;
-    height: 300px;
-  }
-  .chart-container h5 {
+  .st-stat-value {
+    font-size: 2rem;
     font-weight: 700;
-    font-size: 1.05rem;
-    margin-bottom: 0.8rem;
-    color: #212529;
-  }
-  .chart-container canvas {
-    border-radius: 10px;
-    background: #f8f9fa;
-    padding: 1rem;
-    box-shadow: inset 0 0 8px rgba(0,0,0,0.03);
-  }
-    .chart-container {
-    position: relative;
-    /* increased height to match the canvas size with padding */
-    height: 350px;
+    line-height: 1;
+    background: linear-gradient(135deg, #a78bfa, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 
-  .chart-container canvas {
-    border-radius: 10px;
-    background: #f8f9fa;
-    padding: 1rem;
-    box-shadow: inset 0 0 8px rgba(0,0,0,0.03);
-    height: 100% !important;
-    width: 100% !important;
-    object-fit: contain;
+  /* Chart cards */
+  .st-chart-card {
+    display: flex;
+    flex-direction: column;
+  }
+  .st-chart-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #9090a8;
+    margin-bottom: 1rem;
+  }
+  .st-chart-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 260px;
+  }
+  .st-span {
+    grid-column: span 4;
+  }
+  .st-span .st-chart-wrap {
+    min-height: 300px;
   }
 </style>
 
-<div class="chart-grid">
-  <div class="card chart-text">
-    <h5>Total Videos:</h5>
-    <p id="totalcount">Loading...</p>
+<div class="st-page">
+
+  <div class="st-header">
+    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M0 0h1v15h15v1H0V0zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.15-5.073a.5.5 0 0 1 .704-.07z"/>
+    </svg>
+    Stats
   </div>
-  <div class="card chart-text">
-    <h5>Average Video Length:</h5>
-    <p id="avglength">Loading...</p>
-  </div>
-  <div class="card chart-container">
-    <h5>Watched vs Unwatched Videos</h5>
-    <canvas id="watchedChart"></canvas>
-  </div>
-  <div class="card chart-container">
-    <h5>Deleted vs Active Videos</h5>
-    <canvas id="deletedChart"></canvas>
-  </div>
-  <div class="card chart-container" style="grid-column: span 4;">
-    <h5>Video Breakdown by Youtuber:</h5>
-    <canvas id="channelChart"></canvas> 
+
+  <div class="st-grid">
+
+    <div class="st-card st-stat">
+      <span class="st-stat-label">Total Videos</span>
+      <span class="st-stat-value" id="totalcount">—</span>
+    </div>
+
+    <div class="st-card st-stat">
+      <span class="st-stat-label">Avg. Video Length</span>
+      <span class="st-stat-value" id="avglength">—</span>
+    </div>
+
+    <div class="st-card st-chart-card">
+      <div class="st-chart-label">Watched vs Unwatched</div>
+      <div class="st-chart-wrap"><canvas id="watchedChart"></canvas></div>
+    </div>
+
+    <div class="st-card st-chart-card">
+      <div class="st-chart-label">Deleted vs Active</div>
+      <div class="st-chart-wrap"><canvas id="deletedChart"></canvas></div>
+    </div>
+
+    <div class="st-card st-chart-card st-span">
+      <div class="st-chart-label">Video Breakdown by Channel</div>
+      <div class="st-chart-wrap"><canvas id="channelChart"></canvas></div>
+    </div>
+
   </div>
 </div>
 
@@ -139,6 +182,27 @@ function unpackFlagCount(arr) {
   return obj;
 }
 
+const chartDefaults = {
+  color: '#9090a8',
+  borderColor: 'rgba(255,255,255,0.07)',
+  plugins: {
+    legend: {
+      labels: { color: '#c0c0d0', font: { family: 'Inter, sans-serif', size: 12 }, padding: 16 }
+    }
+  },
+  scales: {
+    x: {
+      ticks: { color: '#9090a8', font: { family: 'Inter, sans-serif' } },
+      grid: { color: 'rgba(255,255,255,0.06)' }
+    },
+    y: {
+      ticks: { color: '#9090a8', font: { family: 'Inter, sans-serif' } },
+      grid: { color: 'rgba(255,255,255,0.06)' },
+      beginAtZero: true
+    }
+  }
+};
+
 function drawChannelChart(data) {
   var ctx = document.getElementById('channelChart').getContext('2d');
   new Chart(ctx, {
@@ -148,18 +212,18 @@ function drawChannelChart(data) {
       datasets: [{
         label: '# of Videos',
         data: data.map(item => item[1]),
-        backgroundColor: 'rgba(54, 162, 235, 0.7)',
-        borderColor: 'rgba(54, 162, 235, 1)',
-        borderWidth: 1
+        backgroundColor: 'rgba(124,58,237,0.6)',
+        borderColor: 'rgba(167,139,250,0.9)',
+        borderWidth: 1,
+        borderRadius: 6,
+        borderSkipped: false
       }]
     },
     options: {
-      plugins: { legend: { display: false }},
-      scales: {
-        y: { beginAtZero: true }
-      },
       responsive: true,
-      maintainAspectRatio: false
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: chartDefaults.scales
     }
   });
 }
@@ -171,16 +235,17 @@ function drawWatchedChart(watched, unwatched) {
     data: {
       labels: ['Watched', 'Unwatched'],
       datasets: [{
-        label: 'Videos',
         data: [watched, unwatched],
-        backgroundColor: ['rgba(75, 192, 192, 0.7)', 'rgba(255, 99, 132, 0.7)'],
-        borderColor: ['rgba(75, 192, 192, 1)', 'rgba(255, 99, 132, 1)'],
-        borderWidth: 1
+        backgroundColor: ['rgba(52,211,153,0.75)', 'rgba(248,113,113,0.75)'],
+        borderColor: ['rgba(52,211,153,0.4)', 'rgba(248,113,113,0.4)'],
+        borderWidth: 2,
+        hoverOffset: 8
       }]
     },
     options: {
       responsive: true,
-      plugins: { legend: { position: 'bottom' }}
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: chartDefaults.plugins.legend.labels } }
     }
   });
 }
@@ -192,16 +257,17 @@ function drawDeletedChart(deleted, active) {
     data: {
       labels: ['Deleted', 'Active'],
       datasets: [{
-        label: 'Videos',
         data: [deleted, active],
-        backgroundColor: ['rgba(255, 159, 64, 0.7)', 'rgba(153, 102, 255, 0.7)'],
-        borderColor: ['rgba(255, 159, 64, 1)', 'rgba(153, 102, 255, 1)'],
-        borderWidth: 1
+        backgroundColor: ['rgba(251,146,60,0.75)', 'rgba(129,140,248,0.75)'],
+        borderColor: ['rgba(251,146,60,0.4)', 'rgba(129,140,248,0.4)'],
+        borderWidth: 2,
+        hoverOffset: 8
       }]
     },
     options: {
       responsive: true,
-      plugins: { legend: { position: 'bottom' }}
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: chartDefaults.plugins.legend.labels } }
     }
   });
 }

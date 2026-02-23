@@ -7,13 +7,14 @@
         <!-- CSS -->
         <link href="/static/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
         <link href="/static/css/stylesheet.css" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
         <title>VaultTube</title>
     </head>
     <body>
         <!-- Javascript -->
         <script src="/static/js/jquery.min.js"></script>
         <div class="container-lg py-4">
-            <nav class="navbar navbar-expand-lg navbar-light bg-light rounded shadow-sm mb-4">
+            <nav class="navbar navbar-expand-lg navbar-dark rounded shadow-sm mb-4" id="main-navbar">
                 <div class="container-fluid">
                   <a class="navbar-brand fw-bold fs-4" href="/">VaultTube</a>
                   <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
@@ -41,14 +42,14 @@
                       </li>
                     </ul>
 
-                    <div class="form-check form-switch d-flex align-items-center ms-3">
-                      <input class="form-check-input" type="checkbox" id="darkModeToggle" aria-label="Toggle dark mode" />
-                      <label class="form-check-label ms-2 text-nowrap" for="darkModeToggle">Dark Mode</label>
-                    </div>
-
-                    <form class="d-flex ms-3" onsubmit="do_search(); return false;">
-                      <input class="form-control me-2 rounded-pill border-2" type="search" placeholder="Search" aria-label="Search" id="searchtext">
-                      <button class="btn btn-outline-primary rounded-pill px-4" type="button" onclick="do_search();">Search</button>
+                    <form class="d-flex ms-3 navbar-search" onsubmit="do_search(); return false;">
+                      <div class="navbar-search-wrap">
+                        <svg class="navbar-search-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                          <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.099zm-5.242 1.156a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11z"/>
+                        </svg>
+                        <input class="navbar-search-input" type="search" placeholder="Search…" aria-label="Search" id="searchtext">
+                        <button class="navbar-search-btn" type="button" onclick="do_search();">Search</button>
+                      </div>
                     </form>
                   </div>
                 </div>
@@ -57,7 +58,7 @@
         {% endblock %}
         </div>
         <hr class="my-4">
-        <footer id="footer" class="py-3 bg-light shadow-sm mt-auto">
+        <footer id="footer" class="py-3 shadow-sm mt-auto">
             <div class="container text-center">
                 <p class="mb-0 fst-italic text-secondary">VaultTube v1.0.0-alpha &nbsp;
                   |&nbsp; <a href="https://github.com/jedihomelab/VaultTube" target="_blank" class="link-secondary"><img src="/static/imgs/github.svg" height="20" width="20" alt="GitHub" /></a>
@@ -71,28 +72,6 @@
             window.location.href='/search.html?txt='+encodeURIComponent(searchterm);
           }
         </script>
-        <script>
-          function enableDarkMode(enabled) {
-            if(enabled) {
-              document.documentElement.classList.add('dark-mode');
-              $('#darkModeToggle').prop('checked', true);
-            } else {
-              document.documentElement.classList.remove('dark-mode');
-              $('#darkModeToggle').prop('checked', false);
-            }
-          }
 
-          $(document).ready(function() {
-            // On load, check saved preference
-            let darkModePref = localStorage.getItem('darkModeEnabled') === 'true';
-            enableDarkMode(darkModePref);
-
-            $('#darkModeToggle').change(function() {
-              let enabled = $(this).prop('checked');
-              enableDarkMode(enabled);
-              localStorage.setItem('darkModeEnabled', enabled);
-            });
-          });
-        </script>
     </body>
 </html>

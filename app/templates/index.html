@@ -1,36 +1,57 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div><h5 id="resumelabel"></h5></div>
-<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4" id="resumedeck"></div>
-<hr>
-<div class="row mb-3 align-items-center">
-    <div class="col"><h5 id="latestlabel">Latest</h5></div>
-    <div class="col-auto">
-        <div class="d-flex align-items-center">
-            <span class="form-text me-2">Unwatched</span>
-            <div class="form-check form-switch">
-                <input class="form-check-input" type="checkbox" role="switch" id="contentToggle" onclick="contentChange();" aria-label="Toggle content filter">
-                <label class="form-check-label" for="contentToggle"></label>
+<!-- Animated background orbs -->
+<div class="index-orb index-orb-1" aria-hidden="true"></div>
+<div class="index-orb index-orb-2" aria-hidden="true"></div>
+
+<!-- Resume Section -->
+<section class="index-section" id="resumeSection" style="display:none;">
+    <div class="index-section-header">
+        <h5 id="resumelabel" class="index-section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="me-2" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M11.596 8.697l-6.363 3.692A.5.5 0 0 1 4.5 12V4a.5.5 0 0 1 .733-.441l6.363 3.692a.5.5 0 0 1 0 .882z"/>
+            </svg>
+            Resume
+        </h5>
+    </div>
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4" id="resumedeck"></div>
+</section>
+
+<!-- Latest Section -->
+<section class="index-section">
+    <div class="index-section-header">
+        <h5 id="latestlabel" class="index-section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="me-2" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
+                <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
+            </svg>
+            Latest
+        </h5>
+        <div class="index-filters">
+            <div class="index-filter-pill">
+                <span class="index-filter-label">Unwatched</span>
+                <div class="form-check form-switch index-switch">
+                    <input class="form-check-input" type="checkbox" role="switch" id="contentToggle" onclick="contentChange();" aria-label="Toggle content filter">
+                    <label class="form-check-label" for="contentToggle"></label>
+                </div>
+                <span class="index-filter-label">All</span>
             </div>
-            <span class="form-text ms-2">All</span>
+            <div class="index-filter-pill">
+                <span class="index-filter-label">Published</span>
+                <div class="form-check form-switch index-switch">
+                    <input class="form-check-input" type="checkbox" role="switch" id="dateToggle" onclick="contentChange();" aria-label="Toggle date sort">
+                    <label class="form-check-label" for="dateToggle"></label>
+                </div>
+                <span class="index-filter-label">Added</span>
+            </div>
         </div>
     </div>
-    <div class="col-auto">
-        <div class="d-flex align-items-center">
-            <span class="form-text me-2">Published</span>
-            <div class="form-check form-switch">
-                <input class="form-check-input" type="checkbox" role="switch" id="dateToggle" onclick="contentChange();" aria-label="Toggle content filter">
-                <label class="form-check-label" for="dateToggle"></label>
-            </div>
-            <span class="form-text ms-2">Added</span>
-        </div>
-    </div>
-</div>
-<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4" id="carddeck"></div>
-<nav aria-label="Page navigation example" class="pt-4 pb-4 d-flex justify-content-center">
-    <ul id="pagelist" class="pagination" style="gap: 0.5rem;"></ul>
-</nav>
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4" id="carddeck"></div>
+    <nav aria-label="Video page navigation" class="pt-4 pb-2 d-flex justify-content-center">
+        <ul id="pagelist" class="pagination index-pagination" style="gap: 0.4rem;"></ul>
+    </nav>
+</section>
 
 <script src="/static/js/scripts.js"></script>
 <script>
@@ -47,7 +68,6 @@
         }
         
         if($("#contentToggle").prop('checked')){
-            // All videos count
             $.get("/api/stats/video/count",function(data){
                 totalCount = parseInt(data);
                 let totalPages = Math.ceil(totalCount / 40);
@@ -57,7 +77,6 @@
                 processdata(data);
             });
         } else {
-            // Unwatched videos count
             $.get("/api/stats/video/unwatched",function(data){
                 totalCount = parseInt(data);
                 let totalPages = Math.ceil(totalCount / 40);
@@ -67,31 +86,35 @@
                 processdata(data);
             });
         }
-
     }
+
     $.getJSON("/api/list/resume/",function(data){
         processresume(data);
     });
+
     function processresume(data){
         if(data.length > 0){
-            $("#resumelabel").text("Resume");
+            $("#resumeSection").fadeIn(300);
             $("#resumedeck").empty();
             $.each(data,function(i,item){
                 var jobj = jQuery.parseJSON(data[i]["json"]);
-                var txt = "<div class=\"col\"><div class=\"card h-100\" onclick=\"playvid('"+data[i].id+"')\" role=\"button\" tabindex=\"0\" aria-label=\"Play video: "+data[i].title+"\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top img-fluid\" alt=\"Thumbnail\">";
-                //Progress Bar Math
                 var s = data[i]['length'].split(":")
                 var total = (+s[0]) * 60 * 60 + (+s[1]) * 60 + (+s[2]);
                 var current = parseInt(data[i]['timestamp']);
-                var p = parseInt((current / total)*100);
-                txt += "<div class=\"progress\"><div class=\"progress-bar progress-bar-striped bg-info\" role=\"progressbar\" style=\"width: "+p+"%\" aria-valuenow=\""+p+"\" aria-valuemin=\"0\" aria-valuemax=\"100\"></div></div>";
-                txt +="<div class=\"card-body\"><h5 class=\"card-title\">"+data[i].title+"</h5>";
-                txt += "<p><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
-                txt += "</div><div class=\"card-footer\"><small class=\"text-muted\">Published: "+data[i].PublishedAt+"</small></div></div></div>";
+                var p = parseInt((current / total) * 100);
+                var txt = "<div class=\"col index-card-col\"><div class=\"card index-card h-100\" onclick=\"playvid('"+data[i].id+"')\" role=\"button\" tabindex=\"0\" aria-label=\"Resume: "+data[i].title+"\">";
+                txt += "<div class=\"index-card-thumb-wrap\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top index-card-thumb\" alt=\"Thumbnail\">";
+                txt += "<div class=\"index-card-overlay\"><svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' fill='white' viewBox='0 0 16 16'><path d='M11.596 8.697l-6.363 3.692A.5.5 0 0 1 4.5 12V4a.5.5 0 0 1 .733-.441l6.363 3.692a.5.5 0 0 1 0 .882z'/></svg></div>";
+                txt += "<div class=\"index-resume-bar\"><div class=\"index-resume-fill\" style=\"width:"+p+"%\"></div></div>";
+                txt += "</div>";
+                txt += "<div class=\"card-body\"><h5 class=\"card-title\">"+data[i].title+"</h5>";
+                txt += "<p class=\"index-card-channel\"><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
+                txt += "</div><div class=\"card-footer\"><small>Published: "+data[i].PublishedAt+"</small></div></div></div>";
                 $("#resumedeck").append(txt);
             });
         }
     }
+
     function contentChange(){
             update(currentId);
     }

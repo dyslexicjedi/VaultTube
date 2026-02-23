@@ -1,47 +1,343 @@
 <!-- app/templates/upload.html -->
 {% extends "base.html" %}
 {% block content %}
-<div class="container-lg py-4">
-    <h2 class="mb-4 text-primary fw-bold">Upload Video</h2>
-    <form id="uploadForm" enctype="multipart/form-data" method="post" action="/api/upload/video">
-        <div class="mb-3">
-            <label for="videoFile" class="form-label">Select Video File</label>
-            <input id="videoFile" name="videoFile" type="file" class="form-control" required>
+
+<div class="ul-page">
+    <div class="ul-card">
+
+        <div class="ul-card-header">
+            <div class="ul-title">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                    <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/>
+                </svg>
+                Upload Video
+            </div>
+            <p class="ul-subtitle">Add a local video file to your VaultTube library</p>
         </div>
-        <div class="mb-3">
-            <label for="videoId" class="form-label">Video ID</label>
-            <input id="videoId" name="videoId" type="text" class="form-control" placeholder="Enter Video ID" required>
-        </div>
-        <div class="mb-3">
-            <label for="title" class="form-label">Video Title</label>
-            <input id="title" name="title" type="text" class="form-control" placeholder="Enter Video Title" required>
-        </div>
-        <div class="mb-3">
-            <label for="channelId" class="form-label">Channel ID</label>
-            <input id="channelId" name="channelId" type="text" class="form-control" placeholder="Enter Channel ID" required>
-        </div>
-        <div class="mb-3">
-            <label for="source" class="form-label">Source</label>
-            <select id="source" name="source" class="form-select" required>
-                <option value="youtube" selected>YouTube</option>
-                <option value="patreon">Patreon</option>
-            </select>
-        </div>
-        <div class="mb-3">
-            <label for="publishedAt" class="form-label">Published Date</label>
-            <input id="publishedAt" name="publishedAt" type="date" class="form-control" required>
-        </div>
-        <button type="submit" class="btn btn-primary">Upload</button>
-    </form>
-    <div id="uploadStatus" class="mt-3"></div>
+
+        <form id="uploadForm" enctype="multipart/form-data" method="post" action="/api/upload/video">
+
+            <!-- File picker -->
+            <div class="ul-field">
+                <label class="ul-label" for="videoFile">Video File</label>
+                <label class="ul-file-drop" for="videoFile" id="fileDrop">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16" class="ul-file-icon" aria-hidden="true">
+                        <path d="M4.406 1.342A5.53 5.53 0 0 1 8 0c2.69 0 4.923 2 5.166 4.579C14.758 4.804 16 6.137 16 7.773 16 9.569 14.502 11 12.687 11H10a.5.5 0 0 1 0-1h2.688C13.979 10 15 8.988 15 7.773c0-1.216-1.02-2.228-2.313-2.228h-.5v-.5C12.188 2.825 10.328 1 8 1a4.53 4.53 0 0 0-2.941 1.1c-.757.652-1.153 1.438-1.153 2.055v.448l-.445.049C2.064 4.805 1 5.952 1 7.318 1 8.785 2.23 10 3.781 10H6a.5.5 0 0 1 0 1H3.781C1.708 11 0 9.366 0 7.318c0-1.763 1.266-3.223 2.942-3.593.143-.863.698-1.723 1.464-2.383z"/>
+                        <path d="M7.646 4.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 5.707V14.5a.5.5 0 0 1-1 0V5.707L5.354 7.854a.5.5 0 1 1-.708-.708l3-3z"/>
+                    </svg>
+                    <span class="ul-file-text" id="fileLabel">Choose file or drag &amp; drop</span>
+                    <span class="ul-file-hint">MP4, MKV, WEBM and more</span>
+                    <input id="videoFile" name="videoFile" type="file" class="ul-file-input" required>
+                </label>
+            </div>
+
+            <div class="ul-grid">
+                <!-- Video ID -->
+                <div class="ul-field">
+                    <label class="ul-label" for="videoId">Video ID</label>
+                    <div class="ul-input-wrap">
+                        <svg class="ul-input-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                            <path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1.002 1.002 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4.018 4.018 0 0 1-.128-1.287z"/>
+                            <path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243L6.586 4.672z"/>
+                        </svg>
+                        <input id="videoId" name="videoId" type="text" class="ul-input" placeholder="e.g. dQw4w9WgXcQ" required>
+                    </div>
+                </div>
+
+                <!-- Channel ID -->
+                <div class="ul-field">
+                    <label class="ul-label" for="channelId">Channel ID</label>
+                    <div class="ul-input-wrap">
+                        <svg class="ul-input-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                            <path d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1H7zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+                            <path fill-rule="evenodd" d="M5.216 14A2.238 2.238 0 0 1 5 13c0-1.355.68-2.75 1.936-3.72A6.325 6.325 0 0 0 5 9c-4 0-5 3-5 4s1 1 1 1h4.216z"/>
+                            <path d="M4.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>
+                        </svg>
+                        <input id="channelId" name="channelId" type="text" class="ul-input" placeholder="Enter channel ID" required>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Title -->
+            <div class="ul-field">
+                <label class="ul-label" for="title">Video Title</label>
+                <div class="ul-input-wrap">
+                    <svg class="ul-input-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                        <path d="M12.258 3h-8.51l-.083 2.46h.479c.26-1.544.758-1.783 2.693-1.845l.424-.013v7.827c0 .536-.082.795-1.066.974v.516h3.963v-.516c-.984-.179-1.065-.438-1.065-.974V3.602l.424.013c1.935.062 2.434.301 2.694 1.846h.479L12.258 3z"/>
+                    </svg>
+                    <input id="title" name="title" type="text" class="ul-input" placeholder="Enter video title" required>
+                </div>
+            </div>
+
+            <div class="ul-grid">
+                <!-- Source -->
+                <div class="ul-field">
+                    <label class="ul-label" for="source">Source</label>
+                    <div class="ul-input-wrap ul-input-wrap--select">
+                        <svg class="ul-input-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                            <path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm7.5-6.923c-.67.204-1.335.82-1.887 1.855A7.97 7.97 0 0 0 5.145 4H7.5V1.077zM4.09 4a9.267 9.267 0 0 1 .64-1.539 6.7 6.7 0 0 1 .597-.933A7.025 7.025 0 0 0 2.255 4H4.09zm-.582 3.5c.03-.877.138-1.718.312-2.5H1.674a6.958 6.958 0 0 0-.656 2.5h2.49zM4.847 5a12.5 12.5 0 0 0-.338 2.5H7.5V5H4.847zM8.5 5v2.5h2.99a12.495 12.495 0 0 0-.337-2.5H8.5zM4.51 8.5a12.5 12.5 0 0 0 .337 2.5H7.5V8.5H4.51zm3.99 0V11h2.653c.187-.765.306-1.608.338-2.5H8.5zM5.145 12c.138.386.295.744.468 1.068.552 1.035 1.218 1.65 1.887 1.855V12H5.145zm.182 2.472a6.696 6.696 0 0 1-.597-.933A9.268 9.268 0 0 1 4.09 12H2.255a7.024 7.024 0 0 0 3.072 2.472zM3.82 11a13.652 13.652 0 0 1-.312-2.5h-2.49c.062.89.291 1.733.656 2.5H3.82zm6.853 3.472A7.024 7.024 0 0 0 13.745 12H11.91a9.27 9.27 0 0 1-.64 1.539 6.688 6.688 0 0 1-.597.933zM8.5 12v2.923c.67-.204 1.335-.82 1.887-1.855.173-.324.33-.682.468-1.068H8.5zm3.68-1h2.146c.365-.767.594-1.61.656-2.5h-2.49a13.65 13.65 0 0 1-.312 2.5zm2.802-3.5a6.959 6.959 0 0 0-.656-2.5H11.82c.174.782.282 1.623.312 2.5h2.49zM11.27 2.461c.247.464.462.98.64 1.539h1.835a7.024 7.024 0 0 0-3.072-2.472c.218.284.418.598.597.933zM10.855 4a7.966 7.966 0 0 0-.468-1.068C9.835 1.897 9.17 1.282 8.5 1.077V4h2.355z"/>
+                        </svg>
+                        <select id="source" name="source" class="ul-select" required>
+                            <option value="youtube">YouTube</option>
+                            <option value="patreon">Patreon</option>
+                        </select>
+                        <svg class="ul-select-arrow" xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                            <path d="M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Published Date -->
+                <div class="ul-field">
+                    <label class="ul-label" for="publishedAt">Published Date</label>
+                    <div class="ul-input-wrap">
+                        <svg class="ul-input-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                            <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/>
+                        </svg>
+                        <input id="publishedAt" name="publishedAt" type="date" class="ul-input ul-input--date" required>
+                    </div>
+                </div>
+            </div>
+
+            <div class="ul-actions">
+                <button type="submit" class="ul-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                        <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                        <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/>
+                    </svg>
+                    Upload Video
+                </button>
+            </div>
+
+        </form>
+
+        <div id="uploadStatus" class="mt-3"></div>
+
+    </div>
 </div>
+
+<style>
+    .ul-page {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        justify-content: center;
+        padding: 1rem 0 2rem;
+        animation: fade-up 0.45s ease both;
+    }
+    .ul-card {
+        width: 100%;
+        max-width: 680px;
+        background: rgba(255,255,255,0.05);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 20px;
+        padding: 2rem 2.25rem 2.25rem;
+        box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+    }
+    .ul-card-header {
+        margin-bottom: 1.75rem;
+    }
+    .ul-title {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #e8e8f0;
+        margin-bottom: 0.3rem;
+    }
+    .ul-title svg { opacity: 0.75; }
+    .ul-subtitle {
+        font-size: 0.85rem;
+        color: #9090a8;
+        margin: 0;
+    }
+    /* Fields */
+    .ul-field {
+        margin-bottom: 1.1rem;
+    }
+    .ul-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0 1rem;
+    }
+    @media (max-width: 540px) {
+        .ul-grid { grid-template-columns: 1fr; }
+        .ul-card { padding: 1.5rem 1.25rem; }
+    }
+    .ul-label {
+        display: block;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #a78bfa;
+        margin-bottom: 0.4rem;
+    }
+    /* Shared input wrap */
+    .ul-input-wrap {
+        display: flex;
+        align-items: center;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 10px;
+        padding: 0 0.9rem;
+        height: 44px;
+        transition: border-color 0.2s ease, background 0.2s ease;
+    }
+    .ul-input-wrap:focus-within {
+        background: rgba(255,255,255,0.09);
+        border-color: #a78bfa;
+        box-shadow: 0 0 0 3px rgba(167,139,250,0.18);
+    }
+    .ul-input-icon {
+        color: rgba(255,255,255,0.3);
+        flex-shrink: 0;
+        margin-right: 0.55rem;
+        transition: color 0.2s ease;
+    }
+    .ul-input-wrap:focus-within .ul-input-icon {
+        color: #a78bfa;
+    }
+    .ul-input {
+        background: transparent;
+        border: none;
+        outline: none;
+        color: #e8e8f0;
+        font-family: inherit;
+        font-size: 0.9rem;
+        width: 100%;
+        padding: 0;
+    }
+    .ul-input::placeholder { color: rgba(255,255,255,0.28); }
+    .ul-input--date::-webkit-calendar-picker-indicator {
+        filter: invert(0.6);
+        cursor: pointer;
+    }
+    /* Select */
+    .ul-input-wrap--select { position: relative; }
+    .ul-select {
+        background: transparent;
+        border: none;
+        outline: none;
+        color: #e8e8f0;
+        font-family: inherit;
+        font-size: 0.9rem;
+        width: 100%;
+        padding: 0;
+        appearance: none;
+        -webkit-appearance: none;
+        cursor: pointer;
+    }
+    .ul-select option {
+        background: #1a1a2e;
+        color: #e8e8f0;
+    }
+    .ul-select-arrow {
+        color: rgba(255,255,255,0.35);
+        flex-shrink: 0;
+        margin-left: 0.4rem;
+        pointer-events: none;
+    }
+    /* File drop zone */
+    .ul-file-drop {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        background: rgba(255,255,255,0.04);
+        border: 1.5px dashed rgba(167,139,250,0.35);
+        border-radius: 12px;
+        padding: 1.75rem 1rem;
+        cursor: pointer;
+        transition: background 0.2s ease, border-color 0.2s ease;
+        text-align: center;
+    }
+    .ul-file-drop:hover {
+        background: rgba(167,139,250,0.07);
+        border-color: #a78bfa;
+    }
+    .ul-file-drop.is-selected {
+        background: rgba(167,139,250,0.1);
+        border-color: #a78bfa;
+        border-style: solid;
+    }
+    .ul-file-icon { color: #a78bfa; opacity: 0.7; }
+    .ul-file-text {
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: #c4b5fd;
+    }
+    .ul-file-hint {
+        font-size: 0.78rem;
+        color: #9090a8;
+    }
+    .ul-file-input {
+        display: none;
+    }
+    /* Submit button */
+    .ul-actions {
+        margin-top: 1.5rem;
+    }
+    .ul-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: linear-gradient(135deg, #7c3aed, #4f46e5);
+        border: none;
+        border-radius: 10px;
+        color: #fff;
+        font-family: inherit;
+        font-size: 0.95rem;
+        font-weight: 600;
+        padding: 0.7rem 1.75rem;
+        cursor: pointer;
+        transition: opacity 0.2s ease, transform 0.15s ease;
+        box-shadow: 0 4px 16px rgba(124,58,237,0.4);
+    }
+    .ul-btn:hover { opacity: 0.88; transform: translateY(-2px); }
+    .ul-btn:active { opacity: 1; transform: translateY(0); }
+    /* Status messages */
+    #uploadStatus .alert-success {
+        background: rgba(52,211,153,0.12);
+        border: 1px solid rgba(52,211,153,0.3);
+        color: #6ee7b7;
+        border-radius: 10px;
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+    }
+    #uploadStatus .alert-danger {
+        background: rgba(248,113,113,0.12);
+        border: 1px solid rgba(248,113,113,0.3);
+        color: #fca5a5;
+        border-radius: 10px;
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+    }
+</style>
 
 <script>
 $(function() {
+    // Update file drop label when a file is chosen
+    $('#videoFile').on('change', function() {
+        const file = this.files[0];
+        if (file) {
+            $('#fileLabel').text(file.name);
+            $('#fileDrop').addClass('is-selected');
+        } else {
+            $('#fileLabel').text('Choose file or drag & drop');
+            $('#fileDrop').removeClass('is-selected');
+        }
+    });
+
     $('#uploadForm').on('submit', function(e) {
         e.preventDefault();
         const formData = new FormData(this);
-        $('#uploadStatus').html('Uploading...');
+        $('#uploadStatus').html('<div class="alert alert-success" style="opacity:0.6;">Uploading…</div>');
         $.ajax({
             url: '/api/upload/video',
             type: 'POST',
@@ -51,6 +347,8 @@ $(function() {
             success: function(data) {
                 $('#uploadStatus').html('<div class="alert alert-success">Upload successful!</div>');
                 $('#uploadForm')[0].reset();
+                $('#fileLabel').text('Choose file or drag & drop');
+                $('#fileDrop').removeClass('is-selected');
             },
             error: function(xhr, status, error) {
                 $('#uploadStatus').html('<div class="alert alert-danger">Upload failed: ' + xhr.responseText + '</div>');

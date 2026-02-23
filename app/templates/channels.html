@@ -1,18 +1,137 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-4 pt-4" id="carddeck"></div>
+<style>
+  .ch-page {
+    position: relative;
+    z-index: 1;
+    animation: fade-up 0.45s ease both;
+  }
+  .ch-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #e8e8f0;
+    margin-bottom: 1.5rem;
+    letter-spacing: -0.01em;
+  }
+  .ch-header svg { opacity: 0.75; }
 
-<nav aria-label="Channel pagination" class="pt-4 pb-4 d-flex justify-content-center">
-    <ul id="pagelist" class="pagination pagination-sm" style="gap: 0.5rem;"></ul>
-</nav>
+  /* Cards */
+  .ch-card {
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.09) !important;
+    border-radius: 16px !important;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
+    overflow: hidden;
+  }
+  .ch-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 14px 36px rgba(124,58,237,0.22);
+  }
+  .ch-card .card-body {
+    padding: 1.25rem 1.25rem 0.75rem;
+  }
+
+  .ch-card-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #e8e8f0;
+    text-decoration: none;
+    transition: color 0.15s ease;
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+  .ch-card-title:hover { color: #a78bfa; }
+  .ch-card-desc {
+    font-size: 0.82rem;
+    color: #9090a8;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin: 0;
+  }
+  .ch-card .card-footer {
+    background: transparent;
+    border-top: 1px solid rgba(255,255,255,0.07) !important;
+    padding: 0.75rem 1.25rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .ch-meta {
+    font-size: 0.78rem;
+    color: #9090a8;
+    line-height: 1.6;
+    text-align: right;
+  }
+  .ch-meta span {
+    display: block;
+  }
+
+  /* Subscribe button */
+  .ch-btn-sub {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: none;
+    border-radius: 999px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 0.3rem 0.9rem;
+    cursor: pointer;
+    transition: opacity 0.2s ease, transform 0.15s ease;
+    white-space: nowrap;
+  }
+  .ch-btn-sub--on {
+    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    color: #fff;
+    box-shadow: 0 3px 10px rgba(124,58,237,0.35);
+  }
+  .ch-btn-sub--off {
+    background: rgba(167,139,250,0.12);
+    color: #a78bfa;
+    border: 1px solid rgba(167,139,250,0.25);
+  }
+  .ch-btn-sub:hover { opacity: 0.82; transform: translateY(-1px); }
+  .ch-btn-sub:active { opacity: 1; transform: translateY(0); }
+</style>
+
+<div class="ch-page">
+
+  <div class="ch-header">
+    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1H7zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+      <path fill-rule="evenodd" d="M5.216 14A2.238 2.238 0 0 1 5 13c0-1.355.68-2.75 1.936-3.72A6.325 6.325 0 0 0 5 9c-4 0-5 3-5 4s1 1 1 1h4.216z"/>
+      <path d="M4.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>
+    </svg>
+    Channels
+  </div>
+
+  <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-4" id="carddeck"></div>
+
+  <nav aria-label="Channel pagination" class="pt-4 pb-4 d-flex justify-content-center">
+    <ul id="pagelist" class="pagination index-pagination" style="gap: 0.4rem;"></ul>
+  </nav>
+
+</div>
 
 <script src="/static/js/scripts.js"></script>
 <script>
     update(1);
     function update(id){
         get_channels(id-1);
-        pagination(id);
+        pagination(id, 99); // large number — pagination() will clamp
     }
     function get_channels(currentpage){
         $.getJSON("/api/channels/"+(currentpage*40),function(data){
@@ -24,23 +143,26 @@
         $.each(data,function(i,item){
             var jobj = jQuery.parseJSON(data[i]["json"]);
             var desc = jobj['items'][0]['snippet']['description'] || '';
+            var subbed = data[i]['subscribed'];
             var txt = `
                 <div class="col">
-                  <div class="card h-100 shadow-sm border-0">
+                  <div class="card ch-card h-100">
                     <div class="card-body d-flex flex-column">
-                      <h5 class="card-title"><a href="creator.html?creator=${data[i]['channelid']}" class="stretched-link text-decoration-none">${data[i]['channelname']}</a></h5>
-                      <p class="card-text text-truncate-3">${desc}</p>
+                      <a href="creator.html?creator=${data[i]['channelid']}" class="ch-card-title stretched-link">${data[i]['channelname']}</a>
+                      <p class="ch-card-desc">${desc}</p>
                     </div>
-                    <div class="card-footer bg-transparent border-top d-flex justify-content-between align-items-center">
-                        <div>
-                          <button class="btn btn-${data[i]['subscribed'] ? 'outline-secondary' : 'primary'} btn-sm" onclick="${data[i]['subscribed'] ? `unsubscribe('${data[i]['channelid']}')` : `subscribe('${data[i]['channelid']}')`}">
-                            ${data[i]['subscribed'] ? 'Subscribed' : 'Subscribe'}
-                          </button>
-                        </div>
-                        <small class="text-muted">
-                          Videos: ${data[i]['vidcount']}<br>
-                          Last Archived: ${data[i]['lastvidtime']}
-                        </small>
+                    <div class="card-footer">
+                      <button class="ch-btn-sub ${subbed ? 'ch-btn-sub--on' : 'ch-btn-sub--off'}"
+                        onclick="handleSubToggle('${data[i]['channelid']}', this); event.preventDefault();">
+                        ${subbed
+                          ? `<svg xmlns='http://www.w3.org/2000/svg' width='11' height='11' fill='currentColor' viewBox='0 0 16 16'><path d='M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z'/></svg> Subscribed`
+                          : `<svg xmlns='http://www.w3.org/2000/svg' width='11' height='11' fill='currentColor' viewBox='0 0 16 16'><path d='M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z'/></svg> Subscribe`
+                        }
+                      </button>
+                      <div class="ch-meta">
+                        <span>${data[i]['vidcount']} videos</span>
+                        <span>Last: ${data[i]['lastvidtime']}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -48,15 +170,22 @@
             $("#carddeck").append(txt);
         });
     }
-</script>
 
-<style>
-.text-truncate-3 {
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;  
-    overflow: hidden;
-}
-</style>
+    function handleSubToggle(channelId, btn) {
+        $.getJSON("/api/sub_status/channel/" + channelId, function(data) {
+            if (data == 0) {
+                $.getJSON("/api/subscribe/channel/" + channelId, function() {
+                    $(btn).removeClass('ch-btn-sub--off').addClass('ch-btn-sub--on');
+                    $(btn).html(`<svg xmlns='http://www.w3.org/2000/svg' width='11' height='11' fill='currentColor' viewBox='0 0 16 16'><path d='M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z'/></svg> Subscribed`);
+                });
+            } else {
+                $.getJSON("/api/unsubscribe/channel/" + channelId, function() {
+                    $(btn).removeClass('ch-btn-sub--on').addClass('ch-btn-sub--off');
+                    $(btn).html(`<svg xmlns='http://www.w3.org/2000/svg' width='11' height='11' fill='currentColor' viewBox='0 0 16 16'><path d='M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z'/></svg> Subscribe`);
+                });
+            }
+        });
+    }
+</script>
 
 {% endblock %}
