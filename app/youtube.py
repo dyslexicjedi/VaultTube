@@ -45,6 +45,11 @@ def single_download(url, logger):
                 'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
                 "progress_hooks": [dl_progress_hook],
                 'js_runtimes': {'deno': {'path': '/root/.deno/bin/deno'}, 'node': {'path': '/usr/local/bin/node'}},
+                'socket_timeout': 30,        # seconds before a socket read times out
+                'retries': 10,               # retry failed fragment/chunk downloads
+                'fragment_retries': 10,      # retry failed fragments specifically
+                'retry_sleep_functions': {'http': lambda n: 5 * n},  # back-off: 5s, 10s, 15s...
+                'http_chunk_size': 10485760, # 10 MB chunks instead of the default large size
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 data = ydl.extract_info(url, download=False)
