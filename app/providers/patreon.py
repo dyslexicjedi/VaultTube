@@ -37,12 +37,13 @@ def download(q,logger):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             data = ydl.extract_info(q.url,download=False)
             videoid = data['id']
+            channel_id = data['channel_id']
             title = data['title']
             PublishedAt = datetime.datetime.strptime(data['upload_date'], '%Y%m%d')
             dl_status_map[videoid] = {'progress': '0%', 'title': title, 'type': 'patreon'}
             ydl.download(q.url)
-        ps = patreon_screenshot(videoid,q.channel_id,logger)
-        pdb = patreon_db_info(videoid,q.channel_id,PublishedAt,title,logger)
+        ps = patreon_screenshot(videoid, channel_id, logger)
+        pdb = patreon_db_info(videoid, channel_id, PublishedAt, title, logger)
         if videoid in dl_status_map:
             del dl_status_map[videoid]
         #dl_progress = 0
