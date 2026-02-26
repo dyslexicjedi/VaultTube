@@ -1,8 +1,9 @@
 from flask import Blueprint,current_app,send_file,Response,abort
 import mariadb,json,io,math,os
 import subprocess
-from youtube import get_dl_status,get_video,get_channel_video_list,get_cur_videoID,get_cur_videoTitle,get_playlist_info,dl_status_map as yt_dl_map
-from patreon import dl_status_map as patreon_dl_map   
+from youtube import get_channel_video_list, get_playlist_info
+from backend import get_video
+from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, dl_status_map as yt_dl_map
 from backend import process_channel,save_uploaded_video_metadata
 from database import checkdb,get_connection,insert_playlist,find_next_previous
 from flask import request,jsonify
@@ -150,15 +151,17 @@ def list_resume():
     except Exception as e:
         current_app.logger.error("API List Resume Failed: %s"%e)
 
-@api_bp.route("/download/single/<string:ytid>")
-def api_download(ytid):
+@api_bp.route("/download/single", methods=["POST"])
+def api_download():
     try:
-        url = "https://www.youtube.com/watch?v="+ytid
-        i = QueueObject(url,"","youtube",0,"")
+        url = request.get_json(force=True).get('url', '').strip()
+        if not url:
+            return "Missing URL", 400
+        i = QueueObject(url, "", "", 0, "")
         current_app.config['queue'].put(i)
         return "True"
     except Exception as e:
-        current_app.logger.error("API Download Failed: %s"%e)
+        current_app.logger.error("API Download Failed: %s" % e)
         return "False"
 
 @api_bp.route("/stats/video/count")
@@ -305,8 +308,6 @@ def queue_status():
     data['active'] = [
         {'id': k, **yt_dl_map[k]} for k in yt_active_ids
     ]
-    patreon_active_ids = list(patreon_dl_map.keys())
-    data['active'].extend([{'id': k, **patreon_dl_map[k]} for k in patreon_active_ids])
 
     return json.dumps(data, indent=4, sort_keys=True, default=str)
 

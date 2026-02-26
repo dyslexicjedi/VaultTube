@@ -17,7 +17,7 @@
                     <path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1.002 1.002 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4.018 4.018 0 0 1-.128-1.287z"/>
                     <path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243L6.586 4.672z"/>
                 </svg>
-                <input id="yturl" type="text" class="dl-input" placeholder="Enter YouTube URL or video ID" aria-label="YouTube URL">
+                <input id="yturl" type="text" class="dl-input" placeholder="Enter video URL" aria-label="Video URL">
             </div>
             <button class="dl-btn" type="button" id="yt-download-btn" onclick="processdownload();">
                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
@@ -267,19 +267,16 @@
         return !isNaN(parseFloat(n)) && isFinite(n);
     }
     function processdownload(){
-        var yturl = $("#yturl").val().trim();
-        if(yturl.length == 11){
-            $.ajax({url: "/api/download/single/"+yturl, success: function(result){
-            }});
+        var url = $("#yturl").val().trim();
+        if(!url){
+            alert("Please enter a URL.");
+            return;
         }
-        else if(yturl.includes("watch?v=")){
-            id = yturl.split('=')[1]
-            $.ajax({url: "/api/download/single/"+id, success: function(result){
-            }});
-        }
-        else {
-            alert("Please enter a valid YouTube video URL or ID.");
-        }
+        fetch("/api/download/single", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({url: url})
+        });
     }
     function processPatreonDownload(){
         var patreonurl = $("#patreonurl").val().trim();

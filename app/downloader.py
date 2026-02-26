@@ -1,24 +1,26 @@
 import time
-from youtube import single_download
-from patreon import patreon_download
+import providers
 from QueueObject import QueueObject
 
-def start_dl_queue(logger,app):
+def start_dl_queue(logger, app):
     logger.info("Starting Download Queue Process")
     while 1:
         with app.app_context():
             q = app.config['queue']
-            if(q.qsize() > 0):
+            if q.qsize() > 0:
                 logger.info("*Found Queue Items")
                 while q.qsize() > 0:
                     qo = q.get()
-                    logger.info("Downloading %s"%qo.url)
-                    if "youtube.com" in qo.url:
-                        logger.info("*Found Youtube URL")
-                        single_download(qo.url,logger)
-                    elif "patreon.com" in qo.url:
-                        logger.info("*Found Patreon URL")
-                        patreon_download(qo,logger)
+                    logger.info("Downloading %s" % qo.url)
+                    provider = providers.get_provider(qo.url)
+                    if provider:
+                        logger.info("*Dispatching to provider: %s" % provider.__name__)
+                        if provider.download(qo, logger):
+                            logger.info("Download Successful")
+                        else:
+                            logger.error("Error occurred during download")
+                    else:
+                        logger.error("No provider found for URL: %s" % qo.url)
             else:
                 logger.debug("No Items in Queue")
             time.sleep(60)
