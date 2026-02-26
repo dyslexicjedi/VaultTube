@@ -1,7 +1,6 @@
 from flask import Blueprint,current_app,send_file,Response,abort
 import mariadb,json,io,math,os
 import subprocess
-from youtube import get_channel_video_list, get_playlist_info
 from backend import get_video
 from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, dl_status_map as yt_dl_map
 from backend import process_channel,save_uploaded_video_metadata
@@ -9,6 +8,7 @@ from database import checkdb,get_connection,insert_playlist,find_next_previous
 from flask import request,jsonify
 import shutil
 import datetime
+import requests
 
 from QueueObject import QueueObject
 
@@ -480,17 +480,6 @@ def transcode(videopath):
     # return streaming response
     return Response(generate(), mimetype="video/mp4")
 
-@api_bp.route("/download/patreon/<string:patreonchannelid>/<string:patreonurl>")
-def api_patreon_download(patreonchannelid,patreonurl):
-    try:
-        url = "https://www.patreon.com/posts/"+patreonurl
-        i = QueueObject(url,patreonchannelid,"patreon",0,"")
-        current_app.config['queue'].put(i)
-        return "True"
-    except Exception as e:
-        current_app.logger.error("API Download Failed: %s"%e)
-        return "False"
-
 @api_bp.route("/upload/video", methods=["POST"])
 def api_upload_video():
     try:
@@ -554,3 +543,13 @@ def get_video_unwatched_count():
         return str(count)
     except Exception as e:
         current_app.logger.error("API Image Failed: %s"%e)
+
+def get_playlist_info(playlistid, logger):
+    try:
+        curl = "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&id=%s&key=%s" % (playlistid, os.environ['VAULTTUBE_YTKEY'])
+        r = requests.get(curl)
+        retj = r.json()
+        r.close()
+        return retj
+    except Exception as e:
+        logger.error("Failed to get playlist info: %s" % e)
