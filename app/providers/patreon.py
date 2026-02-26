@@ -24,7 +24,7 @@ def download(q,logger):
         cookies = StringIO(contents)
         ydl_opts = {
             'cookiefile': cookies,
-            'outtmpl': os.environ['VAULTTUBE_VAULTDIR']+"/"+q.channel_id+"/%(id)s.mp4",
+            'outtmpl': os.environ['VAULTTUBE_VAULTDIR']+"/%(channel_id)s/%(id)s.mp4",
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             "progress_hooks": [dl_progress_hook],
             'js_runtimes': {'deno': {'path': '/root/.deno/bin/deno'}, 'node': {'path': '/usr/local/bin/node'}},

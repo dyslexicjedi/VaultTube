@@ -60,8 +60,6 @@ def download(qo, logger):
                 channel_id = data['channel_id']
                 videoID = data['id']
                 videoTitle = data['title']
-                if not os.path.exists(os.environ['VAULTTUBE_VAULTDIR'] + "/" + data['channel_id']):
-                    os.mkdir(os.environ['VAULTTUBE_VAULTDIR'] + "/" + data['channel_id'])
                 dl_status_map[videoID] = {'progress': '0%', 'title': videoTitle, 'type': 'youtube'}
                 ydl.download(url)
             get_video(os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4", current_app.logger)
