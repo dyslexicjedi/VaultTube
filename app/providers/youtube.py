@@ -1,6 +1,7 @@
 import requests
 import os
 from io import StringIO
+from urllib.parse import urlparse, parse_qs
 import yt_dlp
 from flask import current_app
 
@@ -32,7 +33,13 @@ def download(qo, logger):
     """Accept a QueueObject or a plain URL string."""
     url = qo.url if hasattr(qo, 'url') else qo
     try:
-        vid = url.split('=')[1]
+        parsed = urlparse(url)
+        if parsed.hostname in ('youtu.be',):
+            vid = parsed.path.lstrip('/')
+        else:
+            vid = parse_qs(parsed.query).get('v', [None])[0]
+        if not vid:
+            raise ValueError("Could not extract video ID from URL: %s" % url)
         r = requests.get("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=%s&key=%s" % (vid, os.environ['VAULTTUBE_YTKEY']))
         retj = r.json()
         r.close()
