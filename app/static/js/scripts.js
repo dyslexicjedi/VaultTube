@@ -16,8 +16,8 @@ function processdata(data){
         }
         txt += "<p><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
         var d = data[i].PublishedAt.split(' ')[0]
-        txt += "</div><div class=\"card-footer\"><small class=\"text-muted\">Published: "+d+"</small></br>";
-        txt += "<small class=\"text-muted\">Length: "+data[i]['length'];
+        txt += "</div><div class=\"card-footer\"><small>Published: "+d+"</small></br>";
+        txt += "<small>Length: "+data[i]['length'];
         txt += "</small></div></div></div>";
         $("#carddeck").append(txt);
     });
