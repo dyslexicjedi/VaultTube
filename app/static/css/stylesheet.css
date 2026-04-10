@@ -127,9 +127,10 @@ body {
   margin: 3px 0px 0 15px;
 }
 #playerdiv{
-  overflow: hidden;
-  max-height: 80vh;
+  overflow: visible;
+  max-height: 85vh;
   max-width: 100%;
+  padding-bottom: 4em;
 }
 .toprow{
   display: flex;
