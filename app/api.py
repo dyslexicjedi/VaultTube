@@ -4,7 +4,7 @@ import subprocess
 from backend import get_video
 from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, dl_status_map as yt_dl_map
 from backend import process_channel,save_uploaded_video_metadata
-from database import checkdb,get_connection,insert_playlist,find_next_previous
+from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors
 from flask import request,jsonify
 import shutil
 import datetime
@@ -310,6 +310,35 @@ def queue_status():
     ]
 
     return json.dumps(data, indent=4, sort_keys=True, default=str)
+
+@api_bp.route('/downloads/errors/')
+def get_download_errors_api():
+    try:
+        logger = current_app.logger
+        errors = get_download_errors(logger, 50)
+        data = []
+        for err in errors:
+            data.append({
+                'id': err[0],
+                'url': err[1],
+                'error_type': err[2],
+                'error_message': err[3],
+                'created_at': str(err[4])
+            })
+        return json.dumps(data, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API Get Download Errors Failed: %s" % e)
+        return json.dumps([])
+
+@api_bp.route('/downloads/errors/', methods=['DELETE'])
+def clear_download_errors_api():
+    try:
+        logger = current_app.logger
+        clear_download_errors(logger)
+        return "True"
+    except Exception as e:
+        current_app.logger.error("API Clear Download Errors Failed: %s" % e)
+        return "False"
 
 @api_bp.route("/subscribe/<string:type>/<string:value>")
 def api_subscribe(type,value):

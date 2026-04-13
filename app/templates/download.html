@@ -48,6 +48,29 @@
         <ul id="queuelist" class="dl-queue-list"></ul>
     </section>
 
+    <div class="dl-divider"></div>
+
+    <!-- Download Errors -->
+    <section class="dl-section">
+        <div class="dl-queue-header">
+            <div class="dl-section-title" style="margin-bottom:0;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M8.982 1.53a.5.5 0 0 0-.964.286l-1.33 6.6a.5.5 0 0 0 .496.604h7a.5.5 0 0 0 .496-.604l-1.33-6.6a.5.5 0 0 0-.964-.286L8.982 1.53zm-3.692 1.638a.5.5 0 0 0-.286.964l6.6 1.33a.5.5 0 0 0 .604-.496v-7a.5.5 0 0 0-.604-.496l-6.6 1.33a.5.5 0 0 0-.286.964l6.6 1.33a.5.5 0 0 0 .496.604v7a.5.5 0 0 0-.496.604l-6.6-1.33z"/>
+                    <path d="M8 4.5a.5.5 0 0 0-.5.5v4a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 0-.5-.5h-1zm0 6a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/>
+                </svg>
+                Download Errors
+            </div>
+            <button class="dl-clear-btn" type="button" onclick="clearErrors();">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-.5.5v6a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5V6a.5.5 0 0 0-.5-.5h-1z"/>
+                    <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                </svg>
+                Clear Errors
+            </button>
+        </div>
+        <ul id="errorslist" class="dl-queue-list dl-errors-list"></ul>
+    </section>
+
 </div>
 
 <div id="dlpush" style="height: 80px;"></div>
@@ -79,6 +102,56 @@
     .dl-section-title svg {
         opacity: 0.7;
         flex-shrink: 0;
+    }
+    .dl-clear-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        background: rgba(220,38,38,0.2);
+        border: 1px solid rgba(220,38,38,0.4);
+        border-radius: 999px;
+        color: #fca5a5;
+        font-family: inherit;
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.2rem 0.75rem;
+        cursor: pointer;
+        transition: background 0.2s ease, border-color 0.2s ease;
+    }
+    .dl-clear-btn:hover {
+        background: rgba(220,38,38,0.3);
+        border-color: rgba(220,38,38,0.6);
+        color: #f87171;
+    }
+    .dl-errors-list li {
+        background: rgba(220,38,38,0.08);
+        border: 1px solid rgba(220,38,38,0.15);
+    }
+    .dl-errors-list li .error-url {
+        color: #fca5a5;
+        font-weight: 600;
+        word-break: break-all;
+    }
+    .dl-errors-list li .error-type {
+        display: inline-block;
+        background: rgba(220,38,38,0.2);
+        color: #fca5a5;
+        font-size: 0.7rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+        margin-bottom: 0.25rem;
+        font-weight: 600;
+    }
+    .dl-errors-list li .error-message {
+        color: #e5e7eb;
+        font-size: 0.8rem;
+        word-break: break-all;
+        line-height: 1.4;
+    }
+    .dl-errors-list li .error-time {
+        color: #9ca3af;
+        font-size: 0.7rem;
+        margin-top: 0.35rem;
     }
     /* Input row */
     .dl-input-row {
@@ -301,6 +374,62 @@
         }
         setTimeout(getStatus,3000);
     }
+
+    async function getErrors() {
+        try {
+            $("#errorslist").empty();
+            const r = await fetch("/api/downloads/errors/");
+            const errors = await r.json();
+            
+            if(errors.length > 0){
+                for(let i in errors){
+                    let li = document.createElement('li');
+                    li.className = "list-group-item";
+                    
+                    let urlDiv = document.createElement('div');
+                    urlDiv.className = "error-url";
+                    urlDiv.textContent = errors[i].url;
+                    li.appendChild(urlDiv);
+                    
+                    let typeSpan = document.createElement('span');
+                    typeSpan.className = "error-type";
+                    typeSpan.textContent = errors[i].error_type;
+                    li.appendChild(typeSpan);
+                    
+                    let msgDiv = document.createElement('div');
+                    msgDiv.className = "error-message";
+                    msgDiv.textContent = errors[i].error_message;
+                    li.appendChild(msgDiv);
+                    
+                    let timeDiv = document.createElement('div');
+                    timeDiv.className = "error-time";
+                    let errorDate = new Date(errors[i].created_at);
+                    timeDiv.textContent = errorDate.toLocaleString();
+                    li.appendChild(timeDiv);
+                    
+                    $("#errorslist").append(li);
+                }
+            }
+        }
+        catch(e){
+            console.error("Error polling Error",e);
+        }
+        setTimeout(getErrors,5000);
+    }
+
+    async function clearErrors() {
+        try {
+            await fetch("/api/downloads/errors/", {
+                method: "DELETE"
+            });
+            getErrors();
+        }
+        catch(e){
+            console.error("Error clearing errors",e);
+        }
+    }
+
     getStatus();
+    getErrors();
 </script>
 {% endblock %}

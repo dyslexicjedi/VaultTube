@@ -83,3 +83,4 @@ def download(qo, logger):
             return False
     except Exception as e:
         logger.error("YT Single Download Failed: %s" % e)
+        return False

@@ -76,8 +76,22 @@ def checkdb(logger):
         if(not cur.fetchone()):
             logger.info("IgnoreVid Table not created, creating...")
             cur.execute("create table IgnoreVid (`id` varchar(50) COLLATE utf8mb4_bin NOT NULL,PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
+        #Download Errors
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'download_errors' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
+        if(not cur.fetchone()):
+            logger.info("Download Errors Table not created, creating...")
+            cur.execute("""CREATE TABLE `download_errors` (
+                `id` int(11) NOT NULL AUTO_INCREMENT,
+                `url` varchar(500) DEFAULT NULL,
+                `error_type` varchar(50) DEFAULT NULL,
+                `error_message` text DEFAULT NULL,
+                `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+            logger.info("Download Errors table created")
         cur.close()
         con.close()
+        cleanup_old_errors(logger, 7)
         return True
     except Exception as e:
         logger.error("Failed during table create: %s",e)
@@ -316,3 +330,52 @@ def update_video_deleted(vid,isDeleted,logger):
     cur.close()
     con.close()
     logger.info("Updated video deleted status %s for vid %s",isDeleted,vid)
+
+def insert_download_error(url, error_type, error_msg, logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        sql = "INSERT INTO download_errors(url, error_type, error_message) VALUES(%s, %s, %s)"
+        cur.execute(sql, (url, error_type, error_msg))
+        con.commit()
+        cur.close()
+        con.close()
+    except Exception as e:
+        logger.error("Error during insert_download_error: %s", e)
+
+def get_download_errors(logger, limit=50):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        sql = "SELECT id, url, error_type, error_message, created_at FROM download_errors ORDER BY created_at DESC LIMIT %s"
+        cur.execute(sql, (limit,))
+        rv = cur.fetchall()
+        cur.close()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during get_download_errors: %s", e)
+        return []
+
+def clear_download_errors(logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("DELETE FROM download_errors")
+        con.commit()
+        cur.close()
+        con.close()
+        logger.info("Download errors cleared")
+    except Exception as e:
+        logger.error("Error during clear_download_errors: %s", e)
+
+def cleanup_old_errors(logger, days=7):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("DELETE FROM download_errors WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)", (days,))
+        con.commit()
+        cur.close()
+        con.close()
+    except Exception as e:
+        logger.error("Error during cleanup_old_errors: %s", e)
