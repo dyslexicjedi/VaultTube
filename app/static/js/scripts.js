@@ -14,8 +14,9 @@ function processdata(data){
         } else {
             txt += "<h5 class=\"card-title\">"+data[i].title+"</h5></div>";
         }
-        txt += "<p><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
-        var d = data[i].PublishedAt.split(' ')[0]
+        var creatorName = data[i]['youtuber'] || data[i]['channelId'];
+        txt += "<p><a href='/creator.html?creator="+data[i]['channelId']+"'>"+creatorName+"</a></p>";
+        var d = data[i].PublishedAt ? data[i].PublishedAt.split(' ')[0] : 'Unknown';
         txt += "</div><div class=\"card-footer\"><small>Published: "+d+"</small></br>";
         txt += "<small>Length: "+data[i]['length'];
         txt += "</small></div></div></div>";
