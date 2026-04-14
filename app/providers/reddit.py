@@ -85,10 +85,25 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, l
     if published_at is None:
         published_at = datetime.datetime.utcnow()
     filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + ".mp4")
+
+    def make_progress_hook(vid_id):
+        def hook(d):
+            try:
+                status_obj = dl_status_map.setdefault(vid_id, {})
+                if d["status"] == "downloading":
+                    status_obj['progress'] = d['_percent_str']
+                    status_obj['title'] = d.get('info_dict', {}).get('title', "")
+                    status_obj['type'] = 'reddit'
+                elif d["status"] == "finished":
+                    status_obj['progress'] = "100%"
+            except Exception as e:
+                current_app.logger.error("dl_progress_hook Failed: %s" % e)
+        return hook
+
     ydl_opts = {
         'outtmpl': filepath,
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        "progress_hooks": [dl_progress_hook],
+        "progress_hooks": [make_progress_hook(video_id)],
     }
 
     import yt_dlp
@@ -96,10 +111,11 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, l
         dl_status_map[video_id] = {'progress': '0%', 'title': video_title, 'type': 'reddit'}
         ydl.download([video_url])
 
-    save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit')
-
-    if video_id in dl_status_map:
-        del dl_status_map[video_id]
+    try:
+        save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit')
+    finally:
+        if video_id in dl_status_map:
+            del dl_status_map[video_id]
 
     return True
 
@@ -137,17 +153,3 @@ def extract_redgifs_id(url):
     return None
 
 
-def dl_progress_hook(d):
-    try:
-        video_id = d.get('info_dict', {}).get('id', None)
-        if not video_id:
-            video_id = d.get('filename', '').split('/')[-1].split('.')[0]
-        status_obj = dl_status_map.setdefault(video_id, {})
-        if d["status"] == "downloading":
-            status_obj['progress'] = d['_percent_str']
-            status_obj['title'] = d.get('info_dict', {}).get('title', "")
-            status_obj['type'] = 'reddit'
-        elif d["status"] == "finished":
-            status_obj['progress'] = "100%"
-    except Exception as e:
-        current_app.logger.error("dl_progress_hook Failed: %s" % e)
