@@ -1,9 +1,8 @@
 import os
-from urllib.parse import urlparse, urlsplit
-import re
+from urllib.parse import urlparse
 import praw
 from flask import current_app
-from database import check_db_video, insert_not_found
+from database import insert_not_found
 from backend import get_video
 from providers.base import dl_status_map
 
@@ -38,20 +37,8 @@ def download(q, logger):
                 logger.error("Could not extract RedGIF ID from URL: %s" % url)
                 insert_not_found("redgifs_" + url.split('/')[-1][:50], logger)
                 return False
-            
-            reddit = _get_reddit_client()
-            submission = reddit.submission(id=video_id)
-            
-            if not submission:
-                logger.error("Could not fetch RedGIF submission: %s" % url)
-                insert_not_found(video_id, logger)
-                return False
-                
-            video_url = submission.url
-            video_title = submission.title
-            channel_id = submission.author.name if submission.author else 'unknown'
-            is_image = submission.url.endswith(('.jpg', '.jpeg', '.png'))
-            
+            return download_video(url, video_id, video_id, 'redgifs', logger)
+
         else:
             parsed = urlparse(url)
             if parsed.hostname in ('redd.it',):
@@ -64,21 +51,15 @@ def download(q, logger):
             
             reddit = _get_reddit_client()
             submission = reddit.submission(id=vid)
-            
-            if not submission:
-                logger.error("Could not fetch Reddit submission: %s" % url)
-                insert_not_found(vid, logger)
-                return False
-            
             video_id = submission.id
             video_title = submission.title
             channel_id = submission.author.name if submission.author else 'unknown'
             
             if submission.is_video:
-                video_url = submission.media['reddit_video']['fallback_url']
+                video_url = url  # pass the post URL so yt-dlp can merge audio+video
             elif submission.url:
                 video_url = submission.url
-                is_image = submission.url.endswith(('.jpg', '.jpeg', '.png'))
+                is_image = submission.url.lower().split('?')[0].endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
             else:
                 logger.error("No media found in submission: %s" % url)
                 insert_not_found(video_id, logger)
@@ -99,18 +80,17 @@ def download(q, logger):
 
 
 def download_video(video_url, video_id, video_title, channel_id, logger):
+    filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + ".mp4")
     ydl_opts = {
-        'outtmpl': os.path.join(os.environ['VAULTTUBE_VAULTDIR'], "%(channel_id)s", "%(id)s.mp4"),
+        'outtmpl': filepath,
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         "progress_hooks": [dl_progress_hook],
     }
-    
+
     import yt_dlp
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         dl_status_map[video_id] = {'progress': '0%', 'title': video_title, 'type': 'reddit'}
         ydl.download([video_url])
-    
-    filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + ".mp4")
     result = get_video(filepath, current_app.logger)
     
     if video_id in dl_status_map:
@@ -125,7 +105,7 @@ def download_image(image_url, video_id, channel_id, logger):
         response = requests.get(image_url)
         response.raise_for_status()
         
-        ext = image_url.split('.')[-1]
+        ext = image_url.lower().split('?')[0].split('.')[-1]
         filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + "." + ext)
         
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
