@@ -5,6 +5,7 @@
 
 <div id="playerdiv" >
     <video id="player" class="video-js vjs-default-skin vjs-big-play-centered videojs-overlay-player" data-setup='{}' controls playsinline preload="auto" width="auto" height="auto"></video>
+    <img id="imageplayer" style="display:none; max-width:100%; height:auto;">
 </div>
 <script src="/static/js/scripts.js"></script>
 <div class="row">
@@ -19,46 +20,82 @@
     const urlparams = new URLSearchParams(querystring);
     const id = urlparams.get('id');
     const video = document.querySelector("video");
+    const imageExts = ['jpg','jpeg','png','webp','gif'];
     var tspoll;
+    var vPlayer;
     watch_status(id);
-    vPlayer = videojs('player',{techOrder: ["html5"],autoplay: false});
     $.getJSON("/api/video/"+id+".mp4",function(data){
         var jobj = jQuery.parseJSON(data[0]["json"]);
-        //Load Video
-        vPlayer.src([{type: "video/webm",src: data[0]["filepath"]}]);
-        vPlayer.fluid(true);
+        var filepath = data[0]["filepath"];
+        var ext = filepath.split('.').pop().toLowerCase();
+        var isImage = imageExts.includes(ext);
+
         //Adding Info to Player
         $("#title").text(data[0]['title']);
         $("#desc").html(jobj['items'][0]["snippet"]['description'].replace('\n','<br>').replace('\r','<br>'));
         $("#creator").html("<a href='/creator.html?creator="+data[0]['channelId']+"'>"+data[0]['youtuber']+"</a>");
-        //Set Timestamp if non-0
-        if(!data[0]['timestamp'] == 0){
-            vPlayer.currentTime(data[0]['timestamp']);
-        }
-    });
-    //Pause Listener - Push Timestamp to server and disable polling
-    video.addEventListener("pause",(event) => {
-        clearInterval(tspoll);
-        $.getJSON("/api/set_timestamp/"+video.currentTime+"/"+id,function(data){});
-    });
-    //Play Listener - Start polling
-    video.addEventListener("play",(event) => {
-        tspoll = window.setInterval(function(){
-            $.getJSON("/api/set_timestamp/"+video.currentTime+"/"+id,function(data){});
-        }, 5000);
-    });
-    //End Listener - Update watch status
-    video.addEventListener("ended",(event) => {
-        $.ajax({url: "/api/watched/"+id, success: function(result){
-            watch_status(id);
-        }});
-        $.getJSON("/api/set_timestamp/0/"+id,function(data){});
-        clearInterval(tspoll);
-    });
-    video.addEventListener("canplay",(event) => {
-        if(vPlayer.videoHeight() > vPlayer.videoWidth()){
-            $("#playerdiv").width(400);
-            console.log("Suspected Vertical Video, changing player height");
+
+        if(isImage){
+            // Hide video player, show image
+            $("#player").hide();
+            $("#imageplayer").attr("src", filepath).show();
+            // Mark as watched immediately since there's nothing to play
+            $.ajax({url: "/api/watched/"+id, success: function(result){
+                watch_status(id);
+            }});
+        } else {
+            // Load as video
+            vPlayer = videojs('player',{techOrder: ["html5"],autoplay: false});
+            vPlayer.src([{type: "video/webm",src: filepath}]);
+            vPlayer.fluid(true);
+            //Set Timestamp if non-0
+            if(!data[0]['timestamp'] == 0){
+                vPlayer.currentTime(data[0]['timestamp']);
+            }
+            //Pause Listener - Push Timestamp to server and disable polling
+            video.addEventListener("pause",(event) => {
+                clearInterval(tspoll);
+                $.getJSON("/api/set_timestamp/"+video.currentTime+"/"+id,function(data){});
+            });
+            //Play Listener - Start polling
+            video.addEventListener("play",(event) => {
+                tspoll = window.setInterval(function(){
+                    $.getJSON("/api/set_timestamp/"+video.currentTime+"/"+id,function(data){});
+                }, 5000);
+            });
+            //End Listener - Update watch status
+            video.addEventListener("ended",(event) => {
+                $.ajax({url: "/api/watched/"+id, success: function(result){
+                    watch_status(id);
+                }});
+                $.getJSON("/api/set_timestamp/0/"+id,function(data){});
+                clearInterval(tspoll);
+            });
+            video.addEventListener("canplay",(event) => {
+                if(vPlayer.videoHeight() > vPlayer.videoWidth()){
+                    $("#playerdiv").width(400);
+                    console.log("Suspected Vertical Video, changing player height");
+                }
+            });
+            // Keyboard arrow left/right => seek +/- 15s
+            document.addEventListener('keydown', function(event) {
+                if (event.target.tagName.toLowerCase() !== 'input' && event.target.tagName.toLowerCase() !== 'textarea') {
+                    if (event.key === "ArrowRight") {
+                        vPlayer.currentTime(vPlayer.currentTime() + 15);
+                    }
+                    if (event.key === "ArrowLeft") {
+                        vPlayer.currentTime(Math.max(0, vPlayer.currentTime() - 15));
+                    }
+                    if (event.key === " " || event.key === "Spacebar") {
+                        event.preventDefault();
+                        if (vPlayer.paused()) {
+                            vPlayer.play();
+                        } else {
+                            vPlayer.pause();
+                        }
+                    }
+                }
+            });
         }
     });
     $.getJSON("/api/find_next_previous/"+id,function(data){
@@ -77,25 +114,5 @@
             }});
         }
     }
-    // Keyboard arrow left/right => seek +/- 15s
-    document.addEventListener('keydown', function(event) {
-    if (event.target.tagName.toLowerCase() !== 'input' && event.target.tagName.toLowerCase() !== 'textarea') {
-        if (event.key === "ArrowRight") {
-            vPlayer.currentTime(vPlayer.currentTime() + 15);
-        }
-        if (event.key === "ArrowLeft") {
-            vPlayer.currentTime(Math.max(0, vPlayer.currentTime() - 15));
-        }
-        if (event.key === " " || event.key === "Spacebar") { // Spacebar for older browsers
-            event.preventDefault(); // Prevent page from scrolling
-            if (vPlayer.paused()) {
-                vPlayer.play();
-            } else {
-                vPlayer.pause();
-            }
-        }
-    }
-    });
-
 </script>
 {% endblock %}
