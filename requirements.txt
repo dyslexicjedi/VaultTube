@@ -4,3 +4,4 @@ requests
 yt-dlp[default]
 opencv-python-headless
 python-dotenv
+praw
