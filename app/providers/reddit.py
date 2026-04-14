@@ -1,9 +1,10 @@
 import os
+import datetime
 from urllib.parse import urlparse
 import praw
 from flask import current_app
 from database import insert_not_found
-from backend import get_video
+from backend import save_uploaded_video_metadata
 from providers.base import dl_status_map
 
 
@@ -37,7 +38,7 @@ def download(q, logger):
                 logger.error("Could not extract RedGIF ID from URL: %s" % url)
                 insert_not_found("redgifs_" + url.split('/')[-1][:50], logger)
                 return False
-            return download_video(url, video_id, video_id, 'redgifs', logger)
+            return download_video(url, video_id, video_id, 'redgifs', None, logger)
 
         else:
             parsed = urlparse(url)
@@ -54,7 +55,8 @@ def download(q, logger):
             video_id = submission.id
             video_title = submission.title
             channel_id = submission.author.name if submission.author else 'unknown'
-            
+            published_at = datetime.datetime.utcfromtimestamp(submission.created_utc)
+
             if submission.is_video:
                 video_url = url  # pass the post URL so yt-dlp can merge audio+video
             elif submission.url:
@@ -64,22 +66,24 @@ def download(q, logger):
                 logger.error("No media found in submission: %s" % url)
                 insert_not_found(video_id, logger)
                 return False
-        
+
         logger.debug("Starting Reddit/RedGIF Download: %s" % url)
         logger.debug("Content URL: %s" % video_url)
         logger.debug("Is image: %s" % is_image)
-        
+
         if is_image:
-            return download_image(video_url, video_id, channel_id, logger)
+            return download_image(video_url, video_id, channel_id, video_title, published_at, logger)
         else:
-            return download_video(video_url, video_id, video_title, channel_id, logger)
+            return download_video(video_url, video_id, video_title, channel_id, published_at, logger)
             
     except Exception as e:
         logger.error("Reddit Download Failed for %s: %s" % (url, e))
         return False
 
 
-def download_video(video_url, video_id, video_title, channel_id, logger):
+def download_video(video_url, video_id, video_title, channel_id, published_at, logger):
+    if published_at is None:
+        published_at = datetime.datetime.utcnow()
     filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + ".mp4")
     ydl_opts = {
         'outtmpl': filepath,
@@ -91,29 +95,32 @@ def download_video(video_url, video_id, video_title, channel_id, logger):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         dl_status_map[video_id] = {'progress': '0%', 'title': video_title, 'type': 'reddit'}
         ydl.download([video_url])
-    result = get_video(filepath, current_app.logger)
-    
+
+    save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit')
+
     if video_id in dl_status_map:
         del dl_status_map[video_id]
-    
+
     return True
 
 
-def download_image(image_url, video_id, channel_id, logger):
+def download_image(image_url, video_id, channel_id, video_title, published_at, logger):
     try:
         import requests
+        if published_at is None:
+            published_at = datetime.datetime.utcnow()
         response = requests.get(image_url)
         response.raise_for_status()
-        
+
         ext = image_url.lower().split('?')[0].split('.')[-1]
         filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + "." + ext)
-        
+
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'wb') as f:
             f.write(response.content)
-        
-        get_video(filepath, current_app.logger)
-        
+
+        save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit')
+
         return True
     except Exception as e:
         logger.error("Image download failed for %s: %s" % (image_url, e))
