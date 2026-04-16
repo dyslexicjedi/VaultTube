@@ -28,6 +28,12 @@ def parse_response(cur,con):
     # return the results!
     return json.dumps(json_data, indent=4, sort_keys=True, default=str)
 
+ALLOWED_SORT_COLUMNS = {
+    'AddedAt', 'PublishedAt', 'v.AddedAt', 'v.PublishedAt',
+    'v.timestamp', 'timestamp', 'v.title', 'title', 'v.watched', 'watched'
+}
+ALLOWED_DIRECTIONS = {'asc', 'desc'}
+
 @api_bp.route('/getvids/<string:status>/<string:opt>/<string:direction>/<string:page>')
 def getvids(status,opt,direction,page):
     try:
@@ -36,12 +42,15 @@ def getvids(status,opt,direction,page):
         cur = con.cursor()
         page_num = int(page) if page.isdigit() else 0
         if status == "unwatched":
-            status = "where v.watched = 0"
+            status_cond = "v.watched = 0"
         else:
-            status = ""
-        sql = f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid {status} order by {opt} {direction} limit 40 offset {page_num}"
+            status_cond = ""
+        safe_opt = opt if opt in ALLOWED_SORT_COLUMNS else 'PublishedAt'
+        safe_direction = direction if direction in ALLOWED_DIRECTIONS else 'desc'
+        where_clause = f"where {status_cond}" if status_cond else ""
+        sql = f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid {where_clause} order by {safe_opt} {safe_direction} limit 40 offset %s"
         current_app.logger.info(sql)
-        cur.execute(sql)
+        cur.execute(sql, (page_num,))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Latest Failed: %s"%e)
@@ -52,11 +61,10 @@ def imgid(id):
         current_app.logger.debug('Called Image ID: '+id)
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select image from images where id = '%s';"%(id,))
+        cur.execute("select image from images where id = %s;",(id,))
         if cur.rowcount > 0:
             img = cur.fetchone()[0]
         else:
-            #Cannot find image, Send Default Image
             cur.execute("select image from images where id = '-1';")
             img = cur.fetchone()[0]
         cur.close()
@@ -129,13 +137,12 @@ def set_timestamp(id,ts):
         ts = ts.split('.')[0]
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        sql = "Update videos set timestamp = '%s' where id = '%s';"%(ts,id)
+        sql = "Update videos set timestamp = %s where id = %s;"
         current_app.logger.info(sql)
-        cur.execute(sql)
+        cur.execute(sql,(ts,id))
         con.commit()
         cur.close()
         con.close()
-        # return the results!
         return "True"
     except Exception as e:
         current_app.logger.error("Set Timestamp Failed: %s"%e)
@@ -184,7 +191,8 @@ def channels(page):
         current_app.logger.debug("Called Channels %s"%(page,))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select channels.*,count(*) as vidcount,max(PublishedAt) as lastvidtime from channels left outer join videos on channels.channelId = videos.channelId group by channelId order by channelname limit 40 offset %s;"%(page,))
+        page_num = int(page) if page.isdigit() else 0
+        cur.execute("select channels.*,count(*) as vidcount,max(PublishedAt) as lastvidtime from channels left outer join videos on channels.channelId = videos.channelId group by channelId order by channelname limit 40 offset %s;",(page_num,))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
@@ -237,7 +245,7 @@ def api_search(searchtxt,page):
         current_app.logger.debug("Called Creator %s %s"%(searchtxt,page))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select * from videos where lower(json) like lower('%s') order by PublishedAt desc limit 40 offset %s;"%("%"+searchtxt+"%",page))
+        cur.execute("select * from videos where lower(json) like lower(%s) order by PublishedAt desc limit 40 offset %s;",("%"+searchtxt+"%",page))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
@@ -348,9 +356,8 @@ def api_subscribe(type,value):
         cur = con.cursor()
         if(type == "playlist"):
             current_app.logger.debug('Called Playlist Subscribe: '+value)
-            cur.execute("Select * from playlists where playlistId = '%s'"%(value))
+            cur.execute("Select * from playlists where playlistId = %s",(value,))
             if(not cur.rowcount):
-                #Create Playlist Item
                 plinfo = get_playlist_info(value,current_app.logger)
                 insert_playlist(plinfo,current_app.logger)
                 ret = True
@@ -364,7 +371,6 @@ def api_subscribe(type,value):
         con.commit()
         cur.close()
         con.close()
-        # return the results!
         return str(ret)
     except Exception as e:
         current_app.logger.error("Playlist Subscribe Failed: %s"%e)
@@ -394,7 +400,8 @@ def playlists(page):
         current_app.logger.debug("Called Playlists %s"%(page,))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select * from playlists order by playlistName desc limit 40 offset %s;"%(page,))
+        page_num = int(page) if page.isdigit() else 0
+        cur.execute("select * from playlists order by playlistName desc limit 40 offset %s;",(page_num,))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
@@ -405,7 +412,8 @@ def api_playlist(playlist,page):
         current_app.logger.debug("Called playlist %s %s"%(playlist,page))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select videos.*,playlistName from videos left outer join pl2vid on videos.id = pl2vid.videoId left outer join playlists on pl2vid.playlistId = playlists.playlistId where pl2vid.playlistId = '%s' order by PublishedAt desc limit 40 offset %s;"%(playlist,page))
+        page_num = int(page) if page.isdigit() else 0
+        cur.execute("select videos.*,playlistName from videos left outer join pl2vid on videos.id = pl2vid.videoId left outer join playlists on pl2vid.playlistId = playlists.playlistId where pl2vid.playlistId = %s order by PublishedAt desc limit 40 offset %s;",(playlist,page_num))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Playlist Failed: %s"%e)
@@ -444,7 +452,7 @@ def api_delete(vid):
             current_app.logger.error("API Delete File Missing: %s"%e)
         cur.execute("Delete from videos where id = %s",(vid,))
         cur.execute("Delete from images where id = %s",(vid,))
-        cur.execute("Insert ignore into IgnoreVid(id) values('%s')"%vid)
+        cur.execute("Insert ignore into IgnoreVid(id) values(%s)",(vid,))
         con.commit()
         cur.close()
         current_app.logger.info("Deleted Video %s"%vid)

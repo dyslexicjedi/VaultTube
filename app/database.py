@@ -137,7 +137,7 @@ def check_db_channel(id,logger):
     try:
         check = get_connection(logger)
         cur = check.cursor()
-        cur.execute("Select * FROM channels where channelid = '%s'"%id)
+        cur.execute("Select * FROM channels where channelid = %s",(id,))
         if(not cur.fetchone()):
             test = False
         else:
@@ -186,7 +186,7 @@ def check_db_video_length(id,logger):
     try:
         check = get_connection(logger)
         cur = check.cursor()
-        cur.execute("Select length FROM videos where id = '%s'"%id)
+        cur.execute("Select length FROM videos where id = %s",(id,))
         data = cur.fetchone()[0]
         if(not data == "0"):
             test = True
@@ -200,7 +200,7 @@ def update_length(id,length,logger):
     try:
         con = get_connection(logger)
         cur = con.cursor()
-        cur.execute("Update videos set length = '%s' where id='%s';"%(length,id))
+        cur.execute("Update videos set length = %s where id=%s;",(length,id))
         con.commit()
         cur.close()
         con.close()
@@ -238,7 +238,7 @@ def check_pl2vid_info(pl,vid,logger):
     try:
         check = get_connection(logger)
         cur = check.cursor()
-        cur.execute("Select * FROM pl2vid where playlistId = '%s' and videoId = '%s'"%(pl,vid))
+        cur.execute("Select * FROM pl2vid where playlistId = %s and videoId = %s",(pl,vid))
         if(cur.fetchone()):
             test = True
         cur.close()
