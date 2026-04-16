@@ -15,6 +15,12 @@ def get_error_type(error_msg):
     else:
         return 'Provider Error'
 
+def get_provider_by_source(source):
+    for provider in providers._providers:
+        if provider.__name__ == 'providers.' + source:
+            return provider
+    return None
+
 def start_dl_queue(logger, app):
     logger.info("Starting Download Queue Process")
     while 1:
@@ -26,6 +32,8 @@ def start_dl_queue(logger, app):
                     qo = q.get()
                     logger.info("Downloading %s" % qo.url)
                     provider = providers.get_provider(qo.url)
+                    if not provider and qo.source:
+                        provider = get_provider_by_source(qo.source)
                     if provider:
                         logger.info("*Dispatching to provider: %s" % provider.__name__)
                         try:

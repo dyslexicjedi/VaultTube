@@ -27,7 +27,7 @@ def download(q,logger):
             'outtmpl': os.environ['VAULTTUBE_VAULTDIR']+"/%(channel_id)s/%(id)s.mp4",
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             "progress_hooks": [dl_progress_hook],
-            'js_runtimes': {'deno': {'path': '/root/.deno/bin/deno'}},
+            'js_runtimes': {'deno': {'path': os.environ['VAULTTUBE_DENOPATH']}},
             'socket_timeout': 30,        # seconds before a socket read times out
             'retries': 10,               # retry failed fragment/chunk downloads
             'fragment_retries': 10,      # retry failed fragments specifically

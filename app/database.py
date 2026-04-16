@@ -313,7 +313,7 @@ def get_oldest_video_check(logger):
     try:
         con = get_connection(logger)
         cur = con.cursor()
-        cur.execute("Select * from vaulttube.videos where source = 'youtube' order by lastScanned asc limit 1000;")
+        cur.execute("Select * from videos where source = 'youtube' order by lastScanned asc limit 1000;")
         rv = cur.fetchall()
         cur.close()
         con.close()

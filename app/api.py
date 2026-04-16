@@ -48,7 +48,7 @@ def getvids(status,opt,direction,page):
         safe_opt = opt if opt in ALLOWED_SORT_COLUMNS else 'PublishedAt'
         safe_direction = direction if direction in ALLOWED_DIRECTIONS else 'desc'
         where_clause = f"where {status_cond}" if status_cond else ""
-        sql = f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid {where_clause} order by {safe_opt} {safe_direction} limit 40 offset %s"
+        sql = f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid {where_clause} order by {safe_opt} {safe_direction} limit 40 offset %s"
         current_app.logger.info(sql)
         cur.execute(sql, (page_num,))
         return parse_response(cur,con)
@@ -66,12 +66,19 @@ def imgid(id):
             img = cur.fetchone()[0]
         else:
             cur.execute("select image from images where id = '-1';")
-            img = cur.fetchone()[0]
+            result = cur.fetchone()
+            if result:
+                img = result[0]
+            else:
+                cur.close()
+                con.close()
+                return "Image not found", 404
         cur.close()
         con.close()
         return send_file(io.BytesIO(img),mimetype='image/jpeg',as_attachment=True,download_name='%s.jpg' % id)
     except Exception as e:
         current_app.logger.error("API Image Failed: %s"%e)
+        return "Image error", 500
 
 @api_bp.route('/video/<string:id>')
 def getVideo(id):
@@ -81,7 +88,7 @@ def getVideo(id):
             id = id.split(".")[0]
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where id = %s;",(id,))
+        cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where id = %s;",(id,))
         # serialize results into JSON
         row_headers=[x[0] for x in cur.description]
         rv = cur.fetchall()
@@ -153,7 +160,7 @@ def list_resume():
         current_app.logger.debug("Called List Resume")
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where not timestamp = 0 order by PublishedAt desc limit 40;")
+        cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where not timestamp = 0 order by PublishedAt desc limit 40;")
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API List Resume Failed: %s"%e)
@@ -164,7 +171,16 @@ def api_download():
         url = request.get_json(force=True).get('url', '').strip()
         if not url:
             return "Missing URL", 400
-        i = QueueObject(url, "", "", 0, "")
+        source = "youtube"
+        if len(url) == 11 and not url.startswith('http'):
+            source = "youtube"
+        elif url.startswith(('PL', 'LL', 'UL')):
+            source = "youtube"
+        elif url.startswith('UC'):
+            source = "youtube"
+        elif 'youtube.com' in url or 'youtu.be' in url:
+            source = "youtube"
+        i = QueueObject(url, "", source, 0, "")
         current_app.config['queue'].put(i)
         return "True"
     except Exception as e:
@@ -205,7 +221,7 @@ def api_creator(creator,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         offset = int(page) * 40  # fixed offset
-        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.channelId = %s order by v.PublishedAt desc limit 40 offset %s;", (creator, offset))
+        cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.channelId = %s order by v.PublishedAt desc limit 40 offset %s;", (creator, offset))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
@@ -229,11 +245,11 @@ def api_creator(creator,page):
 #             sort_added = 'desc'
         
 #         if(opt == "PublishedAt"):
-#             cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt %s limit 40 offset %s;"%(sort_release, page))
+#             cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt %s limit 40 offset %s;"%(sort_release, page))
 #         elif(opt == "AddedAt"):
-#             cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.AddedAt %s limit 40 offset %s;"%(sort_added, page))
+#             cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.watched = 0 order by v.AddedAt %s limit 40 offset %s;"%(sort_added, page))
 #         else:
-#             cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt %s limit 40 offset %s;"%(sort_release, page))
+#             cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt %s limit 40 offset %s;"%(sort_release, page))
 #         return parse_response(cur,con)
 #     except Exception as e:
 #         current_app.logger.error("API Unwatched Failed: %s"%e)
@@ -424,7 +440,7 @@ def api_random():
         current_app.logger.debug("Called Random")
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from vaulttube.videos v left outer join vaulttube.channels c on v.channelId = c.channelid order by RAND() LIMIT 40;")
+        cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid order by RAND() LIMIT 40;")
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Random Fail: %s"%e)
@@ -467,15 +483,15 @@ def api_stats():
         data = {}
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("Select Youtuber,count(*) from vaulttube.videos Group By Youtuber Having count(*) > 1 and not Youtuber = '404'")
+        cur.execute(f"Select Youtuber,count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos Group By Youtuber Having count(*) > 1 and not Youtuber = '404'")
         data['countbyyoutuber'] = cur.fetchall()
-        cur.execute("Select count(*) from vaulttube.videos Where not youtuber = '404'")
+        cur.execute(f"Select count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos Where not youtuber = '404'")
         data['totalcount'] = cur.fetchall()
-        cur.execute("select videos.watched,count(*) from vaulttube.videos where not youtuber = '404' group by videos.watched")
+        cur.execute(f"select videos.watched,count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos where not youtuber = '404' group by videos.watched")
         data['watched'] = cur.fetchall()
-        cur.execute("select round(avg(TIME_TO_SEC(videos.length)),0) from vaulttube.videos where not youtuber = '404'")
+        cur.execute(f"select round(avg(TIME_TO_SEC(videos.length)),0) from {os.environ['VAULTTUBE_DBNAME']}.videos where not youtuber = '404'")
         data['avg_length_seconds'] = cur.fetchall()
-        cur.execute("select isDeleted,count(*) from vaulttube.videos where source='youtube' group by isDeleted ")
+        cur.execute(f"select isDeleted,count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos where source='youtube' group by isDeleted ")
         data['deleted'] = cur.fetchall()
         cur.close()
         return json.dumps(data, indent=4, sort_keys=True, default=str)

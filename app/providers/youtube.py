@@ -8,13 +8,13 @@ from flask import current_app
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info, insert_not_found
 from backend import get_video
 from providers.base import dl_status_map
+from QueueObject import QueueObject
 
 
 def dl_progress_hook(d):
     try:
         video_id = d.get('info_dict', {}).get('id', None)
         if not video_id:
-            # fallback to global, if needed
             video_id = globals().get('videoID', '')
         status_obj = dl_status_map.setdefault(video_id, {})
         if d["status"] == "downloading":
@@ -29,58 +29,189 @@ def dl_progress_hook(d):
 def provider_domains():
     return ['youtube.com','youtu.be']
 
+def parse_youtube_url(url):
+    if not url:
+        return (None, None)
+    url = url.strip()
+    parsed = urlparse(url)
+    if parsed.hostname in ('youtu.be',):
+        return ('video', parsed.path.lstrip('/'))
+    if parsed.hostname in ('youtube.com', 'www.youtube.com'):
+        path = parsed.path
+        query = parse_qs(parsed.query)
+        if path.startswith('/shorts/'):
+            vid = path.split('/shorts/')[1].split('/')[0]
+            return ('shorts', vid)
+        if path == '/watch' and query.get('v'):
+            return ('video', query['v'][0])
+        if path == '/playlist':
+            return ('playlist', query.get('list', [None])[0])
+        if path.startswith('/channel/'):
+            cid = path.split('/channel/')[1].split('/')[0]
+            return ('channel', cid)
+        if path.startswith('/c/') or path.startswith('/user/'):
+            return ('custom', path.split('/')[2])
+    if len(url) == 11 and not url.startswith('http'):
+        return ('video', url)
+    if not url.startswith('http'):
+        if url.startswith('UC'):
+            return ('channel', url)
+        if url.startswith('PL') or url.startswith('LL') or url.startswith('UL'):
+            return ('playlist', url)
+    return (None, None)
+
+def download_video(url, logger, cookies=None):
+    vid = url.split('/watch?v=')[1] if '/watch?v=' in url else url.split('/shorts/')[1].split('/')[0] if '/shorts/' in url else None
+    if not vid:
+        if len(url) == 11 and not url.startswith('http'):
+            vid = url
+            url = "https://www.youtube.com/watch?v=%s" % vid
+        else:
+            raise ValueError("Could not extract video ID from URL: %s" % url)
+    r = requests.get("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=%s&key=%s" % (vid, os.environ['VAULTTUBE_YTKEY']))
+    retj = r.json()
+    r.close()
+    if retj['pageInfo']['totalResults'] <= 0:
+        insert_not_found(vid, logger)
+        logger.error("Unable to download: %s, content was not found." % vid)
+        return False
+    logger.debug("Starting Download: %s" % url)
+    cookies_local = False
+    if cookies is None:
+        f = open(os.environ['VAULTTUBE_YTCOOKIE'])
+        contents = f.read()
+        f.close()
+        cookies = StringIO(contents)
+        cookies_local = True
+    ydl_opts = {
+        'cookiefile': cookies,
+        'outtmpl': os.environ['VAULTTUBE_VAULTDIR'] + "/%(channel_id)s/%(id)s.mp4",
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        "progress_hooks": [dl_progress_hook],
+        'js_runtimes': {'deno': {'path': os.environ['VAULTTUBE_DENOPATH']}},
+        'socket_timeout': 30,
+        'retries': 10,
+        'fragment_retries': 10,
+        'retry_sleep_functions': {'http': lambda n: 5 * n},
+        'http_chunk_size': 10485760,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            data = ydl.extract_info(url, download=False)
+            channel_id = data['channel_id']
+            videoID = data['id']
+            videoTitle = data['title']
+            dl_status_map[videoID] = {'progress': '0%', 'title': videoTitle, 'type': 'youtube'}
+            ydl.download(url)
+        get_video(os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4", current_app.logger)
+        if videoID in dl_status_map:
+            del dl_status_map[videoID]
+    finally:
+        if cookies_local:
+            cookies.close()
+    videoTitle = ""
+    videoID = ""
+    channel_id = ""
+    return True
+
+def download_playlist(qo, logger, pageToken='0'):
+    try:
+        playlist_id = qo.url if hasattr(qo, 'url') else qo
+        if not playlist_id:
+            logger.error("Playlist ID is empty")
+            return False
+        if playlist_id.startswith('http'):
+            from urllib.parse import parse_qs, urlparse
+            parsed = urlparse(playlist_id)
+            playlist_id = parse_qs(parsed.query).get('list', [None])[0]
+        if not playlist_id:
+            logger.error("Could not extract playlist ID from URL: %s" % qo.url)
+            return False
+        key = os.environ['VAULTTUBE_YTKEY']
+        if pageToken == '0':
+            curl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s&maxResults=50" % (playlist_id, key)
+        else:
+            curl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s&maxResults=50&pageToken=%s" % (playlist_id, key, pageToken)
+        r = requests.get(curl)
+        retj = r.json()
+        r.close()
+        if 'items' not in retj:
+            logger.error("Invalid playlist response for ID: %s" % playlist_id)
+            return False
+        for vid in retj['items']:
+            content_details = vid.get('contentDetails', {})
+            vid_id = content_details.get('videoId')
+            if not vid_id:
+                continue
+            if check_db_video(vid_id, logger):
+                logger.debug("Already exists in DB: %s" % vid_id)
+                insert_pl2vid_info(playlist_id, vid_id, logger)
+            else:
+                logger.info("Queueing video from playlist: %s" % vid_id)
+                url = "https://www.youtube.com/watch?v=%s" % vid_id
+                qi = QueueObject(url, "", "youtube", 0, "")
+                current_app.config['queue'].put(qi)
+                insert_pl2vid_info(playlist_id, vid_id, logger)
+        if 'nextPageToken' in retj:
+            download_playlist(qo, logger, retj['nextPageToken'])
+        return True
+    except Exception as e:
+        logger.error("download_playlist failed: %s" % e)
+        return False
+
+def download_channel(qo, logger):
+    try:
+        channel_id = qo.url if hasattr(qo, 'url') else qo
+        if not channel_id:
+            logger.error("Channel ID is empty")
+            return False
+        if channel_id.startswith('http'):
+            from urllib.parse import urlparse
+            parsed = urlparse(channel_id)
+            if parsed.path.startswith('/channel/'):
+                channel_id = parsed.path.split('/channel/')[1].split('/')[0]
+            else:
+                logger.error("Cannot extract channel ID from URL: %s" % channel_id)
+                return False
+        if not channel_id.startswith('UC'):
+            logger.error("Invalid channel ID format: %s" % channel_id)
+            return False
+        key = os.environ['VAULTTUBE_YTKEY']
+        curl = "https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=%s&key=%s" % (channel_id, key)
+        r = requests.get(curl)
+        retj = r.json()
+        r.close()
+        if 'items' not in retj or len(retj['items']) == 0:
+            logger.error("Channel not found: %s" % channel_id)
+            return False
+        uploads_id = retj['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+        logger.info("Found uploads playlist %s for channel %s" % (uploads_id, channel_id))
+        qo_playlist = QueueObject(uploads_id, "", "youtube", 0, "")
+        return download_playlist(qo_playlist, logger)
+    except Exception as e:
+        logger.error("download_channel failed: %s" % e)
+        return False
+
 def download(qo, logger):
     """Accept a QueueObject or a plain URL string."""
     url = qo.url if hasattr(qo, 'url') else qo
     try:
-        parsed = urlparse(url)
-        if parsed.hostname in ('youtu.be',):
-            vid = parsed.path.lstrip('/')
-        else:
-            vid = parse_qs(parsed.query).get('v', [None])[0]
-        if not vid:
-            raise ValueError("Could not extract video ID from URL: %s" % url)
-        r = requests.get("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=%s&key=%s" % (vid, os.environ['VAULTTUBE_YTKEY']))
-        retj = r.json()
-        r.close()
-        if retj['pageInfo']['totalResults'] > 0:
-            logger.debug("Starting Download: %s" % url)
-            # Set Cookie
-            f = open(os.environ['VAULTTUBE_YTCOOKIE'])
-            contents = f.read()
-            f.close()
-            cookies = StringIO(contents)
-            ydl_opts = {
-                'cookiefile': cookies,
-                'outtmpl': os.environ['VAULTTUBE_VAULTDIR'] + "/%(channel_id)s/%(id)s.mp4",
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                "progress_hooks": [dl_progress_hook],
-                'js_runtimes': {'deno': {'path': '/root/.deno/bin/deno'}},
-                'socket_timeout': 30,        # seconds before a socket read times out
-                'retries': 10,               # retry failed fragment/chunk downloads
-                'fragment_retries': 10,      # retry failed fragments specifically
-                'retry_sleep_functions': {'http': lambda n: 5 * n},  # back-off: 5s, 10s, 15s...
-                'http_chunk_size': 10485760, # 10 MB chunks instead of the default large size
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                data = ydl.extract_info(url, download=False)
-                channel_id = data['channel_id']
-                videoID = data['id']
-                videoTitle = data['title']
-                dl_status_map[videoID] = {'progress': '0%', 'title': videoTitle, 'type': 'youtube'}
-                ydl.download(url)
-            get_video(os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4", current_app.logger)
-            if videoID in dl_status_map:
-                del dl_status_map[videoID]
-            videoTitle = ""
-            videoID = ""
-            channel_id = ""
-            cookies.close()
-            return True
-        else:
-            insert_not_found(vid, logger)
-            logger.error("Unable to download: %s, content was not found." % vid)
+        url_type, vid = parse_youtube_url(url)
+        if url_type is None:
+            raise ValueError("Could not determine URL type for: %s" % url)
+        if url_type in ('video', 'shorts'):
+            if url_type == 'shorts':
+                url = "https://www.youtube.com/shorts/%s" % vid
+            return download_video(url, logger)
+        elif url_type == 'playlist':
+            return download_playlist(qo, logger)
+        elif url_type == 'channel':
+            return download_channel(qo, logger)
+        elif url_type == 'custom':
+            logger.error("Custom channel URLs (e.g. /c/ or /user/) require channel ID conversion. URL: %s" % url)
             return False
+        else:
+            raise ValueError("Unknown URL type: %s" % url_type)
     except Exception as e:
         logger.error("YT Single Download Failed: %s" % e)
         return False
