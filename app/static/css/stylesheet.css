@@ -458,4 +458,10 @@ body {
   margin: 3px 0 0 15px;
 }
 
+#title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 
