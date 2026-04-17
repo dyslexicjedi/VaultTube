@@ -28,6 +28,12 @@ def parse_response(cur,con):
     # return the results!
     return json.dumps(json_data, indent=4, sort_keys=True, default=str)
 
+def api_success(data=None):
+    return jsonify({"success": True, "data": data})
+
+def api_error(error, status_code=400):
+    return jsonify({"success": False, "error": error}), status_code
+
 ALLOWED_SORT_COLUMNS = {
     'AddedAt', 'PublishedAt', 'v.AddedAt', 'v.PublishedAt',
     'v.timestamp', 'timestamp', 'v.title', 'title', 'v.watched', 'watched'
@@ -105,6 +111,7 @@ def getVideo(id):
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API Video Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/watched/<string:id>")
 def watched(id):
@@ -117,10 +124,10 @@ def watched(id):
         con.commit()
         cur.close()
         con.close()
-        # return the results!
-        return "True"
+        return api_success()
     except Exception as e:
         current_app.logger.error("Mark Watched Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/unwatched/<string:id>")
 def unwatched(id):
@@ -132,8 +139,7 @@ def unwatched(id):
         con.commit()
         cur.close()
         con.close()
-        # return the results!
-        return "True"
+        return api_success()
     except Exception as e:
         current_app.logger.error("Mark Unwatched Failed: %s"%e)
 
@@ -150,9 +156,10 @@ def set_timestamp(id,ts):
         con.commit()
         cur.close()
         con.close()
-        return "True"
+        return api_success()
     except Exception as e:
         current_app.logger.error("Set Timestamp Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/list/resume/")
 def list_resume():
@@ -170,7 +177,7 @@ def api_download():
     try:
         url = request.get_json(force=True).get('url', '').strip()
         if not url:
-            return "Missing URL", 400
+            return api_error("Missing URL", 400)
         source = "youtube"
         if len(url) == 11 and not url.startswith('http'):
             source = "youtube"
@@ -182,10 +189,10 @@ def api_download():
             source = "youtube"
         i = QueueObject(url, "", source, 0, "")
         current_app.config['queue'].put(i)
-        return "True"
+        return api_success()
     except Exception as e:
         current_app.logger.error("API Download Failed: %s" % e)
-        return "False"
+        return api_error(str(e), 500)
 
 @api_bp.route("/stats/video/count")
 def get_video_count():
@@ -359,10 +366,10 @@ def clear_download_errors_api():
     try:
         logger = current_app.logger
         clear_download_errors(logger)
-        return "True"
+        return api_success()
     except Exception as e:
         current_app.logger.error("API Clear Download Errors Failed: %s" % e)
-        return "False"
+        return api_error(str(e), 500)
 
 @api_bp.route("/subscribe/<string:type>/<string:value>")
 def api_subscribe(type,value):
@@ -387,9 +394,10 @@ def api_subscribe(type,value):
         con.commit()
         cur.close()
         con.close()
-        return str(ret)
+        return api_success(ret)
     except Exception as e:
         current_app.logger.error("Playlist Subscribe Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/unsubscribe/<string:type>/<string:value>")
 def api_unsubscribe(type,value):
@@ -405,10 +413,10 @@ def api_unsubscribe(type,value):
         con.commit()
         cur.close()
         con.close()
-        # return the results!
-        return "True"
+        return api_success()
     except Exception as e:
         current_app.logger.error("Playlist Unsubscribe Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route('/playlists/<string:page>')
 def playlists(page):
@@ -472,10 +480,10 @@ def api_delete(vid):
         con.commit()
         cur.close()
         current_app.logger.info("Deleted Video %s"%vid)
-        return "True"
+        return api_success()
     except Exception as e:
         current_app.logger.error("API Delete: %s"%e)
-        return "False"
+        return api_error(str(e), 500)
     
 @api_bp.route("/stats")
 def api_stats():
@@ -497,7 +505,7 @@ def api_stats():
         return json.dumps(data, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API Stats Error: %s"%e)
-        return "False"
+        return api_error(str(e), 500)
     
 @api_bp.route('/transcode/<path:videopath>')
 def transcode(videopath):
