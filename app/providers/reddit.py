@@ -5,7 +5,7 @@ import praw
 from flask import current_app
 from database import insert_not_found
 from backend import save_uploaded_video_metadata
-from providers.base import dl_status_map
+from providers.base import set_status, del_status, dl_status_lock, dl_status_map
 
 
 def provider_domains():
@@ -89,13 +89,14 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, l
     def make_progress_hook(vid_id):
         def hook(d):
             try:
-                status_obj = dl_status_map.setdefault(vid_id, {})
-                if d["status"] == "downloading":
-                    status_obj['progress'] = d['_percent_str']
-                    status_obj['title'] = d.get('info_dict', {}).get('title', "")
-                    status_obj['type'] = 'reddit'
-                elif d["status"] == "finished":
-                    status_obj['progress'] = "100%"
+                with dl_status_lock:
+                    status_obj = dl_status_map.setdefault(vid_id, {})
+                    if d["status"] == "downloading":
+                        status_obj['progress'] = d['_percent_str']
+                        status_obj['title'] = d.get('info_dict', {}).get('title', "")
+                        status_obj['type'] = 'reddit'
+                    elif d["status"] == "finished":
+                        status_obj['progress'] = "100%"
             except Exception as e:
                 current_app.logger.error("dl_progress_hook Failed: %s" % e)
         return hook
@@ -108,14 +109,13 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, l
 
     import yt_dlp
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        dl_status_map[video_id] = {'progress': '0%', 'title': video_title, 'type': 'reddit'}
+        set_status(video_id, {'progress': '0%', 'title': video_title, 'type': 'reddit'})
         ydl.download([video_url])
 
     try:
         save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit')
     finally:
-        if video_id in dl_status_map:
-            del dl_status_map[video_id]
+        del_status(video_id)
 
     return True
 

@@ -2,7 +2,7 @@ from flask import Blueprint,current_app,send_file,Response,abort
 import mariadb,json,io,math,os
 import subprocess
 from backend import get_video
-from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, dl_status_map as yt_dl_map
+from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy
 from backend import process_channel,save_uploaded_video_metadata
 from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors
 from flask import request,jsonify
@@ -328,9 +328,9 @@ def queue_status():
     data['cur_title'] = get_cur_videoTitle()
 
     # Add active or all current download statuses for youtube and optionally patreon
-    yt_active_ids = list(yt_dl_map.keys())
+    status_copy = get_status_copy()
     data['active'] = [
-        {'id': k, **yt_dl_map[k]} for k in yt_active_ids
+        {'id': k, **v} for k, v in status_copy.items()
     ]
 
     return json.dumps(data, indent=4, sort_keys=True, default=str)

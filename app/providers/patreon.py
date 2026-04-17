@@ -8,7 +8,7 @@ import json
 import subprocess
 import mariadb
 
-from providers.base import dl_status_map
+from providers.base import set_status, update_status, del_status, dl_status_lock, dl_status_map
 
 
 def provider_domains():
@@ -40,12 +40,11 @@ def download(q,logger):
             channel_id = data['channel_id']
             title = data['title']
             PublishedAt = datetime.datetime.strptime(data['upload_date'], '%Y%m%d')
-            dl_status_map[videoid] = {'progress': '0%', 'title': title, 'type': 'patreon'}
+            set_status(videoid, {'progress': '0%', 'title': title, 'type': 'patreon'})
             ydl.download(q.url)
         ps = patreon_screenshot(videoid, channel_id, logger)
         pdb = patreon_db_info(videoid, channel_id, PublishedAt, title, logger)
-        if videoid in dl_status_map:
-            del dl_status_map[videoid]
+        del_status(videoid)
         #dl_progress = 0
         cookies.close()
         if ps and pdb:
@@ -105,15 +104,14 @@ def dl_progress_hook(d):
     try:
         video_id = d.get('info_dict', {}).get('id', None)
         if not video_id:
-            # fallback to global, if needed
             video_id = globals().get('videoID', '')
-        status_obj = dl_status_map.setdefault(video_id, {})
-        if d["status"] == "downloading":
-            status_obj['progress'] = d['_percent_str']
-            status_obj['title'] = d.get('info_dict', {}).get('title', "")
-            status_obj['type'] = 'patreon'
-        elif d["status"] == "finished":
-            status_obj['progress'] = "100%"
-        # Optionally add more info (like ETA, speed) here
+        with dl_status_lock:
+            status_obj = dl_status_map.setdefault(video_id, {})
+            if d["status"] == "downloading":
+                status_obj['progress'] = d['_percent_str']
+                status_obj['title'] = d.get('info_dict', {}).get('title', "")
+                status_obj['type'] = 'patreon'
+            elif d["status"] == "finished":
+                status_obj['progress'] = "100%"
     except Exception as e:
         current_app.logger.error("dl_progress_hook Failed: %s" % e)

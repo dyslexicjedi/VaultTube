@@ -1,4 +1,6 @@
 import pytest,os,json,mariadb
+import threading
+from providers.base import set_status, update_status, del_status, get_status_copy
 
 def test_home(client):
     response = client.get("/")
@@ -73,5 +75,37 @@ def test_subscribe(client):
 #         assert response.text == "0"
 #     else:
 #         assert False == True
+
+
+def test_dl_status_map_thread_safety():
+    """Test that dl_status_map operations are thread-safe under concurrent access."""
+    iterations = 100
+    num_threads = 10
+    errors = []
+
+    def worker(thread_id):
+        try:
+            for i in range(iterations):
+                video_id = f"vid_{thread_id}_{i}"
+                set_status(video_id, {'progress': '0%', 'title': f'Title {i}', 'type': 'test'})
+                update_status(video_id, {'progress': '50%'})
+                status = get_status_copy()
+                assert video_id in status
+                del_status(video_id)
+        except Exception as e:
+            errors.append(str(e))
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(num_threads)]
+
+    for t in threads:
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    assert len(errors) == 0, f"Thread safety errors: {errors}"
+
+    final_status = get_status_copy()
+    assert len(final_status) == 0
 
 
