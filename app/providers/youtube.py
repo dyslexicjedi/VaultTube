@@ -202,6 +202,8 @@ def download(qo, logger):
         if url_type in ('video', 'shorts'):
             if url_type == 'shorts':
                 url = "https://www.youtube.com/shorts/%s" % vid
+            elif 'youtu.be' in url:
+                url = "https://www.youtube.com/watch?v=%s" % vid
             return download_video(url, logger)
         elif url_type == 'playlist':
             return download_playlist(qo, logger)
