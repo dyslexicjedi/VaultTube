@@ -1,8 +1,8 @@
 from flask import Blueprint,current_app,send_file,Response,abort
-import mariadb,json,io,math,os
+import mariadb,json,io,math,os,queue as _queue
 import subprocess
 from backend import get_video
-from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy
+from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse
 from backend import process_channel,save_uploaded_video_metadata
 from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors
 from flask import request,jsonify
@@ -341,6 +341,40 @@ def queue_status():
     ]
 
     return json.dumps(data, indent=4, sort_keys=True, default=str)
+
+@api_bp.route('/status/stream')
+def status_stream():
+    """Server-Sent Events endpoint that pushes real-time download progress to clients.
+
+    Events are JSON objects with a ``type`` field:
+      - ``{"type": "progress", "id": "...", "title": "...", "progress": "50%", ...}``
+      - ``{"type": "complete", "id": "..."}``
+
+    A keepalive comment (``: keepalive``) is sent every 30 s so proxies and
+    load-balancers do not terminate idle connections.
+    """
+    def generate():
+        q = subscribe_sse()
+        try:
+            while True:
+                try:
+                    event = q.get(timeout=30)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except _queue.Empty:
+                    # SSE comment – ignored by clients, keeps the connection alive
+                    yield ": keepalive\n\n"
+        finally:
+            unsubscribe_sse(q)
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',   # prevent nginx from buffering the stream
+        },
+    )
+
 
 @api_bp.route('/downloads/errors/')
 def get_download_errors_api():

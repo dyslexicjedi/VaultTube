@@ -300,9 +300,9 @@
 </style>
 
 <script>
-    function isNumeric(n) {
-        return !isNaN(parseFloat(n)) && isFinite(n);
-    }
+    // -----------------------------------------------------------------------
+    // Submit a download
+    // -----------------------------------------------------------------------
     function processdownload(){
         var url = $("#yturl").val().trim();
         if(!url){
@@ -316,120 +316,193 @@
         });
     }
 
-    async function getStatus() {
-        try {
-            $("#queuelist").empty();
-            const q = await fetch("/api/status/queue/");
-            const qdata = await q.json();
-            const queueSize = qdata['queue_size'];
-            const queueValue = qdata['queue_value'];
-            const activeDownloads = qdata['active'] || [];
-            $("#queuelength").text(queueSize);
-
-            // Show each active download as a card with progress bar
-                $("#carddeck").empty();
-            if (activeDownloads.length > 0) {
-                activeDownloads.forEach((dl) => {
-                    let pct = 0;
-                    if (dl.progress) {
-                        let cleaned = dl.progress.replace(/\x1b\[[0-9;]*m/g, "");
-                        let match = dl.progress.match(/([0-9\.]+)%/);  // <-- updated regex
-                        if (match) {
-                            pct = parseFloat(match[1]);
-                            pctText = match[1] + "%";
-                        }
-                    }
-                    $("#carddeck").append(`
-                        <div class="card shadow-sm mb-3">
-                              <div class="card-body">
-                                <h5 class="card-title">${dl.title || ''} (${dl.id})</h5>
-                                <p class="mb-1"><span class="badge bg-info">${dl.type || ''}</span></p>
-                                <div class="progress">
-                                    <div class="progress-bar progress-bar-striped progress-bar-animated"
-                                        role="progressbar"
-                                        style="width: ${pct}%"
-                                        aria-valuenow="${pct}"
-                                        aria-valuemin="0"
-                                        aria-valuemax="100"
-                                    >${pct+"%" || '0%'}</div>
-                                </div>
-                            </div>
-                        </div>
-                    `);
-                });
-            }
-
-            // Show the rest of the waiting queue as a simple list
-            if(queueValue.length > 0){
-                for(let i in queueValue){
-                    let li = document.createElement('li');
-                    li.appendChild(document.createTextNode(queueValue[i].url));
-                    li.className = "list-group-item";
-                    $("#queuelist").append(li);
-                }
-            }
-        }
-        catch(e){
-            console.error("Polling Error",e);
-        }
-        setTimeout(getStatus,3000);
+    // -----------------------------------------------------------------------
+    // Helpers shared by initial load and SSE updates
+    // -----------------------------------------------------------------------
+    function parsePct(progressStr) {
+        if (!progressStr) return 0;
+        // Strip ANSI escape codes before matching
+        var cleaned = progressStr.replace(/\x1b\[[0-9;]*m/g, "");
+        var match = cleaned.match(/([0-9.]+)%/);
+        return match ? parseFloat(match[1]) : 0;
     }
 
+    function cardHTML(dl) {
+        var pct = parsePct(dl.progress);
+        return `
+            <div class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">${dl.title || ''} (${dl.id})</h5>
+                    <p class="mb-1"><span class="badge bg-info">${dl.provider || ''}</span></p>
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated"
+                            role="progressbar"
+                            style="width: ${pct}%"
+                            aria-valuenow="${pct}"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                        >${pct}%</div>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    function updateCard(dl) {
+        var pct = parsePct(dl.progress);
+        var cardEl = document.getElementById('card-' + dl.id);
+        if (cardEl) {
+            var bar = cardEl.querySelector('.progress-bar');
+            bar.style.width = pct + '%';
+            bar.setAttribute('aria-valuenow', pct);
+            bar.textContent = pct + '%';
+        } else {
+            // New download started after page load – create the card
+            var col = document.createElement('div');
+            col.className = 'col';
+            col.id = 'card-' + dl.id;
+            col.innerHTML = cardHTML(dl);
+            document.getElementById('carddeck').appendChild(col);
+        }
+    }
+
+    function removeCard(id) {
+        var el = document.getElementById('card-' + id);
+        if (el) el.remove();
+    }
+
+    // -----------------------------------------------------------------------
+    // Initial active-downloads load (also called on SSE reconnect to resync)
+    // -----------------------------------------------------------------------
+    async function loadActiveDownloads() {
+        try {
+            const r = await fetch("/api/status/queue/");
+            const data = await r.json();
+            const activeDownloads = data['active'] || [];
+
+            $("#carddeck").empty();
+            activeDownloads.forEach(function(dl) {
+                var col = document.createElement('div');
+                col.className = 'col';
+                col.id = 'card-' + dl.id;
+                col.innerHTML = cardHTML(dl);
+                document.getElementById('carddeck').appendChild(col);
+            });
+        } catch(e) {
+            console.error("loadActiveDownloads error", e);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Queue polling (size + waiting list) – runs independently at 5 s
+    // -----------------------------------------------------------------------
+    async function pollQueue() {
+        try {
+            const r = await fetch("/api/status/queue/");
+            const data = await r.json();
+            $("#queuelength").text(data['queue_size'] || 0);
+
+            $("#queuelist").empty();
+            (data['queue_value'] || []).forEach(function(item) {
+                var li = document.createElement('li');
+                li.textContent = item.url;
+                $("#queuelist").append(li);
+            });
+        } catch(e) {
+            console.error("pollQueue error", e);
+        }
+        setTimeout(pollQueue, 5000);
+    }
+
+    // -----------------------------------------------------------------------
+    // Error polling – unchanged behaviour, runs at 5 s
+    // -----------------------------------------------------------------------
     async function getErrors() {
         try {
             $("#errorslist").empty();
             const r = await fetch("/api/downloads/errors/");
             const errors = await r.json();
-            
+
             if(errors.length > 0){
-                for(let i in errors){
-                    let li = document.createElement('li');
+                errors.forEach(function(err) {
+                    var li = document.createElement('li');
                     li.className = "list-group-item";
-                    
-                    let urlDiv = document.createElement('div');
+
+                    var urlDiv = document.createElement('div');
                     urlDiv.className = "error-url";
-                    urlDiv.textContent = errors[i].url;
+                    urlDiv.textContent = err.url;
                     li.appendChild(urlDiv);
-                    
-                    let typeSpan = document.createElement('span');
+
+                    var typeSpan = document.createElement('span');
                     typeSpan.className = "error-type";
-                    typeSpan.textContent = errors[i].error_type;
+                    typeSpan.textContent = err.error_type;
                     li.appendChild(typeSpan);
-                    
-                    let msgDiv = document.createElement('div');
+
+                    var msgDiv = document.createElement('div');
                     msgDiv.className = "error-message";
-                    msgDiv.textContent = errors[i].error_message;
+                    msgDiv.textContent = err.error_message;
                     li.appendChild(msgDiv);
-                    
-                    let timeDiv = document.createElement('div');
+
+                    var timeDiv = document.createElement('div');
                     timeDiv.className = "error-time";
-                    let errorDate = new Date(errors[i].created_at);
-                    timeDiv.textContent = errorDate.toLocaleString();
+                    timeDiv.textContent = new Date(err.created_at).toLocaleString();
                     li.appendChild(timeDiv);
-                    
+
                     $("#errorslist").append(li);
-                }
+                });
             }
+        } catch(e) {
+            console.error("getErrors error", e);
         }
-        catch(e){
-            console.error("Error polling Error",e);
-        }
-        setTimeout(getErrors,5000);
+        setTimeout(getErrors, 5000);
     }
 
     async function clearErrors() {
         try {
-            await fetch("/api/downloads/errors/", {
-                method: "DELETE"
-            });
+            await fetch("/api/downloads/errors/", { method: "DELETE" });
             getErrors();
-        }
-        catch(e){
-            console.error("Error clearing errors",e);
+        } catch(e) {
+            console.error("clearErrors error", e);
         }
     }
 
-    getStatus();
+    // -----------------------------------------------------------------------
+    // SSE connection for real-time progress
+    // -----------------------------------------------------------------------
+    var _sseFirstOpen = true;
+
+    function connectSSE() {
+        var evtSource = new EventSource('/api/status/stream');
+
+        evtSource.onopen = function() {
+            // On reconnect (not the very first open) resync active downloads
+            // because we may have missed events while disconnected.
+            if (!_sseFirstOpen) {
+                loadActiveDownloads();
+            }
+            _sseFirstOpen = false;
+        };
+
+        evtSource.onmessage = function(e) {
+            var data = JSON.parse(e.data);
+            if (data.type === 'progress') {
+                updateCard(data);
+            } else if (data.type === 'complete') {
+                removeCard(data.id);
+            }
+        };
+
+        evtSource.onerror = function() {
+            // EventSource will automatically attempt to reconnect; the onopen
+            // handler above will resync state when it does.
+        };
+    }
+
+    // -----------------------------------------------------------------------
+    // Bootstrap on page load
+    // -----------------------------------------------------------------------
+    loadActiveDownloads();
+    pollQueue();
     getErrors();
+    connectSSE();
 </script>
 {% endblock %}

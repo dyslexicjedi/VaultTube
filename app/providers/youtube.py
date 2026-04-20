@@ -7,7 +7,7 @@ from flask import current_app
 
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info, insert_not_found
 from backend import get_video
-from providers.base import set_status, update_status, del_status, dl_status_lock, dl_status_map
+from providers.base import set_status, update_status, del_status
 from QueueObject import QueueObject
 
 
@@ -16,14 +16,14 @@ def dl_progress_hook(d):
         video_id = d.get('info_dict', {}).get('id', None)
         if not video_id:
             video_id = globals().get('videoID', '')
-        with dl_status_lock:
-            status_obj = dl_status_map.setdefault(video_id, {})
-            if d["status"] == "downloading":
-                status_obj['progress'] = d['_percent_str']
-                status_obj['title'] = d.get('info_dict', {}).get('title', "")
-                status_obj['type'] = 'youtube'
-            elif d["status"] == "finished":
-                status_obj['progress'] = "100%"
+        if d["status"] == "downloading":
+            update_status(video_id, {
+                'progress': d['_percent_str'],
+                'title': d.get('info_dict', {}).get('title', ""),
+                'provider': 'youtube',
+            })
+        elif d["status"] == "finished":
+            update_status(video_id, {'progress': '100%'})
     except Exception as e:
         current_app.logger.error("dl_progress_hook Failed: %s" % e)
 
@@ -102,7 +102,7 @@ def download_video(url, logger, cookies=None):
             channel_id = data['channel_id']
             videoID = data['id']
             videoTitle = data['title']
-            set_status(videoID, {'progress': '0%', 'title': videoTitle, 'type': 'youtube'})
+            set_status(videoID, {'progress': '0%', 'title': videoTitle, 'provider': 'youtube'})
             ydl.download(url)
         get_video(os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4", current_app.logger)
         del_status(videoID)
