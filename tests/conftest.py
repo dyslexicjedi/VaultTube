@@ -5,7 +5,7 @@ from app.main import app
 
 # All test-only row IDs that tests insert into the DB
 _TEST_VIDEO_IDS   = ['Test123', 'SearchFT1', 'SearchLIKE1']
-_TEST_CHANNEL_IDS = ['Test123']
+_TEST_CHANNEL_IDS = ['Test123', 'SubTest123']
 
 
 def _delete_test_rows():

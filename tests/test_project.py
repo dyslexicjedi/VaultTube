@@ -29,24 +29,38 @@ def test_populate_db(client):
 
 
 def test_subscribe(client):
+    response = client.get("/api/checkdb")
+    assert response.text == "True"
+
+    con = mariadb.connect(
+        host=os.environ['VAULTTUBE_DBHOST'],
+        user=os.environ['VAULTTUBE_DBUSER'],
+        password=os.environ['VAULTTUBE_DBPASS'],
+        database=os.environ['VAULTTUBE_DBNAME'],
+        autocommit=True,
+        port=int(os.environ['VAULTTUBE_DBPORT'])
+    )
+    cur = con.cursor()
+    cur.execute("INSERT IGNORE INTO channels(channelid,channelname,json,subscribed) values('SubTest123','SubTest123','{}',0);")
+    con.commit()
+    con.close()
+
     response = client.get("/api/channels/0")
     data = json.loads(response.get_data(as_text=True))
-    if(len(data) > 0):
-        id = data[0]['channelid']
-        response = client.get("/api/sub_status/channel/%s"%id)
-        assert response.text == '0'
-        response = client.get("/api/subscribe/channel/%s"%id)
-        data = json.loads(response.get_data(as_text=True))
-        assert data['success'] == True
-        response = client.get("/api/sub_status/channel/%s"%id)
-        assert response.text == '1'
-        response = client.get("/api/unsubscribe/channel/%s"%id)
-        data = json.loads(response.get_data(as_text=True))
-        assert data['success'] == True
-        response = client.get("/api/sub_status/channel/%s"%id)
-        assert response.text == '0'
-    else:
-        assert False == True
+    assert len(data) > 0
+    id = data[0]['channelid']
+    response = client.get("/api/sub_status/channel/%s"%id)
+    assert response.text == '0'
+    response = client.get("/api/subscribe/channel/%s"%id)
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] == True
+    response = client.get("/api/sub_status/channel/%s"%id)
+    assert response.text == '1'
+    response = client.get("/api/unsubscribe/channel/%s"%id)
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] == True
+    response = client.get("/api/sub_status/channel/%s"%id)
+    assert response.text == '0'
 
 # Need to Rework this based on new sorting API
 # def test_watched(client):
