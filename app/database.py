@@ -68,9 +68,24 @@ def checkdb(logger):
                 `isDeleted` int(11) DEFAULT 0,
                 `source` varchar(100) DEFAULT 'youtube',
                 `title` varchar(2000) DEFAULT NULL,
-                PRIMARY KEY (`id`)
+                `description` text DEFAULT NULL,
+                PRIMARY KEY (`id`),
+                FULLTEXT KEY `ft_search` (`title`, `description`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
                         """)
+        # Migrations for existing videos table
+        # Add description column if missing
+        cur.execute("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = %s AND table_name = 'videos' AND column_name = 'description'", (os.environ['VAULTTUBE_DBNAME'],))
+        if cur.fetchone()[0] == 0:
+            logger.info("Adding description column to videos table...")
+            cur.execute("ALTER TABLE videos ADD COLUMN `description` text DEFAULT NULL;")
+        # Add FULLTEXT index if missing
+        cur.execute("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = %s AND table_name = 'videos' AND index_name = 'ft_search'", (os.environ['VAULTTUBE_DBNAME'],))
+        if cur.fetchone()[0] == 0:
+            logger.info("Adding FULLTEXT index ft_search to videos table...")
+            cur.execute("ALTER TABLE videos ADD FULLTEXT KEY `ft_search` (`title`, `description`);")
+        # Backfill description from json blob for existing YouTube records
+        cur.execute("UPDATE videos SET description = JSON_UNQUOTE(JSON_EXTRACT(json, '$.items[0].snippet.description')) WHERE description IS NULL AND source = 'youtube' AND JSON_VALID(json) AND JSON_EXTRACT(json, '$.items[0].snippet.description') IS NOT NULL;")
         #Ignore
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'IgnoreVid' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
@@ -120,8 +135,8 @@ def save_video(id,ret,img,logger,source='youtube'):
         con = get_connection(logger)
         cur = con.cursor()
         #Save Video Data
-        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length,source,title) values(%s,%s,%s,%s,%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title']))
+        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length,source,title,description) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
+        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title'],ret.get('description','')))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))

@@ -79,6 +79,84 @@ def test_subscribe(client):
 #         assert False == True
 
 
+def test_search_fulltext(client):
+    """Test FULLTEXT search on title and description using MATCH/AGAINST."""
+    try:
+        # Ensure DB schema and indexes are up to date
+        response = client.get("/api/checkdb")
+        assert response.text == "True"
+
+        con = mariadb.connect(
+            host=os.environ['VAULTTUBE_DBHOST'],
+            user=os.environ['VAULTTUBE_DBUSER'],
+            password=os.environ['VAULTTUBE_DBPASS'],
+            database=os.environ['VAULTTUBE_DBNAME'],
+            autocommit=True,
+            port=int(os.environ['VAULTTUBE_DBPORT'])
+        )
+        cur = con.cursor()
+        cur.execute(
+            "INSERT IGNORE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
+            "VALUES('SearchFT1', 'TestCreator', 'TestChannel1', '{}', '/videos/search1.mp4', "
+            "'2023-10-21 15:15:15', 'Python Tutorial Advanced', 'Learn advanced Python programming techniques');"
+        )
+        con.close()
+
+        # FULLTEXT search on title (>= 3 chars triggers MATCH/AGAINST)
+        response = client.get("/api/search/Python/0")
+        data = json.loads(response.get_data(as_text=True))
+        ids = [v['id'] for v in data]
+        assert 'SearchFT1' in ids, "FULLTEXT search should find SearchFT1 by title"
+
+        # FULLTEXT search on description
+        response = client.get("/api/search/programming/0")
+        data = json.loads(response.get_data(as_text=True))
+        ids = [v['id'] for v in data]
+        assert 'SearchFT1' in ids, "FULLTEXT search should find SearchFT1 by description"
+
+        # FULLTEXT search for nonexistent term returns empty
+        response = client.get("/api/search/xyznonexistent/0")
+        data = json.loads(response.get_data(as_text=True))
+        assert data == [], "Search for nonexistent term should return empty list"
+
+    except Exception as e:
+        print(e)
+        assert False, str(e)
+
+
+def test_search_short_query(client):
+    """Test LIKE fallback on title for queries shorter than 3 characters."""
+    try:
+        response = client.get("/api/checkdb")
+        assert response.text == "True"
+
+        con = mariadb.connect(
+            host=os.environ['VAULTTUBE_DBHOST'],
+            user=os.environ['VAULTTUBE_DBUSER'],
+            password=os.environ['VAULTTUBE_DBPASS'],
+            database=os.environ['VAULTTUBE_DBNAME'],
+            autocommit=True,
+            port=int(os.environ['VAULTTUBE_DBPORT'])
+        )
+        cur = con.cursor()
+        cur.execute(
+            "INSERT IGNORE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
+            "VALUES('SearchLIKE1', 'TestCreator', 'TestChannel1', '{}', '/videos/search2.mp4', "
+            "'2023-10-21 15:15:15', 'Zynced Workflow Tool', 'A unique workflow tool');"
+        )
+        con.close()
+
+        # Short query (< 3 chars) falls back to LIKE on title
+        response = client.get("/api/search/Zy/0")
+        data = json.loads(response.get_data(as_text=True))
+        ids = [v['id'] for v in data]
+        assert 'SearchLIKE1' in ids, "Short query LIKE fallback should find SearchLIKE1 by title prefix"
+
+    except Exception as e:
+        print(e)
+        assert False, str(e)
+
+
 def test_dl_status_map_thread_safety():
     """Test that dl_status_map operations are thread-safe under concurrent access."""
     iterations = 100

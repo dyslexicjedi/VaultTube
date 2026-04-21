@@ -265,13 +265,32 @@ def api_creator(creator,page):
 @api_bp.route('/search/<string:searchtxt>/<string:page>')
 def api_search(searchtxt,page):
     try:
-        current_app.logger.debug("Called Creator %s %s"%(searchtxt,page))
+        current_app.logger.debug("Called Search %s %s"%(searchtxt,page))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select * from videos where lower(json) like lower(%s) order by PublishedAt desc limit 40 offset %s;",("%"+searchtxt+"%",page))
+        try:
+            offset = int(page)
+        except (ValueError, TypeError):
+            offset = 0
+        if len(searchtxt) >= 3:
+            # Full-text search with relevance ranking
+            cur.execute(
+                "SELECT *, MATCH(title, description) AGAINST(%s IN BOOLEAN MODE) AS relevance "
+                "FROM videos "
+                "WHERE MATCH(title, description) AGAINST(%s IN BOOLEAN MODE) "
+                "ORDER BY relevance DESC "
+                "LIMIT 40 OFFSET %s;",
+                (searchtxt, searchtxt, offset)
+            )
+        else:
+            # Fall back to LIKE on title for short queries below the FULLTEXT minimum token size
+            cur.execute(
+                "SELECT * FROM videos WHERE title LIKE %s ORDER BY PublishedAt DESC LIMIT 40 OFFSET %s;",
+                ("%" + searchtxt + "%", offset)
+            )
         return parse_response(cur,con)
     except Exception as e:
-        current_app.logger.error("API Creator Failed: %s"%e)
+        current_app.logger.error("API Search Failed: %s"%e)
 
 @api_bp.route("/sub_status/<string:type>/<string:value>")
 def sub_status(type,value):
