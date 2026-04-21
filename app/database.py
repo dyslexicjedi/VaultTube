@@ -86,6 +86,19 @@ def checkdb(logger):
             cur.execute("ALTER TABLE videos ADD FULLTEXT KEY `ft_search` (`title`, `description`);")
         # Backfill description from json blob for existing YouTube records
         cur.execute("UPDATE videos SET description = JSON_UNQUOTE(JSON_EXTRACT(json, '$.items[0].snippet.description')) WHERE description IS NULL AND source = 'youtube' AND JSON_VALID(json) AND JSON_EXTRACT(json, '$.items[0].snippet.description') IS NOT NULL;")
+        # Add indexes for advanced filtering
+        cur.execute("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = %s AND table_name = 'videos' AND index_name = 'idx_channelId'", (os.environ['VAULTTUBE_DBNAME'],))
+        if cur.fetchone()[0] == 0:
+            logger.info("Adding index idx_channelId to videos table...")
+            cur.execute("ALTER TABLE videos ADD INDEX `idx_channelId` (`channelId`);")
+        cur.execute("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = %s AND table_name = 'videos' AND index_name = 'idx_PublishedAt'", (os.environ['VAULTTUBE_DBNAME'],))
+        if cur.fetchone()[0] == 0:
+            logger.info("Adding index idx_PublishedAt to videos table...")
+            cur.execute("ALTER TABLE videos ADD INDEX `idx_PublishedAt` (`PublishedAt`);")
+        cur.execute("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = %s AND table_name = 'videos' AND index_name = 'idx_AddedAt'", (os.environ['VAULTTUBE_DBNAME'],))
+        if cur.fetchone()[0] == 0:
+            logger.info("Adding index idx_AddedAt to videos table...")
+            cur.execute("ALTER TABLE videos ADD INDEX `idx_AddedAt` (`AddedAt`);")
         #Ignore
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'IgnoreVid' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):

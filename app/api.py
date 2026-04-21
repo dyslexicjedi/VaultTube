@@ -40,6 +40,28 @@ ALLOWED_SORT_COLUMNS = {
 }
 ALLOWED_DIRECTIONS = {'asc', 'desc'}
 
+def parse_duration_to_seconds(duration_str):
+    if not duration_str or duration_str == '0':
+        return None
+    try:
+        parts = str(duration_str).split(':')
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        elif len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        elif len(parts) == 1:
+            return int(parts[0])
+    except (ValueError, TypeError):
+        return None
+
+def build_duration_condition(min_dur, max_dur):
+    conditions = []
+    if min_dur is not None:
+        conditions.append(f"TIME_TO_SEC(v.length) >= {int(min_dur)}")
+    if max_dur is not None:
+        conditions.append(f"TIME_TO_SEC(v.length) <= {int(max_dur)}")
+    return conditions
+
 @api_bp.route('/getvids/<string:status>/<string:opt>/<string:direction>/<string:page>')
 def getvids(status,opt,direction,page):
     try:
@@ -47,16 +69,55 @@ def getvids(status,opt,direction,page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         page_num = int(page) if page.isdigit() else 0
+        
         if status == "unwatched":
             status_cond = "v.watched = 0"
         else:
             status_cond = ""
+        
         safe_opt = opt if opt in ALLOWED_SORT_COLUMNS else 'PublishedAt'
         safe_direction = direction if direction in ALLOWED_DIRECTIONS else 'desc'
-        where_clause = f"where {status_cond}" if status_cond else ""
+        
+        where_clauses = []
+        if status_cond:
+            where_clauses.append(status_cond)
+        
+        channel_ids = request.args.getlist('channel_ids[]')
+        if channel_ids:
+            channel_ids_safe = [cid for cid in channel_ids if cid]
+            if channel_ids_safe:
+                channel_placeholder = ','.join(['%s'] * len(channel_ids_safe))
+                where_clauses.append(f"v.channelId IN ({channel_placeholder})")
+        
+        from_date = request.args.get('from_date', '').strip()
+        to_date = request.args.get('to_date', '').strip()
+        if from_date:
+            where_clauses.append(f"v.PublishedAt >= %s")
+        if to_date:
+            where_clauses.append(f"v.PublishedAt <= %s")
+        
+        min_duration = request.args.get('min_duration', '').strip()
+        max_duration = request.args.get('max_duration', '').strip()
+        min_dur_sec = int(min_duration) if min_duration and min_duration.isdigit() else None
+        max_dur_sec = int(max_duration) if max_duration and max_duration.isdigit() else None
+        duration_conditions = build_duration_condition(min_dur_sec, max_dur_sec)
+        where_clauses.extend(duration_conditions)
+        
+        where_clause = "where " + " AND ".join(where_clauses) if where_clauses else ""
+        
         sql = f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid {where_clause} order by {safe_opt} {safe_direction} limit 40 offset %s"
-        current_app.logger.info(sql)
-        cur.execute(sql, (page_num,))
+        
+        params = []
+        if channel_ids:
+            params.extend(channel_ids_safe)
+        if from_date:
+            params.append(from_date)
+        if to_date:
+            params.append(to_date)
+        params.append(page_num)
+        
+        current_app.logger.info("SQL: %s, Params: %s", sql, params)
+        cur.execute(sql, tuple(params))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Latest Failed: %s"%e)

@@ -458,6 +458,105 @@ body {
   margin: 3px 0 0 15px;
 }
 
+/* Advanced Filters */
+.advanced-filters {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 12px;
+  padding: 1rem;
+}
+.advanced-filter-group {
+  margin-bottom: 1rem;
+}
+.advanced-filter-group:last-child {
+  margin-bottom: 0;
+}
+.advanced-filter-toggles {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.advanced-filter-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #a78bfa;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.advanced-filter-select {
+  width: 100%;
+  max-width: 300px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 8px;
+  color: #e8e8f0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.88rem;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.advanced-filter-select:focus {
+  outline: none;
+  border-color: #a78bfa;
+  background: rgba(255,255,255,0.08);
+}
+.advanced-filter-select option {
+  background: #1a1a2e;
+  color: #e8e8f0;
+}
+.advanced-filter-dates {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.advanced-filter-input {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 8px;
+  color: #e8e8f0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.88rem;
+  transition: border-color 0.15s ease;
+}
+.advanced-filter-input:focus {
+  outline: none;
+  border-color: #a78bfa;
+}
+.advanced-filter-input::placeholder {
+  color: rgba(255,255,255,0.4);
+}
+.advanced-filter-presets {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.filter-preset-btn {
+  background: rgba(167, 139, 250, 0.1);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 6px;
+  color: #a78bfa;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.filter-preset-btn:hover {
+  background: rgba(167, 139, 250, 0.2);
+  color: #c4b5fd;
+}
+.advanced-filter-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+
 #title {
   overflow: hidden;
   text-overflow: ellipsis;
