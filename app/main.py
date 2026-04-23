@@ -52,7 +52,7 @@ sys.excepthook = log_uncaught_exceptions
 
 #Flask Startup
 app = Flask(__name__)
-app.debug = True
+app.debug = os.environ.get('VAULTTUBE_DEBUG', 'False').lower() in ('true', '1', 'yes')
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024  # 10GB max upload size
 
 #Video static
