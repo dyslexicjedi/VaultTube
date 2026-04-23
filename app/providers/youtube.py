@@ -114,35 +114,54 @@ def download_video(url, logger, cookies=None):
     channel_id = ""
     return True
 
-def download_playlist(qo, logger, pageToken='0'):
+def download_playlist(qo, logger):
+    """Expand a playlist into individual video queue items, then remove the playlist entry."""
     try:
-        playlist_id = qo.url if hasattr(qo, 'url') else qo
-        if not playlist_id:
-            logger.error("Playlist ID is empty")
+        playlist_url = qo.url if hasattr(qo, 'url') else qo
+        if not playlist_url:
+            logger.error("Playlist URL is empty")
             return False
-        if playlist_id.startswith('http'):
-            from urllib.parse import parse_qs, urlparse
-            parsed = urlparse(playlist_id)
+
+        playlist_id = playlist_url
+        if playlist_url.startswith('http'):
+            parsed = urlparse(playlist_url)
             playlist_id = parse_qs(parsed.query).get('list', [None])[0]
         if not playlist_id:
-            logger.error("Could not extract playlist ID from URL: %s" % qo.url)
+            logger.error("Could not extract playlist ID from URL: %s" % playlist_url)
             return False
+
         key = os.environ['VAULTTUBE_YTKEY']
-        if pageToken == '0':
+        all_video_ids = []
+        page_token = None
+
+        while True:
             curl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s&maxResults=50" % (playlist_id, key)
-        else:
-            curl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s&maxResults=50&pageToken=%s" % (playlist_id, key, pageToken)
-        r = requests.get(curl)
-        retj = r.json()
-        r.close()
-        if 'items' not in retj:
-            logger.error("Invalid playlist response for ID: %s" % playlist_id)
-            return False
-        for vid in retj['items']:
-            content_details = vid.get('contentDetails', {})
-            vid_id = content_details.get('videoId')
-            if not vid_id:
-                continue
+            if page_token:
+                curl += "&pageToken=%s" % page_token
+
+            r = requests.get(curl)
+            retj = r.json()
+            r.close()
+
+            if 'items' not in retj:
+                logger.error("Invalid playlist response for ID: %s" % playlist_id)
+                return False
+
+            for vid in retj['items']:
+                content_details = vid.get('contentDetails', {})
+                vid_id = content_details.get('videoId')
+                if not vid_id:
+                    continue
+                all_video_ids.append(vid_id)
+
+            if 'nextPageToken' in retj:
+                page_token = retj['nextPageToken']
+            else:
+                break
+
+        logger.info("Playlist %s contains %d videos, adding to queue" % (playlist_id, len(all_video_ids)))
+
+        for vid_id in all_video_ids:
             if check_db_video(vid_id, logger):
                 logger.debug("Already exists in DB: %s" % vid_id)
                 insert_pl2vid_info(playlist_id, vid_id, logger)
@@ -152,8 +171,7 @@ def download_playlist(qo, logger, pageToken='0'):
                 qi = QueueObject(url, "", "youtube", 0, "")
                 current_app.config['queue'].put(qi)
                 insert_pl2vid_info(playlist_id, vid_id, logger)
-        if 'nextPageToken' in retj:
-            download_playlist(qo, logger, retj['nextPageToken'])
+
         return True
     except Exception as e:
         logger.error("download_playlist failed: %s" % e)

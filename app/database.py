@@ -276,20 +276,30 @@ def check_pl2vid_info(pl,vid,logger):
         logger.error("Error during check_pl2vid_info: %s"%e)
 
 def insert_pl2vid_info(pl,vid,logger):
+    con = None
+    cur = None
     try:
         con = get_connection(logger)
+        if con is None:
+            logger.error("Unable to get connection for insert_pl2vid_info")
+            return
         cur = con.cursor()
-        #Save Video Data
         sql = "Insert into pl2vid(playlistId,videoId) values(%s,%s);"
         cur.execute(sql,(pl,vid))
         con.commit()
-        cur.close()
-        con.close()
     except Exception as e:
         logger.error("Error during insert_pl2vid_info: %s"%e)
     finally:
-        cur.close()
-        con.close()
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
 
 def find_next_previous(vid,logger):
     try:
