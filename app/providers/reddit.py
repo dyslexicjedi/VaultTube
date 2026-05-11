@@ -72,10 +72,19 @@ def download(q, logger):
         logger.debug("Is image: %s" % is_image)
 
         if is_image:
-            return download_image(video_url, video_id, channel_id, video_title, published_at, logger)
+            result = download_image(video_url, video_id, channel_id, video_title, published_at, logger)
         else:
-            return download_video(video_url, video_id, video_title, channel_id, published_at, logger)
-            
+            result = download_video(video_url, video_id, video_title, channel_id, published_at, logger)
+
+        if result and submission and getattr(q, 'unsave', False):
+            try:
+                submission.unsave()
+                logger.info("Unsaved Reddit post %s" % submission.id)
+            except Exception as e:
+                logger.error("Failed to unsave %s: %s" % (submission.id, e))
+
+        return result
+
     except Exception as e:
         logger.error("Reddit Download Failed for %s: %s" % (url, e))
         return False

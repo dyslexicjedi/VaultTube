@@ -690,6 +690,50 @@ def api_upload_video():
         current_app.logger.error(f"API Upload Video Failed: {e}")
         return "Internal server error", 500
 
+@api_bp.route("/reddit/saved", methods=["POST"])
+def api_reddit_saved():
+    try:
+        reddit_vars = [
+            'VAULTTUBE_REDDIT_CLIENT_ID', 'VAULTTUBE_REDDIT_CLIENT_SECRET',
+            'VAULTTUBE_REDDIT_USER_AGENT', 'VAULTTUBE_REDDIT_USERNAME',
+            'VAULTTUBE_REDDIT_PASSWORD',
+        ]
+        missing = [v for v in reddit_vars if v not in os.environ]
+        if missing:
+            return api_error("Reddit credentials not configured: %s" % ', '.join(missing), 400)
+
+        import praw
+        from providers.reddit import _get_reddit_client
+
+        def _has_media(submission):
+            if submission.is_video:
+                return True
+            url = (submission.url or '').lower()
+            if any(url.split('?')[0].endswith(ext) for ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4')):
+                return True
+            return any(host in url for host in ('redgifs.com', 'i.redd.it', 'i.imgur.com'))
+
+        reddit = _get_reddit_client()
+        q = current_app.config['queue']
+        enqueued = 0
+        skipped = 0
+
+        for item in reddit.user.me().saved(limit=100):
+            if not isinstance(item, praw.models.Submission):
+                continue
+            if not item.permalink or not _has_media(item):
+                skipped += 1
+                continue
+            url = "https://www.reddit.com" + item.permalink
+            qo = QueueObject(url, "", "reddit", 0, "", unsave=True)
+            q.put(qo)
+            enqueued += 1
+
+        return api_success({"enqueued": enqueued, "skipped": skipped})
+    except Exception as e:
+        current_app.logger.error("API Reddit Saved Failed: %s" % e)
+        return api_error(str(e), 500)
+
 @api_bp.route('/creator/count/<string:creator>')
 def api_creator_count(creator):
     try:
