@@ -96,6 +96,7 @@ def download_video(url, logger, cookies=None):
         'retry_sleep_functions': {'http': lambda n: 5 * n},
         'http_chunk_size': 10485760,
     }
+    videoID = None
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             data = ydl.extract_info(url, download=False)
@@ -105,8 +106,9 @@ def download_video(url, logger, cookies=None):
             set_status(videoID, {'progress': '0%', 'title': videoTitle, 'provider': 'youtube'})
             ydl.download(url)
         get_video(os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4", current_app.logger)
-        del_status(videoID)
     finally:
+        if videoID is not None:
+            del_status(videoID)
         if cookies_local:
             cookies.close()
     videoTitle = ""

@@ -119,12 +119,11 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, l
     import yt_dlp
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         set_status(video_id, {'progress': '0%', 'title': video_title, 'type': 'reddit'})
-        ydl.download([video_url])
-
-    try:
-        save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit')
-    finally:
-        del_status(video_id)
+        try:
+            ydl.download([video_url])
+            save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit')
+        finally:
+            del_status(video_id)
 
     return True
 

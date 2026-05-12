@@ -41,16 +41,17 @@ def download(q,logger):
             title = data['title']
             PublishedAt = datetime.datetime.strptime(data['upload_date'], '%Y%m%d')
             set_status(videoid, {'progress': '0%', 'title': title, 'provider': 'patreon'})
-            ydl.download(q.url)
-        ps = patreon_screenshot(videoid, channel_id, logger)
-        pdb = patreon_db_info(videoid, channel_id, PublishedAt, title, logger)
-        del_status(videoid)
-        #dl_progress = 0
-        cookies.close()
-        if ps and pdb:
-            return True
-        else: 
-            return False
+            try:
+                ydl.download(q.url)
+                ps = patreon_screenshot(videoid, channel_id, logger)
+                pdb = patreon_db_info(videoid, channel_id, PublishedAt, title, logger)
+                cookies.close()
+                if ps and pdb:
+                    return True
+                else: 
+                    return False
+            finally:
+                del_status(videoid)
     except Exception as e:
         return False
 
