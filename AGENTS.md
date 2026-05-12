@@ -1,7 +1,7 @@
 # VaultTube CodeMap
 
 ## Project Overview
-VaultTube is a **video archive and player application** built with Python/Flask/Bootstrap5/HTML5. It downloads and manages YouTube/Patreon content with a web interface for browsing, watching, and organizing videos.
+VaultTube is a **video archive and player application** built with Python/Flask/Bootstrap5/HTML5. It downloads and manages YouTube/Patreon/Reddit content with a web interface for browsing, watching, and organizing videos.
 
 ## Core Architecture
 
@@ -17,12 +17,13 @@ VaultTube is a **video archive and player application** built with Python/Flask/
 | **Scanner** | `app/scanner.py` | Periodic subscription scanning (channels/playlists) |
 | **Downloader** | `app/downloader.py` | Queue-based download processing |
 | **Database** | `app/database.py` | DB connection, table creation, CRUD operations for videos/channels/playlists |
-| **Providers** | `app/providers/` | Download logic for YouTube (`youtube.py`) and Patreon (`patreon.py`) |
+| **Providers** | `app/providers/` | Download logic for YouTube (`youtube.py`), Patreon (`patreon.py`), and Reddit/RedGifs (`reddit.py`) |
 
 ### Providers
 - `providers/base.py` - Shared state (`dl_status_map`) for download progress tracking
 - `providers/youtube.py` - YouTube download via yt-dlp
 - `providers/patreon.py` - Patreon download with screenshot capture
+- `providers/reddit.py` - Reddit/RedGifs download via praw + yt-dlp
 
 ### Data Models
 
@@ -52,7 +53,8 @@ VaultTube/
 │   │   ├── __init__.py      # Provider loader
 │   │   ├── base.py          # Shared download state
 │   │   ├── youtube.py       # YouTube provider
-│   │   └── patreon.py       # Patreon provider
+│   │   ├── patreon.py       # Patreon provider
+│   │   └── reddit.py        # Reddit/RedGifs provider
 │   ├── static/              # JS/CSS assets
 │   └── templates/           # HTML templates
 │       ├── base.html        # Base template
@@ -69,8 +71,8 @@ VaultTube/
 │       └── playlist.html    # Single playlist view
 ├── tests/
 │   ├── conftest.py          # pytest fixtures
-│   ├── test_project.py      # Project tests
-│   └── test_selenium.py     # Selenium tests
+│   ├── __init__.py          # Package init
+│   └── test_project.py      # Project tests
 ├── requirements.txt         # Python dependencies
 └── .env                     # Environment variables
 ```
@@ -81,6 +83,10 @@ VaultTube/
 - `VAULTTUBE_YTKEY` - YouTube API key
 - `VAULTTUBE_YTCOOKIE` - YouTube cookies file
 - `VAULTTUBE_PATREONCOOKIE` - Patreon cookies file
+- `VAULTTUBE_REDDIT_CLIENT_ID` - Reddit API client ID
+- `VAULTTUBE_REDDIT_CLIENT_SECRET` - Reddit API client secret
+- `VAULTTUBE_REDDIT_USERNAME` - Reddit account username
+- `VAULTTUBE_REDDIT_PASSWORD` - Reddit account password
 
 ## File Naming Convention
 ```
@@ -97,7 +103,7 @@ VaultTube/
 ## Download Flow
 1. User submits URL → `QueueObject` added to queue
 2. `downloader.py` processes queue
-3. Provider-specific download (`youtube.py`/`patreon.py`)
+3. Provider-specific download (`youtube.py`/`patreon.py`/`reddit.py`)
 4. Progress tracked in `dl_status_map`
 5. After download, `backend.py` scans and adds to DB
 
