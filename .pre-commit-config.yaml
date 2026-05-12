@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: vaulttube-tests
+        name: VaultTube tests
+        entry: .venv/bin/python -m pytest tests/ -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
