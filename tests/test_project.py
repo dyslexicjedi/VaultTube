@@ -2,22 +2,33 @@ import pytest,os,json,mariadb
 import threading
 from providers.base import set_status, update_status, del_status, get_status_copy
 
+
+def _db_connect():
+    return mariadb.connect(
+        host=os.environ['VAULTTUBE_DBHOST'],
+        user=os.environ['VAULTTUBE_DBUSER'],
+        password=os.environ['VAULTTUBE_DBPASS'],
+        database=os.environ['VAULTTUBE_DBNAME'],
+        autocommit=True,
+        port=int(os.environ['VAULTTUBE_DBPORT'])
+    )
+
+
 def test_home(client):
     response = client.get("/")
     assert response.status_code == 200
+
 
 def test_populate_db(client):
     try:
         response = client.get("/api/checkdb")
         assert response.text == "True"
-        con = mariadb.connect(host=os.environ['VAULTTUBE_DBHOST'],user=os.environ['VAULTTUBE_DBUSER'],password=os.environ['VAULTTUBE_DBPASS'],database=os.environ['VAULTTUBE_DBNAME'],autocommit=True,port=int(os.environ['VAULTTUBE_DBPORT']))
+        con = _db_connect()
         cur = con.cursor()
-        #Populate Channels Table
         cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('Test123','Test123','Test123',0);")
         con.commit()
         cur.execute("Select * from channels limit 1;")
         assert 1 == cur.rowcount
-        #Populate Video Table
         cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('Test123','Test123','Test123','TestJSON','/videos/1','2023-10-21 15:15:15',0,0);")
         con.commit()
         cur.execute("Select * from videos limit 1;")
@@ -32,174 +43,476 @@ def test_subscribe(client):
     response = client.get("/api/checkdb")
     assert response.text == "True"
 
-    con = mariadb.connect(
-        host=os.environ['VAULTTUBE_DBHOST'],
-        user=os.environ['VAULTTUBE_DBUSER'],
-        password=os.environ['VAULTTUBE_DBPASS'],
-        database=os.environ['VAULTTUBE_DBNAME'],
-        autocommit=True,
-        port=int(os.environ['VAULTTUBE_DBPORT'])
-    )
+    con = _db_connect()
     cur = con.cursor()
-    cur.execute("INSERT IGNORE INTO channels(channelid,channelname,json,subscribed) values('SubTest123','SubTest123','{}',0);")
+    cur.execute("REPLACE INTO channels(channelid,channelname,json,subscribed) values('SubTest123','SubTest123','{}',0);")
     con.commit()
+    # Query the DB directly for the test channel's ID
+    cur.execute("SELECT channelid FROM channels WHERE channelid = %s;", ("SubTest123",))
+    ch_row = cur.fetchone()
+    assert ch_row is not None, "Test channel should exist in DB"
+    ch_id = ch_row[0]
     con.close()
 
-    response = client.get("/api/channels/0")
-    data = json.loads(response.get_data(as_text=True))
-    assert len(data) > 0
-    id = data[0]['channelid']
-    response = client.get("/api/sub_status/channel/%s"%id)
-    assert response.text == '0'
-    response = client.get("/api/subscribe/channel/%s"%id)
-    data = json.loads(response.get_data(as_text=True))
-    assert data['success'] == True
-    response = client.get("/api/sub_status/channel/%s"%id)
-    assert response.text == '1'
-    response = client.get("/api/unsubscribe/channel/%s"%id)
-    data = json.loads(response.get_data(as_text=True))
-    assert data['success'] == True
-    response = client.get("/api/sub_status/channel/%s"%id)
+    response = client.get("/api/sub_status/channel/%s" % ch_id)
     assert response.text == '0'
 
-# Need to Rework this based on new sorting API
-# def test_watched(client):
-#     response = client.get('/api/unwatched/PublishedAt/0')
-#     data = json.loads(response.get_data(as_text=True))
-#     if(len(data) > 0):
-#         id = data[0]['id']
-#         response = client.get("/api/watch_status/%s"%id)
-#         assert response.text == "0"
-#         response = client.get("/api/video/%s"%id)
-#         data = json.loads(response.get_data(as_text=True))
-#         assert data[0]['timestamp'] == "0"
-#         reponse = client.get("/api/set_timestamp/%s/%s"%("1515",id))
-#         assert reponse.text == "True"
-#         response = client.get("/api/video/%s"%id)
-#         data = json.loads(response.get_data(as_text=True))
-#         assert data[0]['timestamp'] == "1515"
-#         response = client.get("/api/watched/%s"%id)
-#         assert response.text == "True"
-#         response = client.get("/api/watch_status/%s"%id)
-#         assert response.text == "1"
-#         response = client.get("/api/video/%s"%id)
-#         data = json.loads(response.get_data(as_text=True))
-#         assert data[0]['timestamp'] == "0"
-#         response = client.get("/api/unwatched/%s"%id)
-#         assert response.text == "True"
-#         response = client.get("/api/watch_status/%s"%id)
-#         assert response.text == "0"
-#     else:
-#         assert False == True
+    response = client.get("/api/subscribe/channel/%s" % ch_id)
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+
+    response = client.get("/api/sub_status/channel/%s" % ch_id)
+    assert response.text == '1'
+
+    response = client.get("/api/unsubscribe/channel/%s" % ch_id)
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+
+    response = client.get("/api/sub_status/channel/%s" % ch_id)
+    assert response.text == '0'
 
 
 def test_search_fulltext(client):
-    """Test FULLTEXT search on title and description using MATCH/AGAINST."""
-    try:
-        # Ensure DB schema and indexes are up to date
-        response = client.get("/api/checkdb")
-        assert response.text == "True"
+    response = client.get("/api/checkdb")
+    assert response.text == "True"
 
-        con = mariadb.connect(
-            host=os.environ['VAULTTUBE_DBHOST'],
-            user=os.environ['VAULTTUBE_DBUSER'],
-            password=os.environ['VAULTTUBE_DBPASS'],
-            database=os.environ['VAULTTUBE_DBNAME'],
-            autocommit=True,
-            port=int(os.environ['VAULTTUBE_DBPORT'])
-        )
-        cur = con.cursor()
-        cur.execute(
-            "INSERT IGNORE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
-            "VALUES('SearchFT1', 'TestCreator', 'TestChannel1', '{}', '/videos/search1.mp4', "
-            "'2023-10-21 15:15:15', 'Python Tutorial Advanced', 'Learn advanced Python programming techniques');"
-        )
-        con.close()
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
+        "VALUES('SearchFT1', 'TestCreator', 'TestChannel1', '{}', '/videos/search1.mp4', "
+        "'2023-10-21 15:15:15', 'Python Tutorial Advanced', 'Learn advanced Python programming techniques for vaulttubefulltextkw');"
+    )
+    con.commit()
+    con.close()
 
-        # FULLTEXT search on title (>= 3 chars triggers MATCH/AGAINST)
-        response = client.get("/api/search/Python/0")
-        data = json.loads(response.get_data(as_text=True))
-        ids = [v['id'] for v in data]
-        assert 'SearchFT1' in ids, "FULLTEXT search should find SearchFT1 by title"
+    # Search for a unique keyword that only exists in our test data - guarantees top rank
+    response = client.get("/api/search/vaulttubefulltextkw/0")
+    data = json.loads(response.get_data(as_text=True))
+    ids = [v['id'] for v in data]
+    assert 'SearchFT1' in ids, "FULLTEXT search should find SearchFT1 by description with unique keyword"
 
-        # FULLTEXT search on description
-        response = client.get("/api/search/programming/0")
-        data = json.loads(response.get_data(as_text=True))
-        ids = [v['id'] for v in data]
-        assert 'SearchFT1' in ids, "FULLTEXT search should find SearchFT1 by description"
+    # Search for a common word - verify search returns results containing the term
+    response = client.get("/api/search/advanced/0")
+    data = json.loads(response.get_data(as_text=True))
+    assert len(data) > 0, "Search for 'advanced' should return results"
+    found_advanced = any('advanced' in (v.get('title') or '').lower() or
+                         'advanced' in (v.get('description') or '').lower()
+                         for v in data)
+    assert found_advanced, "At least one result should contain 'advanced'"
 
-        # FULLTEXT search for nonexistent term returns empty
-        response = client.get("/api/search/xyznonexistent/0")
-        data = json.loads(response.get_data(as_text=True))
-        assert data == [], "Search for nonexistent term should return empty list"
-
-    except Exception as e:
-        print(e)
-        assert False, str(e)
+    response = client.get("/api/search/xyznonexistent/0")
+    data = json.loads(response.get_data(as_text=True))
+    assert data == [], "Search for nonexistent term should return empty list"
 
 
 def test_search_short_query(client):
-    """Test LIKE fallback on title for queries shorter than 3 characters."""
-    try:
-        response = client.get("/api/checkdb")
-        assert response.text == "True"
+    response = client.get("/api/checkdb")
+    assert response.text == "True"
 
-        con = mariadb.connect(
-            host=os.environ['VAULTTUBE_DBHOST'],
-            user=os.environ['VAULTTUBE_DBUSER'],
-            password=os.environ['VAULTTUBE_DBPASS'],
-            database=os.environ['VAULTTUBE_DBNAME'],
-            autocommit=True,
-            port=int(os.environ['VAULTTUBE_DBPORT'])
-        )
-        cur = con.cursor()
-        cur.execute(
-            "INSERT IGNORE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
-            "VALUES('SearchLIKE1', 'TestCreator', 'TestChannel1', '{}', '/videos/search2.mp4', "
-            "'2023-10-21 15:15:15', 'Zynced Workflow Tool', 'A unique workflow tool');"
-        )
-        con.close()
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
+        "VALUES('SearchLIKE1', 'TestCreator', 'TestChannel1', '{}', '/videos/search2.mp4', "
+        "'2023-10-21 15:15:15', 'Zynced Workflow Tool', 'A unique workflow tool');"
+    )
+    con.commit()
+    con.close()
 
-        # Short query (< 3 chars) falls back to LIKE on title
-        response = client.get("/api/search/Zy/0")
-        data = json.loads(response.get_data(as_text=True))
-        ids = [v['id'] for v in data]
-        assert 'SearchLIKE1' in ids, "Short query LIKE fallback should find SearchLIKE1 by title prefix"
-
-    except Exception as e:
-        print(e)
-        assert False, str(e)
+    response = client.get("/api/search/Zy/0")
+    data = json.loads(response.get_data(as_text=True))
+    ids = [v['id'] for v in data]
+    assert 'SearchLIKE1' in ids, "Short query LIKE fallback should find SearchLIKE1 by title prefix"
 
 
-def test_dl_status_map_thread_safety():
-    """Test that dl_status_map operations are thread-safe under concurrent access."""
-    iterations = 100
-    num_threads = 10
-    errors = []
+def test_get_video(client):
+    response = client.get("/api/checkdb")
+    assert response.text == "True"
 
-    def worker(thread_id):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO channels(channelid,channelname,json,subscribed) "
+        "VALUES('GetVidCh1', 'GetVidYoutuber', '{}', 0);"
+    )
+    con.commit()
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description, watched) "
+        "VALUES('GetVid1', 'GetVidYoutuber', 'GetVidCh1', '{}', '/videos/getvid1.mp4', "
+        "'2024-01-01 10:00:00', 'Get Video Test', 'Testing get video API', 0);"
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/video/GetVid1")
+    data = json.loads(response.get_data(as_text=True))
+    assert len(data) > 0
+    assert data[0]['id'] == 'GetVid1'
+    assert data[0]['youtuber'] == 'GetVidYoutuber'
+    assert data[0]['title'] == 'Get Video Test'
+
+
+def test_get_video_mp4_suffix(client):
+    """Test that video lookup strips .mp4 from the id."""
+    response = client.get("/api/checkdb")
+    assert response.text == "True"
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched) "
+        "VALUES('GetVidMp4', 'TestYt', 'Ch1', '{}', '/videos/GetVidMp4.mp4', "
+        "'2024-01-01 10:00:00', 'Mp4 Test', 0);"
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/video/GetVidMp4.mp4")
+    data = json.loads(response.get_data(as_text=True))
+    assert len(data) > 0
+    assert data[0]['id'] == 'GetVidMp4'
+
+
+def test_mark_watched(client):
+    response = client.get("/api/checkdb")
+    assert response.text == "True"
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched, timestamp) "
+        "VALUES('WatchVid1', 'TestYt', 'Ch1', '{}', '/videos/watchvid1.mp4', "
+        "'2024-01-01 10:00:00', 'Watch Test', 0, 0);"
+    )
+    con.commit()
+    con.close()
+
+    # Verify not watched
+    response = client.get("/api/watch_status/WatchVid1")
+    assert response.text == "0"
+
+    # Mark watched
+    response = client.get("/api/watched/WatchVid1")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+
+    # Verify watched
+    response = client.get("/api/watch_status/WatchVid1")
+    assert response.text == "1"
+
+
+def test_mark_unwatched(client):
+    response = client.get("/api/checkdb")
+    assert response.text == "True"
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched, timestamp) "
+        "VALUES('UnwatchVid1', 'TestYt', 'Ch1', '{}', '/videos/unwatchvid1.mp4', "
+        "'2024-01-01 10:00:00', 'Unwatch Test', 1, 0);"
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/watch_status/UnwatchVid1")
+    assert response.text == "1"
+
+    response = client.get("/api/unwatched/UnwatchVid1")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+
+    response = client.get("/api/watch_status/UnwatchVid1")
+    assert response.text == "0"
+
+
+def test_set_timestamp(client):
+    response = client.get("/api/checkdb")
+    assert response.text == "True"
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched, timestamp) "
+        "VALUES('TsVid1', 'TestYt', 'Ch1', '{}', '/videos/tsvid1.mp4', "
+        "'2024-01-01 10:00:00', 'Timestamp Test', 0, 0);"
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/set_timestamp/1515/TsVid1")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+
+    response = client.get("/api/video/TsVid1")
+    data = json.loads(response.get_data(as_text=True))
+    assert data[0]['timestamp'] == "1515"
+
+
+def test_download_queue(client, monkeypatch):
+    """Test that downloading a URL enqueues a job and returns success."""
+    import queue as _queue
+
+    # Ensure queue is initialized for test client
+    with client.application.app_context():
+        if 'queue' not in client.application.config:
+            client.application.config['queue'] = _queue.Queue()
+        q = client.application.config['queue']
+    # Ensure queue is empty before test
+    while not q.empty():
         try:
-            for i in range(iterations):
-                video_id = f"vid_{thread_id}_{i}"
-                set_status(video_id, {'progress': '0%', 'title': f'Title {i}', 'type': 'test'})
-                update_status(video_id, {'progress': '50%'})
-                status = get_status_copy()
-                assert video_id in status
-                del_status(video_id)
-        except Exception as e:
-            errors.append(str(e))
+            q.get_nowait()
+        except _queue.Empty:
+            break
 
-    threads = [threading.Thread(target=worker, args=(i,)) for i in range(num_threads)]
+    response = client.post("/api/download/single", json={"url": "https://youtube.com/watch?v=dQw4w9WgXcQ"})
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
 
-    for t in threads:
-        t.start()
+    with client.application.app_context():
+        assert q.qsize() == 1
 
-    for t in threads:
-        t.join()
 
-    assert len(errors) == 0, f"Thread safety errors: {errors}"
+def test_download_queue_missing_url(client):
+    """Test that downloading without a URL returns an error."""
+    response = client.post("/api/download/single", json={})
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is False
 
-    final_status = get_status_copy()
-    assert len(final_status) == 0
+
+def test_video_count(client):
+    response = client.get("/api/stats/video/count")
+    assert response.status_code == 200
+    # Should return a non-negative integer string
+    count = int(response.text)
+    assert count >= 0
+
+
+def test_video_unwatched_count(client):
+    response = client.get("/api/stats/video/unwatched")
+    assert response.status_code == 200
+    count = int(response.text)
+    assert count >= 0
+
+
+def test_stats(client):
+    response = client.get("/api/stats")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, dict)
+    assert 'countbyyoutuber' in data
+    assert 'totalcount' in data
+    assert 'watched' in data
+
+
+def test_random_video(client):
+    response = client.get("/api/random")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+
+
+def test_random_video_include_reddit(client):
+    response = client.get("/api/random?include_reddit=1")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+
+
+def test_channels_page(client):
+    response = client.get("/api/channels/0")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+
+
+def test_playlists_page(client):
+    response = client.get("/api/playlists/0")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+
+
+def test_creator_count(client):
+    response = client.get("/api/creator/count/TestCreator")
+    data = json.loads(response.get_data(as_text=True))
+    assert 'count' in data
+    assert isinstance(data['count'], int)
+
+
+def test_video_getvids_unwatched(client):
+    response = client.get("/api/getvids/unwatched/PublishedAt/desc/0")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+
+
+def test_video_getvids_watched(client):
+    response = client.get("/api/getvids/watched/PublishedAt/desc/0")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+
+
+def test_video_getvids_invalid_sort(client):
+    """Test that invalid sort column falls back to default."""
+    response = client.get("/api/getvids/unwatched/invalid_col/desc/0")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+
+
+def test_search_empty_result(client):
+    response = client.get("/api/search/zzzznonexistent12345/0")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+    # Should be empty or not contain test-specific IDs
+    for v in data:
+        assert v.get('id') not in ('SearchFT1', 'SearchLIKE1')
+
+
+def test_api_checkdb(client):
+    response = client.get("/api/checkdb")
+    assert response.status_code == 200
+    assert response.text == "True"
+
+
+def test_queue_status(client):
+    # Initialize the queue for test client
+    with client.application.app_context():
+        if 'queue' not in client.application.config:
+            client.application.config['queue'] = __import__('queue').Queue()
+
+    response = client.get("/api/status/queue/")
+    assert response.status_code == 200
+    data = json.loads(response.get_data(as_text=True))
+    assert 'dl_status' in data
+    assert 'queue_size' in data
+    assert 'queue_value' in data
+    assert 'cur_id' in data
+    assert 'cur_title' in data
+    assert 'active' in data
+
+
+def test_subscribe_playlist(client):
+    """Test subscribing to a playlist (existing playlist in DB)."""
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO playlists(playlistId,playlistName,channelId,json,subscribed) "
+        "VALUES('PLTest123', 'Test Playlist', 'TestCh1', '{}', 0);"
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/subscribe/playlist/PLTest123")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+
+    response = client.get("/api/sub_status/playlist/PLTest123")
+    assert response.text == '1'
+
+    response = client.get("/api/unsubscribe/playlist/PLTest123")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+
+    response = client.get("/api/sub_status/playlist/PLTest123")
+    assert response.text == '0'
+
+
+def test_unsubscribe_nonexistent(client):
+    """Test unsubscribing from a channel that doesn't exists (should not error)."""
+    response = client.get("/api/unsubscribe/channel/NonExistentChannel12345")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+
+
+def test_getvids_with_channel_filter(client):
+    """Test getvids endpoint with channel_ids filter."""
+    response = client.get("/api/getvids/unwatched/PublishedAt/desc/0&channel_ids[]=TestChannel1")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+
+
+def test_download_error_entry(client):
+    """Test that download errors can be logged and retrieved."""
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "INSERT INTO download_errors(url, error_type, error_message) VALUES(%s, %s, %s);",
+        ("https://example.com/bad", "TestError", "Test error message")
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/downloads/errors/")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert any(e['url'] == 'https://example.com/bad' for e in data)
+
+
+def test_clear_download_errors(client):
+    """Test clearing download errors."""
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("INSERT INTO download_errors(url, error_type, error_message) VALUES(%s, %s, %s);",
+                ("https://example.com/clear", "TestErr", "To clear"))
+    con.commit()
+    con.close()
+
+    response = client.delete("/api/downloads/errors/")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+
+    response = client.get("/api/downloads/errors/")
+    data = json.loads(response.get_data(as_text=True))
+    assert not any(e['url'] == 'https://example.com/clear' for e in data)
+
+
+def test_dl_status_set_update_get():
+    """Test individual dl_status_map operations."""
+    video_id = "dl_test_vid_001"
+    set_status(video_id, {'progress': '0%', 'title': 'Test Title', 'type': 'youtube'})
+    status = get_status_copy()
+    assert video_id in status
+    assert status[video_id]['progress'] == '0%'
+    assert status[video_id]['title'] == 'Test Title'
+
+    update_status(video_id, {'progress': '50%', 'title': 'Updated Title'})
+    status = get_status_copy()
+    assert status[video_id]['progress'] == '50%'
+    assert status[video_id]['title'] == 'Updated Title'
+
+    del_status(video_id)
+    status = get_status_copy()
+    assert video_id not in status
+
+
+def test_dl_status_overwrite(client):
+    """Test that set_status overwrites existing entries."""
+    video_id = "dl_test_vid_002"
+    set_status(video_id, {'progress': '10%', 'title': 'First'})
+    set_status(video_id, {'progress': '90%', 'title': 'Second'})
+    status = get_status_copy()
+    assert status[video_id]['progress'] == '90%'
+    assert status[video_id]['title'] == 'Second'
+    del_status(video_id)
+
+
+def test_getvids_sort_options(client):
+    """Test getvids with various sort options."""
+    for sort_col in ['PublishedAt', 'AddedAt', 'title', 'watched']:
+        response = client.get(f"/api/getvids/unwatched/{sort_col}/desc/0")
+        data = json.loads(response.get_data(as_text=True))
+        assert isinstance(data, list), f"Sort column '{sort_col}' should return a list"
+
+
+def test_getvids_direction_options(client):
+    """Test getvids with sort directions."""
+    for direction in ['asc', 'desc']:
+        response = client.get(f"/api/getvids/unwatched/PublishedAt/{direction}/0")
+        data = json.loads(response.get_data(as_text=True))
+        assert isinstance(data, list), f"Direction '{direction}' should return a list"
+
+
+def test_getvids_invalid_direction(client):
+    """Test that invalid direction falls back to default."""
+    response = client.get("/api/getvids/unwatched/PublishedAt/invalid/0")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
 
 

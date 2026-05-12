@@ -4,8 +4,15 @@ import mariadb
 from app.main import app
 
 # All test-only row IDs that tests insert into the DB
-_TEST_VIDEO_IDS   = ['Test123', 'SearchFT1', 'SearchLIKE1']
-_TEST_CHANNEL_IDS = ['Test123', 'SubTest123']
+_TEST_VIDEO_IDS   = [
+    'Test123', 'SearchFT1', 'SearchLIKE1',
+    'GetVid1', 'GetVidMp4',
+    'WatchVid1', 'UnwatchVid1', 'TsVid1',
+]
+_TEST_CHANNEL_IDS = [
+    'Test123', 'SubTest123',
+    'GetVidCh1', 'TestCh1',
+]
 
 
 def _delete_test_rows():
