@@ -422,7 +422,7 @@ def test_unsubscribe_nonexistent(client):
 
 def test_getvids_with_channel_filter(client):
     """Test getvids endpoint with channel_ids filter."""
-    response = client.get("/api/getvids/unwatched/PublishedAt/desc/0&channel_ids[]=TestChannel1")
+    response = client.get("/api/getvids/unwatched/PublishedAt/desc/0?channel_ids[]=TestChannel1")
     data = json.loads(response.get_data(as_text=True))
     assert isinstance(data, list)
 
