@@ -18,7 +18,7 @@
         pagination(id);
     }
     function get_videos(currentpage,searchtxt){
-        $.getJSON("/api/search/"+searchtxt+"/"+(currentpage*40),function(data){
+        $.getJSON("/api/search/"+encodeURIComponent(searchtxt)+"/"+(currentpage*40),function(data){
             processdata(data);
         });
     }
