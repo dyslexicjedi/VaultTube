@@ -89,6 +89,9 @@ def process_new_video(id,fpath,logger):
 
 def process_channel(fname,logger):
     id = fname.split('/')[-1]
+    if not id.startswith('UC'):
+        logger.debug("Skipping non-YouTube channel directory: %s" % id)
+        return
     try:
         if(check_db_channel(id,logger)):
             pass
