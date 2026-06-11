@@ -141,8 +141,13 @@
     function processdata(data){
         $("#carddeck").empty();
         $.each(data,function(i,item){
-            var jobj = jQuery.parseJSON(data[i]["json"]);
-            var desc = jobj['items'][0]['snippet']['description'] || '';
+            // json shape differs by source (YouTube API vs Patreon API) and may
+            // not have items[]; a missing description must not break the page
+            var desc = '';
+            try {
+                var jobj = jQuery.parseJSON(data[i]["json"]);
+                desc = jobj['items'][0]['snippet']['description'] || '';
+            } catch (e) {}
             var subbed = data[i]['subscribed'];
             var txt = `
                 <div class="col">
