@@ -1,7 +1,8 @@
 import requests
 import os
-from io import StringIO
+import re
 import yt_dlp
+from yt_dlp.networking.impersonate import ImpersonateTarget
 from flask import current_app
 import datetime
 import json
@@ -14,21 +15,23 @@ from providers.base import set_status, update_status, del_status
 def provider_domains():
     return ['patreon.com']
 
+def _normalize_url(url):
+    # yt-dlp's PatreonIE expects /posts/{slug} not /{creator}/posts/{slug}
+    return re.sub(r'patreon\.com/[^/]+/(posts/)', r'patreon.com/\1', url)
+
 def download(q,logger):
     try:
-        logger.debug("Starting Patreon Download: %s"%q.url)
-        #Set Cookie
-        f = open(os.environ['VAULTTUBE_PATREONCOOKIE'])
-        contents = f.read()
-        f.close()
-        cookies = StringIO(contents)
+        url = _normalize_url(q.url)
+        logger.debug("Starting Patreon Download: %s" % url)
         ydl_opts = {
-            'cookiefile': cookies,
+            'cookiefile': os.environ['VAULTTUBE_PATREONCOOKIE'],
             'outtmpl': os.environ['VAULTTUBE_VAULTDIR']+"/%(channel_id)s/%(id)s.mp4",
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             "progress_hooks": [dl_progress_hook],
             'js_runtimes': {'deno': {'path': os.environ['VAULTTUBE_DENOPATH']}},
-            'extractor_args': {'generic': {'impersonate': [None]}},
+            # Impersonate a browser TLS fingerprint globally (not just for the
+            # generic extractor) or Patreon's Cloudflare returns 403 on API calls
+            'impersonate': ImpersonateTarget.from_str('chrome'),
             'socket_timeout': 30,        # seconds before a socket read times out
             'retries': 10,               # retry failed fragment/chunk downloads
             'fragment_retries': 10,      # retry failed fragments specifically
@@ -36,17 +39,16 @@ def download(q,logger):
             'http_chunk_size': 10485760, # 10 MB chunks instead of the default large size
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            data = ydl.extract_info(q.url,download=False)
+            data = ydl.extract_info(url, download=False)
             videoid = data['id']
             channel_id = data['channel_id']
             title = data['title']
             PublishedAt = datetime.datetime.strptime(data['upload_date'], '%Y%m%d')
             set_status(videoid, {'progress': '0%', 'title': title, 'provider': 'patreon'})
             try:
-                ydl.download(q.url)
+                ydl.download(url)
                 ps = patreon_screenshot(videoid, channel_id, logger)
                 pdb = patreon_db_info(videoid, channel_id, PublishedAt, title, logger)
-                cookies.close()
                 if ps and pdb:
                     return True
                 else: 
