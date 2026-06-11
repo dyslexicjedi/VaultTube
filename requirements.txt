@@ -2,6 +2,7 @@ Flask
 mariadb
 requests
 yt-dlp[default]
+curl_cffi
 opencv-python-headless
 python-dotenv
 praw

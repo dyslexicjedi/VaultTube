@@ -28,6 +28,7 @@ def download(q,logger):
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             "progress_hooks": [dl_progress_hook],
             'js_runtimes': {'deno': {'path': os.environ['VAULTTUBE_DENOPATH']}},
+            'extractor_args': {'generic': {'impersonate': [None]}},
             'socket_timeout': 30,        # seconds before a socket read times out
             'retries': 10,               # retry failed fragment/chunk downloads
             'fragment_retries': 10,      # retry failed fragments specifically
@@ -53,7 +54,8 @@ def download(q,logger):
             finally:
                 del_status(videoid)
     except Exception as e:
-        return False
+        logger.error("Patreon download failed: %s" % e)
+        raise
 
 def patreon_screenshot(videoid,channelid,logger):
     try:
