@@ -32,8 +32,12 @@ are not in it; copy them in or replicate their logic in the test script.
 ```
 
 - Tests need a reachable MariaDB; connection info comes from `.env` at the repo
-  root (loaded by `load_dotenv()` in `app/main.py`). Tests insert/delete real
-  rows; `tests/conftest.py` cleans up known test IDs before and after each test.
+  root (loaded by `load_dotenv()` in `app/main.py`). **This is the PRODUCTION
+  database** — tests insert/delete real rows, and `tests/conftest.py` cleans up
+  known test IDs before and after each test. Any new test that writes rows
+  (including anything that enqueues a download — queue rows are persisted)
+  MUST register its IDs/URLs in conftest's cleanup lists or clean up itself,
+  or the live app will pick the rows up as real work.
 - A pre-commit hook runs the full test suite on every commit; commits fail if
   tests fail.
 - Branch `dev` is the working/default branch; `latest` image tag is stable.
@@ -45,9 +49,13 @@ are not in it; copy them in or replicate their logic in the test script.
   error_type, error_message, created_at) — check there for history.
 - Query the DB from inside the container with the `VAULTTUBE_DB*` env vars and
   the `mariadb` Python module (no mysql CLI in the image).
-- The download queue is **in-memory** (`queue.Queue` in `app.config['queue']`),
-  not persisted — queued items are lost on restart and cannot be inspected
-  from outside.
+- The download queue is dispatched from an in-memory `queue.Queue`
+  (`app.config['queue']`) but every item is mirrored to the `queue` DB table
+  (status: pending/downloading/done/failed, attempts, last_error). Unfinished
+  rows are re-enqueued on startup, transient (network) failures retry up to 3
+  times, and `queue_utils.enqueue()` skips URLs already pending. Inspect the
+  table to see what's queued; enqueue ONLY via `queue_utils.enqueue()` so the
+  DB row is written.
 
 ## Architecture notes (the non-obvious parts)
 
@@ -60,6 +68,11 @@ are not in it; copy them in or replicate their logic in the test script.
 - `app/downloader.py` dispatches by URL domain first, then by `q.source`.
 - Background threads (backend file scanner, subscription scanner, downloader)
   are started from `app/main.py`; `VAULTTUBE_DISABLEBACK` controls them.
+- Subscriptions live in the `channels` table; the scanner treats numeric
+  channel IDs as Patreon campaign IDs (scanned via the Patreon posts API,
+  only `*video*` post types enqueued) and `UC...` IDs as YouTube channels.
+  Patreon campaigns get their `channels` row auto-created on first download
+  or vault scan (`ensure_channel` in `app/providers/patreon.py`).
 - Video files live at `$VAULTTUBE_VAULTDIR/{channel_id}/{video_id}.{ext}`;
   the backend thread scans the vault and adds any new files to the DB, so
   a download is "done" when the file lands in the right place.

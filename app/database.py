@@ -104,6 +104,24 @@ def checkdb(logger):
         if(not cur.fetchone()):
             logger.info("IgnoreVid Table not created, creating...")
             cur.execute("create table IgnoreVid (`id` varchar(50) COLLATE utf8mb4_bin NOT NULL,PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
+        #Queue
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'queue' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
+        if(not cur.fetchone()):
+            logger.info("Queue Table not created, creating...")
+            cur.execute("""CREATE TABLE `queue` (
+                `id` int(11) NOT NULL AUTO_INCREMENT,
+                `url` varchar(500) NOT NULL,
+                `source` varchar(50) DEFAULT 'youtube',
+                `channel_id` varchar(100) DEFAULT '',
+                `unsave` tinyint(1) DEFAULT 0,
+                `status` varchar(20) DEFAULT 'pending',
+                `attempts` int(11) DEFAULT 0,
+                `last_error` text DEFAULT NULL,
+                `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
         #Download Errors
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'download_errors' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
@@ -120,6 +138,7 @@ def checkdb(logger):
         cur.close()
         con.close()
         cleanup_old_errors(logger, 7)
+        cleanup_old_queue_rows(logger, 7)
         return True
     except Exception as e:
         logger.error("Failed during table create: %s",e)
@@ -406,6 +425,77 @@ def clear_download_errors(logger):
         logger.info("Download errors cleared")
     except Exception as e:
         logger.error("Error during clear_download_errors: %s", e)
+
+def insert_queue_item(qo, logger):
+    """Persist a queued download. Returns the row id, or None on failure."""
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        sql = "INSERT INTO queue(url, source, channel_id, unsave, status, attempts) VALUES(%s, %s, %s, %s, 'pending', %s)"
+        cur.execute(sql, (qo.url, qo.source, qo.channel_id, 1 if qo.unsave else 0, qo.attempts))
+        rowid = cur.lastrowid
+        con.commit()
+        cur.close()
+        con.close()
+        return rowid
+    except Exception as e:
+        logger.error("Error during insert_queue_item: %s" % e)
+        return None
+
+def update_queue_status(rowid, status, logger, error=None, attempts=None):
+    if rowid is None:
+        return
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        if attempts is not None:
+            cur.execute("UPDATE queue SET status=%s, last_error=%s, attempts=%s WHERE id=%s", (status, error, attempts, rowid))
+        else:
+            cur.execute("UPDATE queue SET status=%s, last_error=%s WHERE id=%s", (status, error, rowid))
+        con.commit()
+        cur.close()
+        con.close()
+    except Exception as e:
+        logger.error("Error during update_queue_status: %s" % e)
+
+def queue_has_url(url, logger):
+    """True if the URL is already queued or downloading."""
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("SELECT 1 FROM queue WHERE url = %s AND status IN ('pending','downloading') LIMIT 1", (url,))
+        rv = cur.fetchone() is not None
+        cur.close()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during queue_has_url: %s" % e)
+        return False
+
+def get_resumable_queue_items(logger):
+    """Rows that were pending or mid-download when the app last stopped."""
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("SELECT id, url, source, channel_id, unsave, attempts FROM queue WHERE status IN ('pending','downloading') ORDER BY id")
+        rv = cur.fetchall()
+        cur.close()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during get_resumable_queue_items: %s" % e)
+        return []
+
+def cleanup_old_queue_rows(logger, days=7):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("DELETE FROM queue WHERE status IN ('done','failed') AND updated_at < DATE_SUB(NOW(), INTERVAL %s DAY)", (days,))
+        con.commit()
+        cur.close()
+        con.close()
+    except Exception as e:
+        logger.error("Error during cleanup_old_queue_rows: %s" % e)
 
 def cleanup_old_errors(logger, days=7):
     try:

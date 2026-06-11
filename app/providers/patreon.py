@@ -10,6 +10,9 @@ import subprocess
 import mariadb
 
 from providers.base import set_status, update_status, del_status
+from database import check_db_video, check_db_channel, save_channel
+from QueueObject import QueueObject
+from queue_utils import enqueue
 
 
 def provider_domains():
@@ -18,6 +21,61 @@ def provider_domains():
 def _normalize_url(url):
     # yt-dlp's PatreonIE expects /posts/{slug} not /{creator}/posts/{slug}
     return re.sub(r'patreon\.com/[^/]+/(posts/)', r'patreon.com/\1', url)
+
+def _api_get(url, logger):
+    """GET a Patreon API URL using the configured cookies + browser impersonation."""
+    ydl = yt_dlp.YoutubeDL({
+        'cookiefile': os.environ['VAULTTUBE_PATREONCOOKIE'],
+        'impersonate': ImpersonateTarget.from_str('chrome'),
+        'quiet': True,
+    })
+    resp = ydl.urlopen(yt_dlp.networking.Request(url, headers={'Content-Type': 'application/vnd.api+json'}))
+    return json.loads(resp.read())
+
+def ensure_channel(campaign_id, logger):
+    """Create a channels row for a Patreon campaign so it shows up in the UI
+    and can be subscribed to. No-op if the row already exists."""
+    try:
+        if 'VAULTTUBE_PATREONCOOKIE' not in os.environ:
+            return
+        if check_db_channel(campaign_id, logger):
+            return
+        data = _api_get('https://www.patreon.com/api/campaigns/%s?fields[campaign]=name&json-api-version=1.0' % campaign_id, logger)
+        name = data['data']['attributes']['name']
+        save_channel(campaign_id, name, data, logger)
+        logger.info("Created channel entry for Patreon campaign %s (%s)" % (campaign_id, name))
+    except Exception as e:
+        logger.error("ensure_channel failed for Patreon campaign %s: %s" % (campaign_id, e))
+
+def scan_campaign(campaign_id, logger):
+    """Enqueue any new viewable video posts from a subscribed Patreon campaign.
+    Non-video posts (text_only, image_file, poll, ...) carry no downloadable
+    media and are skipped."""
+    if 'VAULTTUBE_PATREONCOOKIE' not in os.environ:
+        logger.error("VAULTTUBE_PATREONCOOKIE not set, skipping Patreon campaign %s" % campaign_id)
+        return
+    try:
+        url = ('https://www.patreon.com/api/posts'
+               '?filter[campaign_id]=%s'
+               '&fields[post]=title,post_type,current_user_can_view'
+               '&sort=-published_at&page[count]=50&json-api-version=1.0' % campaign_id)
+        data = _api_get(url, logger)
+        for post in data.get('data', []):
+            attrs = post.get('attributes', {})
+            post_id = post['id']
+            if 'video' not in (attrs.get('post_type') or ''):
+                continue
+            if not attrs.get('current_user_can_view'):
+                logger.info("Skipping locked Patreon post: %s (%s)" % (post_id, attrs.get('title')))
+                continue
+            if check_db_video(post_id, logger):
+                logger.info("Already found: %s" % post_id)
+                continue
+            logger.info("Processing Patreon post: %s (%s)" % (post_id, attrs.get('title')))
+            qo = QueueObject("https://www.patreon.com/posts/%s" % post_id, "", "patreon", 0, "")
+            enqueue(qo, current_app.config['queue'], logger)
+    except Exception as e:
+        logger.error("Scanning Patreon campaign %s failed: %s" % (campaign_id, e))
 
 def download(q,logger):
     try:
@@ -44,6 +102,7 @@ def download(q,logger):
             channel_id = data['channel_id']
             title = data['title']
             PublishedAt = datetime.datetime.strptime(data['upload_date'], '%Y%m%d')
+            ensure_channel(channel_id, logger)
             set_status(videoid, {'progress': '0%', 'title': title, 'provider': 'patreon'})
             try:
                 ydl.download(url)

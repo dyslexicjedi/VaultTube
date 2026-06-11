@@ -89,6 +89,11 @@ def process_new_video(id,fpath,logger):
 
 def process_channel(fname,logger):
     id = fname.split('/')[-1]
+    if id.isdigit():
+        # Numeric directory names are Patreon campaign IDs
+        from providers.patreon import ensure_channel
+        ensure_channel(id, logger)
+        return
     if not id.startswith('UC'):
         logger.debug("Skipping non-YouTube channel directory: %s" % id)
         return

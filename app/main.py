@@ -3,9 +3,10 @@ from logging.handlers import TimedRotatingFileHandler
 from flask import Flask,render_template,send_file,Blueprint,request
 from api import api_bp
 from backend import backend_thread,deleted_check_thread
-from database import checkdb
+from database import checkdb,get_resumable_queue_items
 from scanner import start_scanner
 from downloader import start_dl_queue
+from QueueObject import QueueObject
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -126,6 +127,13 @@ def startup():
     if(dbpass):
         q = queue.Queue()
         app.config['queue'] = q
+        #Restore downloads that were queued or in-flight at last shutdown
+        for rowid, url, source, channel_id, unsave, attempts in get_resumable_queue_items(logger):
+            qo = QueueObject(url, channel_id or "", source, 0, "", unsave=bool(unsave))
+            qo.row_id = rowid
+            qo.attempts = attempts
+            q.put(qo)
+            logger.info("Restored queued download: %s" % url)
         if("VAULTTUBE_DISABLEBACK" in os.environ):
             logger.info("Found Disable Backend variable of %s",os.environ['VAULTTUBE_DISABLEBACK'])
             if(os.environ['VAULTTUBE_DISABLEBACK'] == "False"):

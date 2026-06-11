@@ -11,6 +11,7 @@ import datetime
 import requests
 
 from QueueObject import QueueObject
+from queue_utils import enqueue
 
 api_bp = Blueprint('api',__name__)
 
@@ -249,7 +250,7 @@ def api_download():
         elif 'youtube.com' in url or 'youtu.be' in url:
             source = "youtube"
         i = QueueObject(url, "", source, 0, "")
-        current_app.config['queue'].put(i)
+        enqueue(i, current_app.config['queue'], current_app.logger)
         return api_success()
     except Exception as e:
         current_app.logger.error("API Download Failed: %s" % e)
@@ -730,7 +731,7 @@ def api_reddit_saved():
                 continue
             url = "https://www.reddit.com" + item.permalink
             qo = QueueObject(url, "", "reddit", 0, "", unsave=True)
-            q.put(qo)
+            enqueue(qo, q, current_app.logger)
             enqueued += 1
 
         return api_success({"enqueued": enqueued, "skipped": skipped})

@@ -7,6 +7,8 @@ from flask import current_app
 from QueueObject import QueueObject
 from database import get_active_subscriptions,get_active_playlist_subs
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info
+from providers.patreon import scan_campaign
+from queue_utils import enqueue
 
 def start_scanner(logger,app):
     logger.info("*Starting Scanner")
@@ -15,8 +17,13 @@ def start_scanner(logger,app):
         data = get_active_subscriptions(logger)
         for id in data:
             with app.app_context():
-                logger.info("Scanning Channel: %s"%id)
-                get_channel_video_list(id,logger)
+                # Patreon campaign IDs are numeric; YouTube channel IDs start with UC
+                if id[0].isdigit():
+                    logger.info("Scanning Patreon Campaign: %s"%id[0])
+                    scan_campaign(id[0],logger)
+                else:
+                    logger.info("Scanning Channel: %s"%id)
+                    get_channel_video_list(id,logger)
         #Process Playlist Subs
         data = get_active_playlist_subs(logger)
         for id in data:
@@ -46,9 +53,9 @@ def get_channel_video_list(channelid, logger):
                 logger.info("Processing: %s" % id)
                 url = "https://www.youtube.com/watch?v=%s" % id
                 i = QueueObject(url, "", "youtube", 0, "")
-                current_app.config['queue'].put(i) 
+                enqueue(i, current_app.config['queue'], logger)
     except Exception as e:
-        logger.error("Scanning Channel Failed on ChannelID: %s" % channelid[0])
+        logger.error("Scanning Channel Failed on ChannelID: %s: %s" % (channelid[0], e))
 
 def get_playlist_video_list(playlistid, logger, pageToken='0'):
     try:
@@ -72,7 +79,7 @@ def get_playlist_video_list(playlistid, logger, pageToken='0'):
                 logger.info("Processing: %s" % id)
                 url = "https://www.youtube.com/watch?v=%s" % id
                 i = QueueObject(url, "", "youtube", 0, "")
-                current_app.config['queue'].put(i)
+                enqueue(i, current_app.config['queue'], logger)
                 insert_pl2vid_info(playlistid[0], id, logger)
         if "nextPageToken" in retj:
             logger.info("Processing Next Page for %s" % playlistid)

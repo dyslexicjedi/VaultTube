@@ -46,6 +46,7 @@ by `q.source` as a fallback (see `downloader.py`).
 - `tags` - Video tags
 - `IgnoreVid` - Ignored videos
 - `download_errors` - Download error logging
+- `queue` - Persisted download queue (status, attempts, last_error); done/failed rows auto-pruned after 7 days
 
 ## Directory Structure
 
@@ -119,11 +120,18 @@ Optional:
 4. **Deleted check thread** - Checks for deleted videos (disabled)
 
 ## Download Flow
-1. User submits URL → `QueueObject` added to queue (in-memory `queue.Queue` in `app.config['queue']`; not persisted across restarts)
-2. `downloader.py` polls the queue every 60s
-3. Provider-specific download (`youtube.py`/`patreon.py`/`reddit.py`)
+1. URL enqueued via `queue_utils.enqueue()` → writes a `queue` table row + puts a `QueueObject` on the in-memory `queue.Queue` (`app.config['queue']`). URLs already pending/downloading are skipped (periodic scans don't duplicate a draining backlog)
+2. `downloader.py` blocks on `q.get()` — items are picked up instantly
+3. Provider-specific download (`youtube.py`/`patreon.py`/`reddit.py`); row status tracked pending → downloading → done/failed
 4. Progress tracked in `dl_status_map` and broadcast to SSE subscribers
-5. After download, `backend.py` scans and adds to DB; failures land in `download_errors`
+5. Transient (network) failures retry up to 3 times with a 60s delay; permanent failures land in `download_errors`
+6. On startup, `main.py` re-enqueues any rows still pending/downloading from the last run
+7. After download, `backend.py` scans and adds to DB
+
+## Subscription Scanning (`scanner.py`, hourly)
+- YouTube channels (`UC...` IDs) and playlists: polled via the YouTube Data API
+- Patreon campaigns (numeric IDs in `channels`): polled via the Patreon posts API with cookies + impersonation (`scan_campaign` in `providers/patreon.py`); only viewable `*video*` post types are enqueued — `text_only`/`image_file`/`poll` posts carry no media
+- Patreon campaigns get their `channels` row auto-created on first download or vault scan (`ensure_channel`); subscribe via the normal `/api/subscribe/channel/<campaign_id>` endpoint
 
 ## Testing & CI
 - `.venv/bin/python -m pytest tests/ -q` — tests need a reachable MariaDB

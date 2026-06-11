@@ -6,6 +6,8 @@ class QueueObject:
         self.dl_status = dl_status
         self.source = source
         self.unsave = unsave
+        self.row_id = None   # queue table row backing this item, if persisted
+        self.attempts = 0
 
     def update_dl_progress(self, progress):
         self.dl_progress = progress

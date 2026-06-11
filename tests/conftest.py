@@ -13,6 +13,13 @@ _TEST_CHANNEL_IDS = [
     'Test123', 'SubTest123',
     'GetVidCh1', 'TestCh1',
 ]
+# Every URL a test may enqueue — queue rows persist to the real DB, so any
+# test that hits an enqueue path MUST list its URL here or clean up itself.
+_TEST_QUEUE_URLS = [
+    'https://youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://www.youtube.com/watch?v=vt-test-1',
+    'https://example.com/vt-test-queue-row',
+]
 
 
 def _delete_test_rows():
@@ -31,6 +38,8 @@ def _delete_test_rows():
             cur.execute("DELETE FROM videos WHERE id = %s", (vid_id,))
         for ch_id in _TEST_CHANNEL_IDS:
             cur.execute("DELETE FROM channels WHERE channelid = %s", (ch_id,))
+        for q_url in _TEST_QUEUE_URLS:
+            cur.execute("DELETE FROM queue WHERE url = %s", (q_url,))
         cur.close()
         con.close()
     except Exception:

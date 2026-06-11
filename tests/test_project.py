@@ -516,3 +516,144 @@ def test_getvids_invalid_direction(client):
     assert isinstance(data, list)
 
 
+
+
+def test_patreon_normalize_url():
+    """Creator-prefixed Patreon URLs must be normalized for yt-dlp's extractor."""
+    from providers.patreon import _normalize_url
+    assert _normalize_url("https://www.patreon.com/TeeReacts/posts/foo-123") == "https://www.patreon.com/posts/foo-123"
+    assert _normalize_url("https://www.patreon.com/posts/foo-123") == "https://www.patreon.com/posts/foo-123"
+    assert _normalize_url("https://www.youtube.com/watch?v=abc") == "https://www.youtube.com/watch?v=abc"
+
+
+def test_patreon_scan_campaign_filters(client, monkeypatch):
+    """scan_campaign enqueues only new, viewable video posts."""
+    import queue as _queue
+    import providers.patreon as patreon
+
+    posts = {'data': [
+        {'id': '1', 'attributes': {'post_type': 'text_only', 'current_user_can_view': True, 'title': 'announcement'}},
+        {'id': '2', 'attributes': {'post_type': 'video_external_file', 'current_user_can_view': False, 'title': 'locked'}},
+        {'id': '3', 'attributes': {'post_type': 'video_external_file', 'current_user_can_view': True, 'title': 'already have'}},
+        {'id': '4', 'attributes': {'post_type': 'video_external_file', 'current_user_can_view': True, 'title': 'new video'}},
+    ]}
+    monkeypatch.setattr(patreon, '_api_get', lambda url, logger: posts)
+    monkeypatch.setattr(patreon, 'check_db_video', lambda id, logger: id == '3')
+    # bypass DB persistence so the fake post URL never lands in the real queue table
+    monkeypatch.setattr(patreon, 'enqueue', lambda qo, q, logger: q.put(qo))
+    monkeypatch.setenv('VAULTTUBE_PATREONCOOKIE', '/tmp/fake-cookie')
+
+    client.application.config['queue'] = _queue.Queue()
+    with client.application.app_context():
+        patreon.scan_campaign('11752268', client.application.logger)
+
+    q = client.application.config['queue']
+    assert q.qsize() == 1
+    qo = q.get()
+    assert qo.url == 'https://www.patreon.com/posts/4'
+    assert qo.source == 'patreon'
+
+
+def test_queue_persistence_roundtrip(client):
+    """Queue rows are inserted as pending, resumable, and excluded once done."""
+    from database import insert_queue_item, update_queue_status, get_resumable_queue_items
+    from QueueObject import QueueObject
+
+    logger = client.application.logger
+    qo = QueueObject("https://example.com/vt-test-queue-row", "", "youtube", 0, "")
+    rowid = qo.row_id = insert_queue_item(qo, logger)
+    assert rowid is not None
+    try:
+        assert any(r[0] == rowid for r in get_resumable_queue_items(logger))
+        update_queue_status(rowid, 'done', logger)
+        assert not any(r[0] == rowid for r in get_resumable_queue_items(logger))
+    finally:
+        con = _db_connect()
+        cur = con.cursor()
+        cur.execute("DELETE FROM queue WHERE id = %s", (rowid,))
+        con.commit()
+        con.close()
+
+
+def test_download_single_persists_queue_row(client):
+    """POST /api/download/single writes a queue table row."""
+    import queue as _queue
+    client.application.config['queue'] = _queue.Queue()
+    url = "https://www.youtube.com/watch?v=vt-test-1"
+    response = client.post("/api/download/single", json={"url": url})
+    assert response.status_code == 200
+    con = _db_connect()
+    cur = con.cursor()
+    try:
+        cur.execute("SELECT status FROM queue WHERE url = %s", (url,))
+        row = cur.fetchone()
+        assert row is not None and row[0] == 'pending'
+    finally:
+        cur.execute("DELETE FROM queue WHERE url = %s", (url,))
+        con.commit()
+        con.close()
+
+
+def test_handle_failure_retries_transient(client, monkeypatch):
+    """Network errors are requeued with attempt tracking; permanent errors are not."""
+    import downloader
+    from QueueObject import QueueObject
+
+    updates = []
+    errors = []
+    timers = []
+    monkeypatch.setattr(downloader, 'update_queue_status',
+                        lambda rowid, status, logger, error=None, attempts=None: updates.append((status, attempts)))
+    monkeypatch.setattr(downloader, 'insert_download_error',
+                        lambda url, et, em, logger: errors.append(et))
+
+    class FakeTimer:
+        def __init__(self, delay, fn, args=()):
+            timers.append((delay, fn, args))
+        def start(self):
+            pass
+    monkeypatch.setattr(downloader.threading, 'Timer', FakeTimer)
+
+    logger = client.application.logger
+
+    class FakeQueue:
+        def put(self, item):
+            pass
+    q = FakeQueue()
+
+    # Transient: requeued, no download_errors row
+    qo = QueueObject("https://example.com/a")
+    downloader.handle_failure(qo, q, 'Network Error', 'Connection timed out', logger)
+    assert updates == [('pending', 1)] and timers and not errors
+
+    # Exhausted attempts: marked failed and recorded
+    qo2 = QueueObject("https://example.com/b")
+    qo2.attempts = downloader.MAX_ATTEMPTS - 1
+    downloader.handle_failure(qo2, q, 'Network Error', 'Connection timed out', logger)
+    assert updates[-1] == ('failed', downloader.MAX_ATTEMPTS) and errors == ['Network Error']
+
+    # Permanent: marked failed immediately
+    qo3 = QueueObject("https://example.com/c")
+    downloader.handle_failure(qo3, q, 'Provider Error', 'No supported media', logger)
+    assert updates[-1] == ('failed', 1) and errors[-1] == 'Provider Error'
+
+
+def test_enqueue_dedups_pending_urls(client):
+    """enqueue skips URLs already pending in the queue table."""
+    import queue as _queue
+    from queue_utils import enqueue
+    from QueueObject import QueueObject
+
+    logger = client.application.logger
+    q = _queue.Queue()
+    url = "https://example.com/vt-test-queue-row"
+    try:
+        assert enqueue(QueueObject(url), q, logger) is True
+        assert enqueue(QueueObject(url), q, logger) is False
+        assert q.qsize() == 1
+    finally:
+        con = _db_connect()
+        cur = con.cursor()
+        cur.execute("DELETE FROM queue WHERE url = %s", (url,))
+        con.commit()
+        con.close()
