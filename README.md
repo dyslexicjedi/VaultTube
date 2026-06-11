@@ -48,6 +48,33 @@ services:
       - db
 ```
 
+## Environment Variables
+
+Required:
+
+| Variable | Purpose |
+|----------|---------|
+| `VAULTTUBE_VAULTDIR` | Video storage path (generally `/videos`) |
+| `VAULTTUBE_DBHOST` / `DBUSER` / `DBPASS` / `DBNAME` / `DBPORT` | MariaDB connection |
+| `VAULTTUBE_YTKEY` | YouTube Data API key |
+
+Optional:
+
+| Variable | Purpose |
+|----------|---------|
+| `VAULTTUBE_YTCOOKIE` | Path to a Netscape-format cookies.txt for YouTube |
+| `VAULTTUBE_PATREONCOOKIE` | Path to a Netscape-format cookies.txt for Patreon |
+| `VAULTTUBE_DENOPATH` | Path to a deno binary for yt-dlp's JS runtime |
+| `VAULTTUBE_REDDIT_CLIENT_ID` / `CLIENT_SECRET` / `USERNAME` / `PASSWORD` | Reddit API credentials |
+| `VAULTTUBE_PORT` | Listen port (default 5000) |
+| `VAULTTUBE_DEBUG` | Enable Flask debug mode |
+| `VAULTTUBE_DISABLEBACK` | Set to anything but `False` to disable background scan/download threads |
+
+## Contributing / Architecture
+
+See [AGENTS.md](AGENTS.md) for a code map (components, DB tables, API routes)
+and [CLAUDE.md](CLAUDE.md) for the development/testing workflow.
+
 ## Info
 
 Problem? Open an issue [Issues](https://github.com/jedihomelab/VaultTube/issues) 

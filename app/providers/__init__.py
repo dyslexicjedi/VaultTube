@@ -4,7 +4,7 @@ import os
 
 # Must implement:
 #   provider_domains() -> list[str]   e.g. ['youtube.com', 'youtu.be']
-#   download(url, logger) -> str      returns "True"/"False"
+#   download(q, logger) -> bool       q is a QueueObject; True on success
 
 _providers = []
 

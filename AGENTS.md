@@ -20,10 +20,20 @@ VaultTube is a **video archive and player application** built with Python/Flask/
 | **Providers** | `app/providers/` | Download logic for YouTube (`youtube.py`), Patreon (`patreon.py`), and Reddit/RedGifs (`reddit.py`) |
 
 ### Providers
-- `providers/base.py` - Shared state (`dl_status_map`) for download progress tracking
+- `providers/__init__.py` - Auto-loads every module in `providers/` (except `base`) that implements the contract
+- `providers/base.py` - Shared state (`dl_status_map`) for download progress tracking + SSE pub/sub for live progress events
 - `providers/youtube.py` - YouTube download via yt-dlp
-- `providers/patreon.py` - Patreon download with screenshot capture
+- `providers/patreon.py` - Patreon download with screenshot capture (URL normalization + browser impersonation for Cloudflare)
 - `providers/reddit.py` - Reddit/RedGifs download via praw + yt-dlp
+
+**Provider contract** (required to be picked up by the loader):
+```python
+provider_domains() -> list[str]   # substring-matched against the queued URL
+download(q, logger) -> bool       # q is a QueueObject (q.url, q.source, ...)
+```
+`download()` returns `True` on success; returning `False` or raising logs the
+failure to the `download_errors` table. Dispatch is by URL domain first, then
+by `q.source` as a fallback (see `downloader.py`).
 
 ### Data Models
 
@@ -78,15 +88,23 @@ VaultTube/
 ```
 
 ## Key Environment Variables
+
+Required at startup (validated in `main.py`):
 - `VAULTTUBE_VAULTDIR` - Video storage path
 - `VAULTTUBE_DBHOST/DBUSER/DBPASS/DBNAME/DBPORT` - Database credentials
 - `VAULTTUBE_YTKEY` - YouTube API key
-- `VAULTTUBE_YTCOOKIE` - YouTube cookies file
-- `VAULTTUBE_PATREONCOOKIE` - Patreon cookies file
+
+Optional:
+- `VAULTTUBE_YTCOOKIE` - YouTube cookies file (Netscape cookies.txt path)
+- `VAULTTUBE_PATREONCOOKIE` - Patreon cookies file (Netscape cookies.txt path)
+- `VAULTTUBE_DENOPATH` - Deno binary path for yt-dlp's JS runtime (`/root/.deno/bin/deno` in the Docker image)
 - `VAULTTUBE_REDDIT_CLIENT_ID` - Reddit API client ID
 - `VAULTTUBE_REDDIT_CLIENT_SECRET` - Reddit API client secret
 - `VAULTTUBE_REDDIT_USERNAME` - Reddit account username
 - `VAULTTUBE_REDDIT_PASSWORD` - Reddit account password
+- `VAULTTUBE_PORT` - Flask listen port (default 5000)
+- `VAULTTUBE_DEBUG` - Enable Flask debug mode
+- `VAULTTUBE_DISABLEBACK` - Set to anything but "False" to skip starting background threads
 
 ## File Naming Convention
 ```
@@ -101,11 +119,21 @@ VaultTube/
 4. **Deleted check thread** - Checks for deleted videos (disabled)
 
 ## Download Flow
-1. User submits URL → `QueueObject` added to queue
-2. `downloader.py` processes queue
+1. User submits URL → `QueueObject` added to queue (in-memory `queue.Queue` in `app.config['queue']`; not persisted across restarts)
+2. `downloader.py` polls the queue every 60s
 3. Provider-specific download (`youtube.py`/`patreon.py`/`reddit.py`)
-4. Progress tracked in `dl_status_map`
-5. After download, `backend.py` scans and adds to DB
+4. Progress tracked in `dl_status_map` and broadcast to SSE subscribers
+5. After download, `backend.py` scans and adds to DB; failures land in `download_errors`
+
+## Testing & CI
+- `.venv/bin/python -m pytest tests/ -q` — tests need a reachable MariaDB
+  (connection from `.env`, loaded by `load_dotenv()` in `main.py`); they
+  insert/delete real rows and `conftest.py` cleans up known test IDs.
+- A pre-commit hook runs the full suite on every commit.
+- Pushing to `dev` runs tests in GitHub Actions (with a MariaDB service
+  container) and builds/pushes `dyslexicjedi/vaulttube:dev`.
+- See `CLAUDE.md` for the deployment layout and how to test changes inside
+  the production container before pushing.
 
 ## API Routes (key)
 - `/api/getvids/<status>/<opt>/<direction>/<page>` - Get videos
