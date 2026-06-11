@@ -47,23 +47,50 @@ def ensure_channel(campaign_id, logger):
     except Exception as e:
         logger.error("ensure_channel failed for Patreon campaign %s: %s" % (campaign_id, e))
 
+def _inline_video_media_ids(content_json_string):
+    """Media IDs of video blocks in a block-editor post body. Newer Patreon
+    posts embed video as a content block (post_type stays 'text_only' and
+    post_file stays null), so this is the only place the video shows up."""
+    ids = []
+    try:
+        doc = json.loads(content_json_string or '{}')
+        def walk(node):
+            if isinstance(node, dict):
+                if node.get('type') == 'video' and node.get('attrs', {}).get('media_id'):
+                    ids.append(str(node['attrs']['media_id']))
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+        walk(doc)
+    except Exception:
+        pass
+    return ids
+
+def _post_has_video(attrs):
+    """A post is downloadable if it's a classic video post OR a block-editor
+    post with an inline video block."""
+    if 'video' in (attrs.get('post_type') or ''):
+        return True
+    return bool(_inline_video_media_ids(attrs.get('content_json_string')))
+
 def scan_campaign(campaign_id, logger):
     """Enqueue any new viewable video posts from a subscribed Patreon campaign.
-    Non-video posts (text_only, image_file, poll, ...) carry no downloadable
-    media and are skipped."""
+    Posts without video (announcements, images, polls) are skipped."""
     if 'VAULTTUBE_PATREONCOOKIE' not in os.environ:
         logger.error("VAULTTUBE_PATREONCOOKIE not set, skipping Patreon campaign %s" % campaign_id)
         return
     try:
         url = ('https://www.patreon.com/api/posts'
                '?filter[campaign_id]=%s'
-               '&fields[post]=title,post_type,current_user_can_view'
+               '&fields[post]=title,post_type,content_json_string,current_user_can_view'
                '&sort=-published_at&page[count]=50&json-api-version=1.0' % campaign_id)
         data = _api_get(url, logger)
         for post in data.get('data', []):
             attrs = post.get('attributes', {})
             post_id = post['id']
-            if 'video' not in (attrs.get('post_type') or ''):
+            if not _post_has_video(attrs):
                 continue
             if not attrs.get('current_user_can_view'):
                 logger.info("Skipping locked Patreon post: %s (%s)" % (post_id, attrs.get('title')))
@@ -97,7 +124,15 @@ def download(q,logger):
             'http_chunk_size': 10485760, # 10 MB chunks instead of the default large size
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            data = ydl.extract_info(url, download=False)
+            try:
+                data = ydl.extract_info(url, download=False)
+            except yt_dlp.utils.DownloadError as e:
+                # Block-editor posts keep post_type 'text_only' and have no
+                # post_file, so yt-dlp's extractor finds nothing — the video
+                # lives in an inline content block instead
+                if 'No supported media found' in str(e):
+                    return _download_inline_video(url, logger)
+                raise
             videoid = data['id']
             channel_id = data['channel_id']
             title = data['title']
@@ -110,13 +145,69 @@ def download(q,logger):
                 pdb = patreon_db_info(videoid, channel_id, PublishedAt, title, logger)
                 if ps and pdb:
                     return True
-                else: 
+                else:
                     return False
             finally:
                 del_status(videoid)
     except Exception as e:
         logger.error("Patreon download failed: %s" % e)
         raise
+
+def _download_inline_video(url, logger):
+    """Download a block-editor post whose video is an inline media block."""
+    post_id = re.search(r'(\d+)/?$', url).group(1)
+    post = _api_get('https://www.patreon.com/api/posts/%s'
+                    '?fields[post]=title,published_at,content_json_string'
+                    '&json-api-version=1.0' % post_id, logger)
+    attrs = post['data']['attributes']
+    media_ids = _inline_video_media_ids(attrs.get('content_json_string'))
+    if not media_ids:
+        raise Exception("No supported media found in this post (no inline video blocks either)")
+    if len(media_ids) > 1:
+        logger.info("Post %s has %d inline videos, downloading the first" % (post_id, len(media_ids)))
+    channel_id = post['data']['relationships']['campaign']['data']['id']
+    title = attrs['title']
+    PublishedAt = datetime.datetime.fromisoformat(attrs['published_at']).replace(tzinfo=None)
+
+    media = _api_get('https://www.patreon.com/api/media/%s?json-api-version=1.0' % media_ids[0], logger)
+    mattrs = media['data']['attributes']
+    # display.url is the signed HLS master (all renditions); download_url is a
+    # lower-quality progressive mp4 fallback
+    stream_url = (mattrs.get('display') or {}).get('url') or mattrs.get('download_url')
+    if not stream_url:
+        raise Exception("Inline video media %s has no stream URL" % media_ids[0])
+
+    def hook(d):
+        try:
+            if d['status'] == 'downloading':
+                update_status(post_id, {'progress': d.get('_percent_str', ''), 'title': title, 'provider': 'patreon'})
+            elif d['status'] == 'finished':
+                update_status(post_id, {'progress': '100%'})
+        except Exception:
+            pass
+
+    ydl_opts = {
+        'cookiefile': os.environ['VAULTTUBE_PATREONCOOKIE'],
+        'outtmpl': os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + post_id + ".mp4",
+        'progress_hooks': [hook],
+        'impersonate': ImpersonateTarget.from_str('chrome'),
+        'http_headers': {'Referer': 'https://www.patreon.com/'},
+        'socket_timeout': 30,
+        'retries': 10,
+        'fragment_retries': 10,
+        'retry_sleep_functions': {'http': lambda n: 5 * n},
+    }
+    ensure_channel(channel_id, logger)
+    set_status(post_id, {'progress': '0%', 'title': title, 'provider': 'patreon'})
+    try:
+        logger.info("Downloading inline video for post %s (%s)" % (post_id, title))
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([stream_url])
+        ps = patreon_screenshot(post_id, channel_id, logger)
+        pdb = patreon_db_info(post_id, channel_id, PublishedAt, title, logger)
+        return bool(ps and pdb)
+    finally:
+        del_status(post_id)
 
 def patreon_screenshot(videoid,channelid,logger):
     try:

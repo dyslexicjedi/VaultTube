@@ -657,3 +657,21 @@ def test_enqueue_dedups_pending_urls(client):
         cur.execute("DELETE FROM queue WHERE url = %s", (url,))
         con.commit()
         con.close()
+
+
+def test_patreon_inline_video_detection():
+    """Video blocks in block-editor post bodies are detected; plain text is not."""
+    from providers.patreon import _inline_video_media_ids, _post_has_video
+
+    cjs_video = '{"type":"doc","content":[{"type":"video","attrs":{"fallback_strategy":"fallback","media_id":"645278519"}},{"type":"paragraph","content":[]}]}'
+    cjs_text = '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}'
+
+    assert _inline_video_media_ids(cjs_video) == ['645278519']
+    assert _inline_video_media_ids(cjs_text) == []
+    assert _inline_video_media_ids(None) == []
+    assert _inline_video_media_ids('not json') == []
+
+    assert _post_has_video({'post_type': 'video_external_file'}) is True
+    assert _post_has_video({'post_type': 'text_only', 'content_json_string': cjs_video}) is True
+    assert _post_has_video({'post_type': 'text_only', 'content_json_string': cjs_text}) is False
+    assert _post_has_video({'post_type': 'text_only'}) is False

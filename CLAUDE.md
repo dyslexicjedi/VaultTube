@@ -92,10 +92,15 @@ are not in it; copy them in or replicate their logic in the test script.
   do NOT match yt-dlp's Patreon extractor and silently fall through to the
   generic extractor. Normalize to `patreon.com/posts/{slug}` first
   (see `_normalize_url` in `app/providers/patreon.py`).
-- Some Patreon posts are `post_type: "text_only"` with no media at all (the
-  creator never attached a video) — "No supported media found in this post"
-  can be correct behavior, not a bug. Verify via the Patreon API before
-  debugging: `https://www.patreon.com/api/posts/{id}?json-api-version=1.0`.
+- Patreon posts made with the block editor report `post_type: "text_only"`
+  with null `post_file`/`embed` even when they contain a video — the video is
+  an inline block in the `content_json_string` attribute
+  (`{"type":"video","attrs":{"media_id":...}}`), and yt-dlp's extractor fails
+  with "No supported media found". The provider falls back to
+  `_download_inline_video()`: resolve the media via
+  `patreon.com/api/media/{id}` and download `display.url` (signed Mux HLS
+  master). Truly media-less posts (announcements, polls) also exist; check
+  `content_json_string` to tell them apart.
 
 ## Environment variables
 

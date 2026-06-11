@@ -130,7 +130,7 @@ Optional:
 
 ## Subscription Scanning (`scanner.py`, hourly)
 - YouTube channels (`UC...` IDs) and playlists: polled via the YouTube Data API
-- Patreon campaigns (numeric IDs in `channels`): polled via the Patreon posts API with cookies + impersonation (`scan_campaign` in `providers/patreon.py`); only viewable `*video*` post types are enqueued — `text_only`/`image_file`/`poll` posts carry no media
+- Patreon campaigns (numeric IDs in `channels`): polled via the Patreon posts API with cookies + impersonation (`scan_campaign` in `providers/patreon.py`); a post is enqueued if it's a `*video*` post type OR a block-editor post with an inline video block in `content_json_string` (these report `text_only`). Posts with neither are skipped
 - Patreon campaigns get their `channels` row auto-created on first download or vault scan (`ensure_channel`); subscribe via the normal `/api/subscribe/channel/<campaign_id>` endpoint
 
 ## Testing & CI
