@@ -4,7 +4,7 @@ import subprocess
 from backend import get_video
 from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse
 from backend import process_channel,save_uploaded_video_metadata
-from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors
+from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors,delete_download_error
 from flask import request,jsonify
 import shutil
 import datetime
@@ -477,6 +477,24 @@ def get_download_errors_api():
     except Exception as e:
         current_app.logger.error("API Get Download Errors Failed: %s" % e)
         return json.dumps([])
+
+@api_bp.route('/downloads/retry', methods=['POST'])
+def retry_download_api():
+    """Re-enqueue a failed URL. Optional 'id' removes the download_errors row
+    once the URL is back in the queue."""
+    try:
+        body = request.get_json(force=True)
+        url = (body.get('url') or '').strip()
+        if not url:
+            return api_error("Missing URL", 400)
+        qo = QueueObject(url, "", body.get('source') or 'youtube', 0, "")
+        enqueued = enqueue(qo, current_app.config['queue'], current_app.logger)
+        if body.get('id') is not None:
+            delete_download_error(body['id'], current_app.logger)
+        return api_success({"enqueued": enqueued})
+    except Exception as e:
+        current_app.logger.error("API Retry Download Failed: %s" % e)
+        return api_error(str(e), 500)
 
 @api_bp.route('/downloads/errors/', methods=['DELETE'])
 def clear_download_errors_api():

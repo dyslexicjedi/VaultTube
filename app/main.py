@@ -1,6 +1,6 @@
 import logging,os,traceback,sys, threading, queue
 from logging.handlers import TimedRotatingFileHandler
-from flask import Flask,render_template,send_file,Blueprint,request
+from flask import Flask,render_template,send_file,Blueprint,request,redirect
 from api import api_bp
 from backend import backend_thread,deleted_check_thread
 from database import checkdb,get_resumable_queue_items
@@ -76,9 +76,14 @@ def browse():
 def player():
     return render_template('/player.html')
 
+@app.route("/queue.html")
+def queue_page():
+    return render_template('/queue.html')
+
+#Old entry points for downloads/uploads; both live on the queue page now
 @app.route("/download.html")
 def download():
-    return render_template('/download.html')
+    return redirect('/queue.html', code=301)
 
 @app.route("/channels.html")
 def channels():
@@ -110,7 +115,7 @@ def stats():
 
 @app.route("/upload.html")
 def upload():
-    return render_template("/upload.html")
+    return redirect('/queue.html', code=301)
 
 def start_background_threads():
     logger.info("Starting Background Threads")

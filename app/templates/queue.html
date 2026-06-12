@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="vt-section">
+    <div class="vt-rail-header">
+        <h2>Downloading</h2>
+        <span class="vt-sub" id="active-count"></span>
+    </div>
+    <div class="vt-list" id="active-list"></div>
+    <div class="vt-empty" id="active-empty" style="padding:18px 0">Nothing downloading right now.</div>
+</section>
+
+<section class="vt-section">
+    <div class="vt-rail-header">
+        <h2>Pending</h2>
+        <span class="vt-sub" id="pending-count"></span>
+    </div>
+    <div class="vt-list" id="pending-list"></div>
+    <div class="vt-empty" id="pending-empty" style="padding:18px 0">The queue is empty.</div>
+</section>
+
+<section class="vt-section">
+    <div class="vt-rail-header">
+        <h2>Failed</h2>
+        <span class="vt-sub" id="errors-count"></span>
+        <a class="vt-all" href="#" id="errors-clear" hidden>Clear all</a>
+    </div>
+    <div class="vt-list" id="errors-list"></div>
+    <div class="vt-empty" id="errors-empty" style="padding:18px 0">No failed downloads.</div>
+</section>
+
+<script src="/static/js/cards.js"></script>
+<script>
+(function () {
+    function $id(x) { return document.getElementById(x); }
+    function getJSON(url) {
+        return fetch(url).then(function (r) { return r.json(); });
+    }
+
+    function parsePct(progressStr) {
+        if (!progressStr) return 0;
+        // yt-dlp progress strings can carry ANSI color codes
+        var cleaned = String(progressStr).replace(/\x1b\[[0-9;]*m/g, '');
+        var match = cleaned.match(/([0-9.]+)%/);
+        return match ? parseFloat(match[1]) : 0;
+    }
+
+    // ---- Active downloads (SSE-driven) ----
+    function activeRowHTML(dl) {
+        var pct = parsePct(dl.progress);
+        return '<div class="vt-row-head">'
+            + '<div class="vt-row-title">' + VT.esc(dl.title || dl.id) + '</div>'
+            + (dl.provider ? '<span class="vt-chip">' + VT.esc(dl.provider) + '</span>' : '')
+            + '<span class="vt-sub" style="margin-left:auto;flex-shrink:0">' + pct.toFixed(0) + '%</span>'
+            + '</div>'
+            + '<div class="vt-qbar"><div style="width:' + pct + '%"></div></div>';
+    }
+
+    function upsertActive(dl) {
+        var row = $id('active-' + dl.id);
+        if (!row) {
+            row = document.createElement('div');
+            row.className = 'vt-row';
+            row.id = 'active-' + dl.id;
+            $id('active-list').appendChild(row);
+        }
+        row.innerHTML = activeRowHTML(dl);
+        syncActiveEmpty();
+    }
+
+    function removeActive(id) {
+        var row = $id('active-' + id);
+        if (row) row.remove();
+        syncActiveEmpty();
+    }
+
+    function syncActiveEmpty() {
+        var n = $id('active-list').children.length;
+        $id('active-empty').style.display = n ? 'none' : '';
+        $id('active-count').textContent = n ? n : '';
+    }
+
+    function loadActive() {
+        getJSON('/api/status/queue/').then(function (data) {
+            $id('active-list').innerHTML = '';
+            (data.active || []).forEach(upsertActive);
+            renderPending(data);
+            syncActiveEmpty();
+        });
+    }
+
+    // ---- Pending queue ----
+    function renderPending(data) {
+        var items = data.queue_value || [];
+        $id('pending-list').innerHTML = items.map(function (item) {
+            return '<div class="vt-row"><div class="vt-row-sub">' + VT.esc(item.url) + '</div></div>';
+        }).join('');
+        $id('pending-empty').style.display = items.length ? 'none' : '';
+        $id('pending-count').textContent = items.length ? items.length : '';
+    }
+
+    function pollPending() {
+        getJSON('/api/status/queue/').then(renderPending).catch(function () {});
+    }
+
+    // ---- Failed downloads ----
+    function loadErrors() {
+        getJSON('/api/downloads/errors/').then(function (errors) {
+            $id('errors-list').innerHTML = errors.map(function (err) {
+                return '<div class="vt-row" id="error-' + err.id + '">'
+                    + '<div class="vt-row-head">'
+                    + '<span class="vt-chip danger">' + VT.esc(err.error_type) + '</span>'
+                    + '<div class="vt-row-title">' + VT.esc(err.url) + '</div>'
+                    + '<div class="vt-actions"><button type="button" class="vt-btn-ghost vt-btn-sm" data-retry="' + err.id + '" data-url="' + VT.esc(err.url) + '">Retry</button></div>'
+                    + '</div>'
+                    + '<div class="vt-row-sub">' + VT.esc(err.error_message) + '</div>'
+                    + '<div class="vt-row-sub">' + VT.esc(new Date(err.created_at).toLocaleString()) + '</div>'
+                    + '</div>';
+            }).join('');
+            $id('errors-empty').style.display = errors.length ? 'none' : '';
+            $id('errors-count').textContent = errors.length ? errors.length : '';
+            $id('errors-clear').hidden = !errors.length;
+        }).catch(function () {});
+    }
+
+    $id('errors-list').addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-retry]');
+        if (!btn) return;
+        btn.disabled = true;
+        btn.textContent = 'Retrying…';
+        fetch('/api/downloads/retry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: parseInt(btn.dataset.retry, 10), url: btn.dataset.url })
+        }).then(function () {
+            loadErrors();
+            pollPending();
+        });
+    });
+
+    $id('errors-clear').addEventListener('click', function (e) {
+        e.preventDefault();
+        fetch('/api/downloads/errors/', { method: 'DELETE' }).then(loadErrors);
+    });
+
+    // ---- SSE: live progress; resync on reconnect ----
+    var firstOpen = true;
+    var es = new EventSource('/api/status/stream');
+    es.onopen = function () {
+        if (!firstOpen) loadActive();
+        firstOpen = false;
+    };
+    es.onmessage = function (e) {
+        var data = JSON.parse(e.data);
+        if (data.type === 'progress') upsertActive(data);
+        else if (data.type === 'complete') {
+            removeActive(data.id);
+            pollPending();
+        }
+    };
+
+    loadActive();
+    loadErrors();
+    setInterval(pollPending, 5000);
+    setInterval(loadErrors, 5000);
+})();
+</script>
+{% endblock %}

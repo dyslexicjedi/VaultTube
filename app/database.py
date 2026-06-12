@@ -426,6 +426,17 @@ def clear_download_errors(logger):
     except Exception as e:
         logger.error("Error during clear_download_errors: %s", e)
 
+def delete_download_error(error_id, logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("DELETE FROM download_errors WHERE id = %s", (error_id,))
+        con.commit()
+        cur.close()
+        con.close()
+    except Exception as e:
+        logger.error("Error during delete_download_error: %s", e)
+
 def insert_queue_item(qo, logger):
     """Persist a queued download. Returns the row id, or None on failure."""
     try:

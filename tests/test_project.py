@@ -366,6 +366,52 @@ def test_up_next_unknown_video(client):
     assert data == []
 
 
+def test_queue_page(client):
+    response = client.get("/queue.html")
+    assert response.status_code == 200
+    assert b'active-list' in response.data
+
+
+def test_download_upload_redirect_to_queue(client):
+    for path in ("/download.html", "/upload.html"):
+        response = client.get(path)
+        assert response.status_code == 301
+        assert response.headers['Location'].endswith('/queue.html')
+
+
+def test_retry_download(client):
+    import queue as _queue
+    with client.application.app_context():
+        if 'queue' not in client.application.config:
+            client.application.config['queue'] = _queue.Queue()
+        q = client.application.config['queue']
+    while not q.empty():
+        try:
+            q.get_nowait()
+        except _queue.Empty:
+            break
+
+    # URL is registered in conftest's _TEST_QUEUE_URLS for DB cleanup
+    response = client.post("/api/downloads/retry", json={"url": "https://example.com/vt-test-queue-row"})
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+    assert data['data']['enqueued'] is True
+    assert q.qsize() == 1
+
+    # Same URL again: still pending, so it must be skipped
+    response = client.post("/api/downloads/retry", json={"url": "https://example.com/vt-test-queue-row"})
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+    assert data['data']['enqueued'] is False
+    assert q.qsize() == 1
+
+
+def test_retry_download_missing_url(client):
+    response = client.post("/api/downloads/retry", json={})
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is False
+
+
 def test_playlists_page(client):
     response = client.get("/api/playlists/0")
     data = json.loads(response.get_data(as_text=True))

@@ -847,6 +847,157 @@ a {
   justify-content: flex-end;
   gap: 8px;
 }
+.vt-modal-wide {
+  max-width: 520px;
+}
+.vt-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.vt-modal-head h3 {
+  margin: 0;
+}
+.vt-modal-close {
+  background: none;
+  border: none;
+  color: var(--vt-text-dim);
+  cursor: pointer;
+  padding: 4px;
+  display: inline-flex;
+  border-radius: 6px;
+}
+.vt-modal-close:hover {
+  color: var(--vt-text);
+  background: var(--vt-surface-2);
+}
+.vt-modal-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--vt-surface-2);
+  border-radius: 9px;
+  padding: 4px;
+  margin-bottom: 16px;
+}
+.vt-modal-tabs button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--vt-text-dim);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 0;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.vt-modal-tabs button.active {
+  background: var(--vt-surface);
+  color: var(--vt-text);
+}
+.vt-modal-status {
+  font-size: 12.5px;
+  color: var(--vt-text-dim);
+  margin-right: auto;
+  align-self: center;
+}
+.vt-modal-status.ok {
+  color: var(--vt-accent);
+}
+.vt-modal-status.err {
+  color: var(--vt-danger);
+}
+.vt-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+.vt-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px dashed var(--vt-line-strong);
+  border-radius: 10px;
+  padding: 20px 12px;
+  color: var(--vt-text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.vt-file:hover,
+.vt-file.selected {
+  border-color: var(--vt-accent);
+  color: var(--vt-text);
+}
+
+/* ---------- Queue page ---------- */
+.vt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vt-row {
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius);
+  padding: 12px 16px;
+}
+.vt-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.vt-row-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.vt-row-sub {
+  font-size: 12px;
+  color: var(--vt-text-dim);
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+.vt-row .vt-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.vt-chip {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--vt-accent-soft);
+  color: var(--vt-accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.vt-chip.danger {
+  background: rgba(248, 81, 73, 0.14);
+  color: var(--vt-danger);
+}
+.vt-qbar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--vt-surface-2);
+  overflow: hidden;
+  margin-top: 10px;
+}
+.vt-qbar > div {
+  height: 100%;
+  background: var(--vt-accent);
+  transition: width 0.3s ease;
+}
+.vt-btn-sm {
+  padding: 5px 12px;
+  font-size: 12px;
+}
 
 /* ---------- Mobile: sidebar becomes bottom tab bar ---------- */
 @media (max-width: 768px) {

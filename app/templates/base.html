@@ -25,22 +25,17 @@
                 <a class="vt-nav-item{{ ' active' if request.path == '/playlists.html' }}" href="/playlists.html" title="Playlists" aria-label="Playlists">
                     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
                 </a>
-                <a class="vt-nav-item{{ ' active' if request.path == '/download.html' }}" href="/download.html" title="Queue" aria-label="Download queue">
+                <a class="vt-nav-item{{ ' active' if request.path == '/queue.html' }}" href="/queue.html" title="Queue" aria-label="Download queue">
                     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     <span class="vt-badge" id="queue-badge" hidden>0</span>
                 </a>
                 <a class="vt-nav-item{{ ' active' if request.path == '/stats.html' }}" href="/stats.html" title="Stats" aria-label="Stats">
                     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                 </a>
-                <a class="vt-nav-item{{ ' active' if request.path == '/random.html' }}" href="/random.html" title="Random" aria-label="Play something random">
+                <a class="vt-nav-item{{ ' active' if request.path == '/random.html' }}" href="/random.html" title="Random" aria-label="Random videos">
                     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/></svg>
                 </a>
             </nav>
-            <span class="vt-spacer"></span>
-            <!-- Upload keeps a sidebar slot until it merges into the "+ Add" modal (Phase 4) -->
-            <a class="vt-nav-item{{ ' active' if request.path == '/upload.html' }}" href="/upload.html" title="Upload" aria-label="Upload a file">
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            </a>
         </aside>
 
         <div class="vt-main">
@@ -50,10 +45,10 @@
                     <input type="search" placeholder="Search videos, channels…" aria-label="Search" id="searchtext">
                     <kbd>/</kbd>
                 </form>
-                <a class="vt-btn" href="/download.html">
+                <button type="button" class="vt-btn" id="add-open">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                     Add
-                </a>
+                </button>
             </header>
 
             <main class="vt-content">
@@ -66,6 +61,68 @@
                 <a href="https://github.com/jedihomelab/VaultTube" target="_blank" aria-label="GitHub"><img src="/static/imgs/github.svg" height="18" width="18" alt="GitHub" /></a>
                 <a href="https://hub.docker.com/repository/docker/dyslexicjedi/vaulttube/general" target="_blank" aria-label="Docker Hub"><img src="/static/imgs/package.svg" height="18" width="18" alt="Docker" /></a>
             </footer>
+        </div>
+
+        <!-- "+ Add" modal: URL download / file upload / Reddit saved (shell.js) -->
+        <div class="vt-modal-backdrop" id="add-modal" hidden>
+            <div class="vt-modal vt-modal-wide" role="dialog" aria-labelledby="add-modal-title">
+                <div class="vt-modal-head">
+                    <h3 id="add-modal-title">Add to vault</h3>
+                    <button type="button" class="vt-modal-close" id="add-close" aria-label="Close">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+                <div class="vt-modal-tabs" id="add-tabs">
+                    <button type="button" data-tab="url" class="active">URL</button>
+                    <button type="button" data-tab="upload">Upload file</button>
+                    <button type="button" data-tab="reddit">Reddit</button>
+                </div>
+
+                <div class="vt-tab" id="add-tab-url">
+                    <p class="vt-modal-text">Download from YouTube, Patreon, Reddit, or paste a video/playlist/channel ID.</p>
+                    <form id="add-url-form">
+                        <input type="text" class="vt-input" id="add-url" placeholder="https://… or video ID" style="width:100%">
+                        <div class="vt-modal-actions" style="margin-top:14px">
+                            <span class="vt-modal-status" id="add-url-status"></span>
+                            <button type="submit" class="vt-btn">Download</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="vt-tab" id="add-tab-upload" hidden>
+                    <form id="add-upload-form">
+                        <label class="vt-file" id="add-file-drop">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            <span id="add-file-label">Choose a video file</span>
+                            <input type="file" name="videoFile" id="add-file" hidden>
+                        </label>
+                        <div class="vt-form-grid">
+                            <div class="vt-field"><label>Video ID</label><input type="text" class="vt-input" name="videoId" required></div>
+                            <div class="vt-field"><label>Channel ID</label><input type="text" class="vt-input" name="channelId" required></div>
+                            <div class="vt-field" style="grid-column:1/-1"><label>Title</label><input type="text" class="vt-input" name="title" required></div>
+                            <div class="vt-field"><label>Source</label>
+                                <select class="vt-select" name="source">
+                                    <option value="youtube">YouTube</option>
+                                    <option value="patreon">Patreon</option>
+                                </select>
+                            </div>
+                            <div class="vt-field"><label>Published</label><input type="date" class="vt-input" name="publishedAt" required></div>
+                        </div>
+                        <div class="vt-modal-actions" style="margin-top:14px">
+                            <span class="vt-modal-status" id="add-upload-status"></span>
+                            <button type="submit" class="vt-btn">Upload</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="vt-tab" id="add-tab-reddit" hidden>
+                    <p class="vt-modal-text">Scan your saved Reddit posts and queue everything with media.</p>
+                    <div class="vt-modal-actions">
+                        <span class="vt-modal-status" id="add-reddit-status"></span>
+                        <button type="button" class="vt-btn" id="add-reddit-btn">Enqueue saved posts</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <script src="/static/js/shell.js"></script>
