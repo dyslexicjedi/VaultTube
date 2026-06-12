@@ -331,6 +331,7 @@ def test_channels_page(client):
     for ch in data:
         assert 'unwatched' in ch
         assert 'vidcount' in ch
+        assert 'source' in ch
 
 
 def test_channels_order_activity(client):
@@ -371,6 +372,310 @@ def test_up_next_unknown_video(client):
     response = client.get("/api/up_next/NonexistentVid123")
     data = json.loads(response.get_data(as_text=True))
     assert data == []
+
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+    def close(self):
+        pass
+
+
+def _playlist_page(video_ids, next_token=None):
+    page = {'items': [{'contentDetails': {'videoId': v}} for v in video_ids]}
+    if next_token:
+        page['nextPageToken'] = next_token
+    return page
+
+
+def _ensure_queue(client):
+    import queue as _queue
+    with client.application.app_context():
+        if 'queue' not in client.application.config:
+            client.application.config['queue'] = _queue.Queue()
+        q = client.application.config['queue']
+    while not q.empty():
+        try:
+            q.get_nowait()
+        except _queue.Empty:
+            break
+    return q
+
+
+def test_uploads_playlist_id():
+    from scanner import uploads_playlist_id
+    assert uploads_playlist_id('UCVtTestChannel1') == 'UUVtTestChannel1'
+
+
+def test_parse_response_closes_connection_on_empty():
+    from api import parse_response
+
+    class FakeCur:
+        rowcount = 0
+        closed = False
+        def close(self):
+            self.closed = True
+
+    class FakeCon:
+        closed = False
+        def close(self):
+            self.closed = True
+
+    cur, con = FakeCur(), FakeCon()
+    assert parse_response(cur, con) == "[]"
+    assert cur.closed and con.closed
+
+
+def test_db_checks_fail_closed(monkeypatch):
+    """A DB error must read as 'already have it', never as 'missing' —
+    otherwise a DB blip makes scanners re-enqueue everything they see."""
+    import logging, database
+
+    def boom(logger):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(database, 'get_connection', boom)
+    log = logging.getLogger('test')
+    assert database.check_db_video('AnyVid', log) is True
+    assert database.check_db_channel('AnyChan', log) is True
+    assert database.check_pl2vid_info('AnyPl', 'AnyVid', log) is True
+    assert database.check_db_video_length('AnyVid', log) is True
+    assert database.get_video_index(log) is None
+
+
+def test_get_video_index(client):
+    import logging, database
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,length) values('GetVid1','X','GetVidCh1','{}','/videos/1','2024-01-01 10:00:00',0,0,'0:10:00');")
+    cur.execute("Insert ignore into IgnoreVid(id) values('TombVid1');")
+    con.close()
+
+    lengths, ignored = database.get_video_index(logging.getLogger('test'))
+    assert lengths.get('GetVid1') == '0:10:00'
+    assert 'TombVid1' in ignored
+
+
+def test_connection_pool_reuse(client):
+    import logging, database
+    log = logging.getLogger('test')
+    for _ in range(3):
+        con = database.get_connection(log)
+        cur = con.cursor()
+        cur.execute("SELECT 1")
+        assert cur.fetchone()[0] == 1
+        cur.close()
+        con.close()   # returns to the pool; next call must hand out a working one
+
+
+def test_find_next_previous_series(client):
+    """Series detection keys on channelId + title column, so it works for
+    Patreon/Reddit rows too (their legacy youtuber column is empty)."""
+    con = _db_connect()
+    cur = con.cursor()
+    # youtuber deliberately empty, like Patreon rows
+    for n in (1, 2, 3):
+        cur.execute(
+            "Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,title) "
+            "values(%s,'','UpNextCh1','{}','/videos/x',%s,0,0,%s);",
+            ('FnpVid%d' % n, '2024-01-0%d 10:00:00' % n, 'My Series Episode %d' % n))
+    con.close()
+
+    response = client.get("/api/find_next_previous/FnpVid2")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['NextID'] == 'FnpVid3'
+    assert data['NextTitle'] == 'My Series Episode 3'
+    assert data['PreviousID'] == 'FnpVid1'
+    assert data['PreviousTitle'] == 'My Series Episode 1'
+
+    # Unknown video: empty dict, not an error
+    response = client.get("/api/find_next_previous/NoSuchVidXyz")
+    assert json.loads(response.get_data(as_text=True)) == {}
+
+
+def test_patreon_db_info_json(client):
+    """Non-YouTube rows store honest metadata, not a fake YouTube API blob."""
+    import logging, datetime
+    from providers.patreon import patreon_db_info
+
+    assert patreon_db_info('PatVid1', '11752268', datetime.datetime(2024, 1, 1), 'Pat Title', logging.getLogger('test')) is True
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Select json, title, source from videos where id = 'PatVid1'")
+    jdata, title, source = cur.fetchone()
+    con.close()
+    j = json.loads(jdata)
+    assert j['webpage_url'] == 'https://www.patreon.com/posts/PatVid1'
+    assert j['title'] == 'Pat Title'
+    assert 'items' not in j          # the fake YouTube shape is gone
+    assert title == 'Pat Title' and source == 'patreon'
+
+
+def test_run_deleted_check_batched(client, monkeypatch):
+    """One API call per 50 IDs; videos absent from the response get
+    isDeleted=1, present ones get cleared. Rows are injected so the fake
+    API response can never touch real data."""
+    import logging, requests, backend
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted,source) values('DelVid1','X','GetVidCh1','{}','/videos/1','2024-01-01 10:00:00',0,0,0,'youtube');")
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted,source) values('DelVid2','X','GetVidCh1','{}','/videos/2','2024-01-02 10:00:00',0,0,1,'youtube');")
+    con.close()
+
+    calls = []
+    def fake_get(url, **kw):
+        calls.append(url)
+        # Only DelVid2 still exists at the source
+        return _FakeResp({'items': [{'id': 'DelVid2'}]})
+    monkeypatch.setattr(requests, 'get', fake_get)
+
+    with client.application.app_context():
+        backend.run_deleted_check(logging.getLogger('test'), rows=[('DelVid1', 0), ('DelVid2', 1)])
+
+    assert len(calls) == 1                       # both IDs in one batched call
+    assert 'DelVid1' in calls[0] and 'DelVid2' in calls[0]
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Select id, isDeleted from videos where id in ('DelVid1','DelVid2') order by id")
+    result = dict(cur.fetchall())
+    con.close()
+    assert result['DelVid1'] == 1   # vanished from the source
+    assert result['DelVid2'] == 0   # back/still up: flag cleared
+
+
+def test_partial_download_detection():
+    from backend import is_partial_download
+    # yt-dlp working files in all their shapes
+    assert is_partial_download('abc12345678.mp4.part')
+    assert is_partial_download('abc12345678.mp4.part-Frag42')
+    assert is_partial_download('abc12345678.mp4.ytdl')
+    assert is_partial_download('abc12345678.f137.mp4')   # pre-merge video stream
+    assert is_partial_download('abc12345678.f140.m4a')   # pre-merge audio stream
+    # finished files
+    assert not is_partial_download('abc12345678.mp4')
+    assert not is_partial_download('abc12345678.webm')
+    assert not is_partial_download('partytime.mp4')
+
+
+def test_looks_like_youtube():
+    from backend import looks_like_youtube
+    assert looks_like_youtube('/videos/UCabc123/dQw4w9WgXcQ.mp4')
+    assert not looks_like_youtube('/videos/11752268/152769940.mp4')        # patreon
+    assert not looks_like_youtube('/videos/SomeRedditUser/abc123.mp4')     # reddit
+    assert not looks_like_youtube('/videos/UCabc123/152769940.mp4')        # wrong id length
+
+
+def test_error_type_classification():
+    from downloader import get_error_type
+    # Throttling responses must be transient (retried), not permanent failures
+    assert get_error_type('HTTP Error 429: Too Many Requests') == 'Network Error'
+    assert get_error_type('Download throttled by server') == 'Network Error'
+    assert get_error_type('Connection reset by peer') == 'Network Error'
+    assert get_error_type('Video not found') == 'Content Not Found'
+    assert get_error_type('HTTP Error 403: Forbidden') == 'Authentication Error'
+    assert get_error_type('something exploded') == 'Provider Error'
+
+
+def test_channel_scan_paginates(client, monkeypatch):
+    """The scan must walk every playlistItems page, not just the first."""
+    import logging, requests, scanner
+    q = _ensure_queue(client)
+
+    pages = [
+        _playlist_page(['VtScanVid1', 'VtScanVid2'], next_token='p2'),
+        _playlist_page(['VtScanVid3']),
+    ]
+    calls = []
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(pages[len(calls) - 1]))[1])
+
+    with client.application.app_context():
+        scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
+
+    assert len(calls) == 2
+    assert 'UUVtTestChannel1' in calls[0]          # uploads playlist derived, no channels.list call
+    assert 'maxResults=50' in calls[0]
+    assert 'pageToken=p2' in calls[1]
+    assert q.qsize() == 3
+    urls = sorted(qo.url for qo in list(q.queue))
+    assert urls == [
+        'https://www.youtube.com/watch?v=VtScanVid1',
+        'https://www.youtube.com/watch?v=VtScanVid2',
+        'https://www.youtube.com/watch?v=VtScanVid3',
+    ]
+
+
+def test_channel_scan_stops_when_caught_up(client, monkeypatch):
+    """A page with nothing new means everything older is known: stop paging."""
+    import logging, requests, scanner
+    q = _ensure_queue(client)
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
+    con.close()
+
+    calls = []
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(_playlist_page(['VtScanVid1'], next_token='p2')))[1])
+
+    with client.application.app_context():
+        scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
+
+    assert len(calls) == 1   # did not fetch page 2
+    assert q.qsize() == 0
+
+
+def test_channel_scan_mixed_page_takes_new_only(client, monkeypatch):
+    """New uploads on a page with known videos are enqueued, but paging stops
+    there — a subscription must not backfill deep history."""
+    import logging, requests, scanner
+    q = _ensure_queue(client)
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
+    con.close()
+
+    calls = []
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(_playlist_page(['VtScanVid3', 'VtScanVid1'], next_token='p2')))[1])
+
+    with client.application.app_context():
+        scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
+
+    assert len(calls) == 1
+    assert q.qsize() == 1
+    assert list(q.queue)[0].url == 'https://www.youtube.com/watch?v=VtScanVid3'
+
+
+def test_download_playlist_writes_queue_rows(client, monkeypatch):
+    """Playlist expansion must go through enqueue() so queue rows persist."""
+    import logging, requests
+    import providers.youtube as yt
+    q = _ensure_queue(client)
+
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: _FakeResp(_playlist_page(['VtPlVid1'])))
+
+    from QueueObject import QueueObject
+    with client.application.app_context():
+        result = yt.download_playlist(QueueObject('PLVtTest123', '', 'youtube', 0, ''), logging.getLogger('test'))
+
+    assert result is True
+    assert q.qsize() == 1
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Select status from queue where url = 'https://www.youtube.com/watch?v=VtPlVid1'")
+    row = cur.fetchone()
+    assert row is not None and row[0] == 'pending'
+    cur.execute("Select count(*) from pl2vid where playlistId = 'PLVtTest123' and videoId = 'VtPlVid1'")
+    assert cur.fetchone()[0] == 1
+    con.close()
 
 
 def test_channel_source_url(client):

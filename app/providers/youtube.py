@@ -9,13 +9,12 @@ from database import check_db_video, check_pl2vid_info, insert_pl2vid_info, inse
 from backend import get_video
 from providers.base import set_status, update_status, del_status
 from QueueObject import QueueObject
+from queue_utils import enqueue
 
 
 def dl_progress_hook(d):
     try:
-        video_id = d.get('info_dict', {}).get('id', None)
-        if not video_id:
-            video_id = globals().get('videoID', '')
+        video_id = d.get('info_dict', {}).get('id', '') or ''
         if d["status"] == "downloading":
             update_status(video_id, {
                 'progress': d['_percent_str'],
@@ -69,7 +68,7 @@ def download_video(url, logger, cookies=None):
             url = "https://www.youtube.com/watch?v=%s" % vid
         else:
             raise ValueError("Could not extract video ID from URL: %s" % url)
-    r = requests.get("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=%s&key=%s" % (vid, os.environ['VAULTTUBE_YTKEY']))
+    r = requests.get("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=%s&key=%s" % (vid, os.environ['VAULTTUBE_YTKEY']), timeout=30)
     retj = r.json()
     r.close()
     if retj['pageInfo']['totalResults'] <= 0:
@@ -141,7 +140,7 @@ def download_playlist(qo, logger):
             if page_token:
                 curl += "&pageToken=%s" % page_token
 
-            r = requests.get(curl)
+            r = requests.get(curl, timeout=30)
             retj = r.json()
             r.close()
 
@@ -171,7 +170,9 @@ def download_playlist(qo, logger):
                 logger.info("Queueing video from playlist: %s" % vid_id)
                 url = "https://www.youtube.com/watch?v=%s" % vid_id
                 qi = QueueObject(url, "", "youtube", 0, "")
-                current_app.config['queue'].put(qi)
+                # enqueue() writes the queue table row (restart resumption +
+                # duplicate-skip); a bare q.put() would not
+                enqueue(qi, current_app.config['queue'], logger)
                 insert_pl2vid_info(playlist_id, vid_id, logger)
 
         return True
@@ -196,16 +197,9 @@ def download_channel(qo, logger):
         if not channel_id.startswith('UC'):
             logger.error("Invalid channel ID format: %s" % channel_id)
             return False
-        key = os.environ['VAULTTUBE_YTKEY']
-        curl = "https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=%s&key=%s" % (channel_id, key)
-        r = requests.get(curl)
-        retj = r.json()
-        r.close()
-        if 'items' not in retj or len(retj['items']) == 0:
-            logger.error("Channel not found: %s" % channel_id)
-            return False
-        uploads_id = retj['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-        logger.info("Found uploads playlist %s for channel %s" % (uploads_id, channel_id))
+        # The uploads playlist is always the channel ID with UC swapped for UU
+        uploads_id = 'UU' + channel_id[2:]
+        logger.info("Using uploads playlist %s for channel %s" % (uploads_id, channel_id))
         qo_playlist = QueueObject(uploads_id, "", "youtube", 0, "")
         return download_playlist(qo_playlist, logger)
     except Exception as e:

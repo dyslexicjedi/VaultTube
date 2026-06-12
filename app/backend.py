@@ -1,38 +1,84 @@
-import glob,time,os,requests,datetime,json,cv2,logging
+import glob,time,os,re,requests,datetime,json,cv2,logging
 from flask import current_app
-from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted
+from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted,get_video_index
+
+# yt-dlp working files: *.part, *.part-FragN, *.ytdl, and pre-merge *.fNNN.* streams
+_PARTIAL_RE = re.compile(r'\.part(-Frag\d+)?$|\.ytdl$|\.f\d+\.')
+
+def is_partial_download(fname):
+    return bool(_PARTIAL_RE.search(fname))
+
+def looks_like_youtube(fpath):
+    """Only files shaped like <UC-channel-dir>/<11-char-id>.<ext> may be sent
+    to the YouTube API; anything else (Patreon/Reddit strays, files caught
+    mid-pipeline) would come back not-found and poison IgnoreVid."""
+    vid = os.path.basename(fpath).split('.')[0]
+    parent = os.path.basename(os.path.dirname(fpath))
+    return parent.startswith('UC') and len(vid) == 11
 
 def backend_thread(logger,app):
     logger.info("*Starting Backend")
     while 1:
         with app.app_context():
-            logger.info("Scanning Vault")
-            for filename in glob.iglob(os.environ['VAULTTUBE_VAULTDIR']+'/**/*', recursive=True):
-                if(os.path.isfile(os.path.abspath(filename))):
-                    if(not ".mp4.part" in filename):
-                        logger.debug("Path is file: %s"%filename)
-                        get_video(os.path.abspath(filename),logger)
-                        #time.sleep(5)
-                else:
-                    process_channel(filename,logger)
-                    #time.sleep(5)
-            time.sleep(5000)
+            scan_vault(logger)
+        time.sleep(5000)
+
+def scan_vault(logger):
+    """Walk the vault and reconcile it with the DB. The dedupe index is
+    fetched once up front (two queries) instead of two queries per file."""
+    started = time.time()
+    index = get_video_index(logger)
+    if index is None:
+        logger.error("Vault scan skipped: could not load video index")
+        return
+    lengths, ignored = index
+    files = 0
+    for filename in glob.iglob(os.environ['VAULTTUBE_VAULTDIR']+'/**/*', recursive=True):
+        fpath = os.path.abspath(filename)
+        if(os.path.isfile(fpath)):
+            if is_partial_download(os.path.basename(fpath)):
+                continue
+            files += 1
+            id = os.path.basename(fpath).split('.')[0]
+            if id in ignored:
+                continue
+            if id in lengths:
+                if lengths[id] == "0":
+                    _update_video_length(id, fpath, logger)
+                    lengths[id] = "updated"
+            elif looks_like_youtube(fpath):
+                logger.info("Processing New Video: %s"%fpath)
+                process_new_video(id,fpath,logger)
+                lengths[id] = "added"
+            else:
+                # Likely a non-YouTube download caught before its DB row was
+                # written; the provider/upload paths own importing these
+                logger.debug("Skipping non-YouTube file with no DB row: %s"%fpath)
+        else:
+            process_channel(filename,logger)
+    logger.info("Vault scan complete: %d files in %.1fs" % (files, time.time() - started))
+
+def _update_video_length(id, fpath, logger):
+    try:
+        logger.info("Updating Length for id: %s"%fpath)
+        data = cv2.VideoCapture(fpath)
+        frames = data.get(cv2.CAP_PROP_FRAME_COUNT)
+        fps = data.get(cv2.CAP_PROP_FPS)
+        seconds = round(frames / fps)
+        data.release()
+        update_length(id,datetime.timedelta(seconds=seconds),logger)
+    except Exception as e:
+        logger.error("Error updating video length for %s: %s"%(id,e))
 
 def get_video(fpath,logger):
+    """Reconcile a single just-downloaded file with the DB (provider path)."""
     try:
         fname = os.path.basename(fpath)
         id = fname.split('.')[0]
         if(check_db_video(id,logger)):
             #In database
             if(not check_db_video_length(id,logger)):
-                logger.info("Updating Length for id: %s"%fpath)
-                data = cv2.VideoCapture(fpath)
-                frames = data.get(cv2.CAP_PROP_FRAME_COUNT)
-                fps = data.get(cv2.CAP_PROP_FPS)
-                # calculate duration of the video
-                seconds = round(frames / fps)
-                data.release()
-                update_length(id,datetime.timedelta(seconds=seconds),logger)
+                _update_video_length(id, fpath, logger)
         else:
             #Missing from database
             logger.info("Processing New Video: %s"%fpath)
@@ -43,7 +89,7 @@ def get_video(fpath,logger):
 def process_new_video(id,fpath,logger):
     ret = {}
     try:
-        r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'])
+        r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'], timeout=30)
         retj = r.json()
         r.close()
         if "error" in retj:
@@ -75,7 +121,7 @@ def process_new_video(id,fpath,logger):
             else:
                 logger.error("Unable to find Thumbnail")
             if('ImageURL' in ret):
-                data = requests.get(ret['ImageURL'])
+                data = requests.get(ret['ImageURL'], timeout=30)
                 img = data.content
             else:
                 img = None
@@ -102,47 +148,64 @@ def process_channel(fname,logger):
             pass
         else:
             logger.info("Processing Channel: "+id)
-            r = requests.get('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY']).json()
+            r = requests.get('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'], timeout=30).json()
             if(r['pageInfo']['totalResults'] > 0):
                 save_channel(r['items'][0]['id'],r['items'][0]['snippet']['title'],r,logger)
             else:
                 logger.info("Unable to find Channel: %s"%id)
     except Exception as e:
-        logger.error("Error in Channel: %s"%e)
-        logger.error(json.dumps(r, indent=4))
+        logger.error("Error in Channel %s: %s"%(id,e))
 
 
 def deleted_check_thread(logger,app):
     logger.info("*Starting Deleted Check")
     while 1:
         with app.app_context():
-            logger.info("Getting Video List for deletion check")
-            videos = get_oldest_video_check(logger)
-            for video in videos:
-                r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+video[0]+'&key='+os.environ['VAULTTUBE_YTKEY'])
-                retj = r.json()
-                r.close()
-                if "error" in retj:
-                    logger.info("Found error: %s",retj['error'])
-                    #Error handling
-                    pass
-                else:
-                    if(retj['pageInfo']['totalResults'] > 0):
-                        #Video is still there
-                        update_video_deleted(video[0],0,logger)
-                        logger.info("Updating video as not deleted. Video ID: %s" %video[0])
-                        pass
-                    else:
-                        #Video has been deleted
-                        update_video_deleted(video[0],1,logger)
-                        logger.info("Updating video as deleted. Video ID: %s" %video[0])
-                        pass
+            run_deleted_check(logger)
         time.sleep(86400)
 
-def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source):
-    """
-    Save metadata about uploaded video to database. 
-    """
+def run_deleted_check(logger, rows=None, batch_size=50):
+    """Mark YouTube videos that were removed at the source (feeds the
+    isDeleted flag behind browse's "Gone from source" view). Batched 50 IDs
+    per videos.list call: a 1,000-video pass costs 20 quota units, not 1,000.
+    Only status *changes* are logged, plus one summary line per pass."""
+    if rows is None:
+        rows = get_oldest_video_check(logger)
+    if not rows:
+        return
+    checked = newly_gone = restored = 0
+    for i in range(0, len(rows), batch_size):
+        chunk = rows[i:i+batch_size]
+        try:
+            r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=id&maxResults=50&id='
+                             + ','.join(vid for vid, _ in chunk)
+                             + '&key=' + os.environ['VAULTTUBE_YTKEY'], timeout=30)
+            retj = r.json()
+            r.close()
+        except Exception as e:
+            logger.error("Deleted check batch failed: %s" % e)
+            return
+        if 'error' in retj:
+            logger.error("Deleted check API error: %s" % retj['error'].get('message', retj['error']))
+            return
+        alive = {item['id'] for item in retj.get('items', [])}
+        for vid, was_deleted in chunk:
+            is_deleted = 0 if vid in alive else 1
+            if is_deleted != (was_deleted or 0):
+                if is_deleted:
+                    newly_gone += 1
+                    logger.info("Video gone from YouTube: %s" % vid)
+                else:
+                    restored += 1
+                    logger.info("Video back on YouTube: %s" % vid)
+            update_video_deleted(vid, is_deleted, logger)
+            checked += 1
+    logger.info("Deleted check: %d checked, %d newly gone, %d restored" % (checked, newly_gone, restored))
+
+def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source,webpage_url=None):
+    """Save a non-YouTube video (Reddit download or manual upload) to the DB.
+    The json column gets a plain metadata dict; webpage_url, when known,
+    powers the player's copy-source-link button."""
     try:
         # For length, try to read video length as in get_video
         try:
@@ -171,17 +234,17 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         except Exception:
             current_app.logger.error("Unable to Extract Frame")
 
-        t = json.loads(open('template','r').read())
-        t['items'][0]['snippet']['title'] = title
-        t['items'][0]['snippet']['channelId'] = channel_id
-        t['items'][0]['snippet']['channelTitle'] = ""
-        t['items'][0]['snippet']['publishedAt'] = published_at.isoformat()
-        t['items'][0]['id'] = video_id
-        
         # Insert video record
         ret = {}
         ret["Youtuber"] = ""
-        ret["Json"] = t
+        ret["Json"] = {
+            'id': video_id,
+            'title': title,
+            'channelId': channel_id,
+            'publishedAt': published_at.isoformat(),
+            'source': source,
+            'webpage_url': webpage_url,
+        }
         ret["Filepath"] = db_path
         ret['PublishedAt'] = published_at.isoformat()
         ret['channelId'] = channel_id

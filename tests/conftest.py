@@ -12,6 +12,8 @@ _TEST_VIDEO_IDS   = [
     'DelVid1', 'DelVid2',
     'TombVid1', 'TombVid2',
     'RedVid1',
+    'VtScanVid1', 'VtScanVid2', 'VtScanVid3', 'VtPlVid1',
+    'FnpVid1', 'FnpVid2', 'FnpVid3', 'PatVid1',
 ]
 _TEST_CHANNEL_IDS = [
     'Test123', 'SubTest123',
@@ -24,7 +26,13 @@ _TEST_QUEUE_URLS = [
     'https://youtube.com/watch?v=dQw4w9WgXcQ',
     'https://www.youtube.com/watch?v=vt-test-1',
     'https://example.com/vt-test-queue-row',
+    'https://www.youtube.com/watch?v=VtScanVid1',
+    'https://www.youtube.com/watch?v=VtScanVid2',
+    'https://www.youtube.com/watch?v=VtScanVid3',
+    'https://www.youtube.com/watch?v=VtPlVid1',
 ]
+# Playlist IDs tests may write pl2vid mappings for
+_TEST_PLAYLIST_IDS = ['PLVtTest123']
 
 
 def _delete_test_rows():
@@ -46,6 +54,8 @@ def _delete_test_rows():
             cur.execute("DELETE FROM channels WHERE channelid = %s", (ch_id,))
         for q_url in _TEST_QUEUE_URLS:
             cur.execute("DELETE FROM queue WHERE url = %s", (q_url,))
+        for pl_id in _TEST_PLAYLIST_IDS:
+            cur.execute("DELETE FROM pl2vid WHERE playlistId = %s", (pl_id,))
         cur.close()
         con.close()
     except Exception:

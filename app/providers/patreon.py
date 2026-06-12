@@ -7,10 +7,10 @@ from flask import current_app
 import datetime
 import json
 import subprocess
-import mariadb
+import tempfile
 
 from providers.base import set_status, update_status, del_status
-from database import check_db_video, check_db_channel, save_channel
+from database import check_db_video, check_db_channel, save_channel, get_connection
 from QueueObject import QueueObject
 from queue_utils import enqueue
 
@@ -211,35 +211,43 @@ def _download_inline_video(url, logger):
         del_status(post_id)
 
 def patreon_screenshot(videoid,channelid,logger):
+    output_img = os.path.join(tempfile.gettempdir(), "%s.jpg" % videoid)
     try:
-        #print(t)
         input_video = os.environ['VAULTTUBE_VAULTDIR']+"/"+channelid+"/"+str(videoid)+".mp4"
-        output_img = videoid+".jpg"
-        subprocess.call(['ffmpeg', '-i', input_video, '-ss', '00:00:01.000', '-vframes', '1', output_img])
-        img = open(videoid+".jpg",'rb').read()
-        con = mariadb.connect(host=os.environ['VAULTTUBE_DBHOST'],user=os.environ['VAULTTUBE_DBUSER'],password=os.environ['VAULTTUBE_DBPASS'],database=os.environ['VAULTTUBE_DBNAME'],autocommit=True,port=int(os.environ['VAULTTUBE_DBPORT']))
+        rc = subprocess.call(['ffmpeg', '-y', '-i', input_video, '-ss', '00:00:01.000', '-vframes', '1', output_img],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if rc != 0 or not os.path.exists(output_img):
+            logger.error("patreon_screenshot: ffmpeg failed for %s (exit %s)" % (videoid, rc))
+            return False
+        img = open(output_img,'rb').read()
+        con = get_connection(logger)
         cur = con.cursor()
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(videoid,img))
         con.commit()
         con.close()
         logger.debug("Screenshot saved")
-        os.remove(videoid+".jpg")
         return True
     except Exception as e:
+        logger.error("patreon_screenshot failed for %s: %s" % (videoid, e))
         return False
+    finally:
+        if os.path.exists(output_img):
+            os.remove(output_img)
 
 def patreon_db_info(videoid,channelid,PublishedAt,title,logger):
     try:
-        t = json.loads(open('template','r').read())
-        t['items'][0]['snippet']['title'] = title
-        t['items'][0]['snippet']['channelId'] = channelid
-        t['items'][0]['snippet']['channelTitle'] = ""
-        t['items'][0]['snippet']['publishedAt'] = PublishedAt.strftime('%Y-%m-%d %H:%M:%S.%f')
-        t['items'][0]['id'] = videoid
+        t = {
+            'id': videoid,
+            'title': title,
+            'channelId': channelid,
+            'publishedAt': PublishedAt.strftime('%Y-%m-%d %H:%M:%S.%f'),
+            'source': 'patreon',
+            'webpage_url': 'https://www.patreon.com/posts/%s' % videoid,
+        }
         source = "patreon"
 
-        con = mariadb.connect(host=os.environ['VAULTTUBE_DBHOST'],user=os.environ['VAULTTUBE_DBUSER'],password=os.environ['VAULTTUBE_DBPASS'],database=os.environ['VAULTTUBE_DBNAME'],autocommit=True,port=int(os.environ['VAULTTUBE_DBPORT']))
+        con = get_connection(logger)
         cur = con.cursor()
         sql = "Select * from videos where id = %s"
         cur.execute(sql,(videoid,))
@@ -254,13 +262,12 @@ def patreon_db_info(videoid,channelid,PublishedAt,title,logger):
         logger.debug("Metadata saved")
         return True
     except Exception as e:
+        logger.error("patreon_db_info failed for %s: %s" % (videoid, e))
         return False
 
 def dl_progress_hook(d):
     try:
-        video_id = d.get('info_dict', {}).get('id', None)
-        if not video_id:
-            video_id = globals().get('videoID', '')
+        video_id = d.get('info_dict', {}).get('id', '') or ''
         if d["status"] == "downloading":
             update_status(video_id, {
                 'progress': d['_percent_str'],

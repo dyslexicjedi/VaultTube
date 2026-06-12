@@ -1,7 +1,6 @@
 from flask import Blueprint,current_app,send_file,Response,abort
 import mariadb,json,io,math,os,queue as _queue
 import subprocess
-from backend import get_video
 from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse
 from backend import process_channel,save_uploaded_video_metadata
 from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors,delete_download_error
@@ -17,6 +16,8 @@ api_bp = Blueprint('api',__name__)
 
 def parse_response(cur,con):
     if(not cur.rowcount):
+        cur.close()
+        con.close()
         return "[]"
     # serialize results into JSON
     row_headers=[x[0] for x in cur.description]
@@ -66,7 +67,7 @@ def build_duration_condition(min_dur, max_dur):
 @api_bp.route('/getvids/<string:status>/<string:opt>/<string:direction>/<string:page>')
 def getvids(status,opt,direction,page):
     try:
-        current_app.logger.info("Called Latest %s %s %s"%(opt,direction,page))
+        current_app.logger.debug("Called Latest %s %s %s"%(opt,direction,page))
         con = get_connection(current_app.logger)
         cur = con.cursor()
         page_num = int(page) if page.isdigit() else 0
@@ -120,7 +121,7 @@ def getvids(status,opt,direction,page):
             params.append(to_date)
         params.append(page_num)
         
-        current_app.logger.info("SQL: %s, Params: %s", sql, params)
+        current_app.logger.debug("SQL: %s, Params: %s", sql, params)
         cur.execute(sql, tuple(params))
         return parse_response(cur,con)
     except Exception as e:
@@ -282,7 +283,7 @@ def channels(page):
         page_num = int(page) if page.isdigit() else 0
         # order=activity sorts by most recent video (used by the home page rails)
         order_by = "lastvidtime desc" if request.args.get('order') == 'activity' else "channelname"
-        cur.execute(f"select channels.*,count(videos.id) as vidcount,max(PublishedAt) as lastvidtime,coalesce(sum(videos.watched = 0),0) as unwatched from channels left outer join videos on channels.channelId = videos.channelId group by channels.channelId order by {order_by} limit 40 offset %s;",(page_num,))
+        cur.execute(f"select channels.*,count(videos.id) as vidcount,max(PublishedAt) as lastvidtime,coalesce(sum(videos.watched = 0),0) as unwatched,max(videos.source) as source from channels left outer join videos on channels.channelId = videos.channelId group by channels.channelId order by {order_by} limit 40 offset %s;",(page_num,))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
@@ -904,7 +905,7 @@ def get_video_unwatched_count():
 def get_playlist_info(playlistid, logger):
     try:
         curl = "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&id=%s&key=%s" % (playlistid, os.environ['VAULTTUBE_YTKEY'])
-        r = requests.get(curl)
+        r = requests.get(curl, timeout=30)
         retj = r.json()
         r.close()
         return retj

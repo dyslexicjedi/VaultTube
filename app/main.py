@@ -1,4 +1,4 @@
-import logging,os,traceback,sys, threading, queue
+import logging,os,traceback,sys, threading, queue, signal
 from logging.handlers import TimedRotatingFileHandler
 from flask import Flask,render_template,send_file,Blueprint,request,redirect
 from api import api_bp
@@ -49,6 +49,15 @@ def log_uncaught_exceptions(ex_cls, ex, tb):
     logger.handlers = []
 
 sys.excepthook = log_uncaught_exceptions
+
+#As PID 1 in the container, Python ignores default-disposition signals, so
+#docker stop's SIGTERM was dropped and every stop waited out the 10s SIGKILL
+#timeout. Exit explicitly (worker threads are daemons; the queue is DB-backed).
+def _graceful_exit(signum, frame):
+    logger.info("Received signal %s, shutting down", signum)
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, _graceful_exit)
 
 
 #Flask Startup
@@ -119,16 +128,17 @@ def upload():
 
 def start_background_threads():
     logger.info("Starting Background Threads")
-    #Start Threads
-    be = threading.Thread(target=backend_thread,args=(logger,app))
+    #Start Threads (daemons: the queue is DB-backed so nothing is lost on
+    #shutdown, and docker stop terminates instantly instead of timing out)
+    be = threading.Thread(target=backend_thread,args=(logger,app),daemon=True)
     be.start()
-    sc = threading.Thread(target=start_scanner,args=(logger,app))
+    sc = threading.Thread(target=start_scanner,args=(logger,app),daemon=True)
     sc.start()
-    dl = threading.Thread(target=start_dl_queue,args=(logger,app))
+    dl = threading.Thread(target=start_dl_queue,args=(logger,app),daemon=True)
     dl.start()
-    #Removed - Too Noisy
-    # dc = threading.Thread(target=deleted_check_thread,args=(logger,app))
-    # dc.start()
+    #Re-enabled: lookups are batched 50/call now and only changes are logged
+    dc = threading.Thread(target=deleted_check_thread,args=(logger,app),daemon=True)
+    dc.start()
 
 def startup():
     #Check Database

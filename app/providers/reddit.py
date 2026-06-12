@@ -38,7 +38,7 @@ def download(q, logger):
                 logger.error("Could not extract RedGIF ID from URL: %s" % url)
                 insert_not_found("redgifs_" + url.split('/')[-1][:50], logger)
                 return False
-            return download_video(url, video_id, video_id, 'redgifs', None, logger)
+            return download_video(url, video_id, video_id, 'redgifs', None, logger, webpage_url=url)
 
         else:
             parsed = urlparse(url)
@@ -71,10 +71,11 @@ def download(q, logger):
         logger.debug("Content URL: %s" % video_url)
         logger.debug("Is image: %s" % is_image)
 
+        post_url = "https://www.reddit.com" + submission.permalink if submission.permalink else url
         if is_image:
-            result = download_image(video_url, video_id, channel_id, video_title, published_at, logger)
+            result = download_image(video_url, video_id, channel_id, video_title, published_at, logger, webpage_url=post_url)
         else:
-            result = download_video(video_url, video_id, video_title, channel_id, published_at, logger)
+            result = download_video(video_url, video_id, video_title, channel_id, published_at, logger, webpage_url=post_url)
 
         if result and submission and getattr(q, 'unsave', False):
             try:
@@ -90,7 +91,7 @@ def download(q, logger):
         return False
 
 
-def download_video(video_url, video_id, video_title, channel_id, published_at, logger):
+def download_video(video_url, video_id, video_title, channel_id, published_at, logger, webpage_url=None):
     if published_at is None:
         published_at = datetime.datetime.utcnow()
     filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + ".mp4")
@@ -121,19 +122,19 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, l
         set_status(video_id, {'progress': '0%', 'title': video_title, 'type': 'reddit'})
         try:
             ydl.download([video_url])
-            save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit')
+            save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit', webpage_url=webpage_url)
         finally:
             del_status(video_id)
 
     return True
 
 
-def download_image(image_url, video_id, channel_id, video_title, published_at, logger):
+def download_image(image_url, video_id, channel_id, video_title, published_at, logger, webpage_url=None):
     try:
         import requests
         if published_at is None:
             published_at = datetime.datetime.utcnow()
-        response = requests.get(image_url)
+        response = requests.get(image_url, timeout=60)
         response.raise_for_status()
 
         ext = image_url.lower().split('?')[0].split('.')[-1]
@@ -143,7 +144,7 @@ def download_image(image_url, video_id, channel_id, video_title, published_at, l
         with open(filepath, 'wb') as f:
             f.write(response.content)
 
-        save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit')
+        save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit', webpage_url=webpage_url)
 
         return True
     except Exception as e:

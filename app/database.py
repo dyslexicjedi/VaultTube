@@ -1,4 +1,4 @@
-import mariadb,requests,json,os
+import mariadb,requests,json,os,threading
 from difflib import SequenceMatcher
 
 #Perform database checks on startup
@@ -169,7 +169,28 @@ def check_db_video(id,logger):
         check.close()
         return test
     except Exception as e:
+        # Fail closed: a DB hiccup must read as "already have it", or a scan
+        # pass during an outage would re-enqueue everything it sees
         logger.error("Error during check_db_video: %s"%e)
+        return True
+
+def get_video_index(logger):
+    """The whole dedupe index in two queries: {video_id: length} plus the
+    ignored-ID set. Used by the vault sweep instead of two queries per file.
+    Returns None on DB failure so callers can skip the pass entirely."""
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("Select id, length FROM videos")
+        lengths = {row[0]: row[1] for row in cur.fetchall()}
+        cur.execute("Select id FROM IgnoreVid")
+        ignored = {row[0] for row in cur.fetchall()}
+        cur.close()
+        con.close()
+        return lengths, ignored
+    except Exception as e:
+        logger.error("Error during get_video_index: %s"%e)
+        return None
 
 def save_video(id,ret,img,logger,source='youtube'):
     try:
@@ -202,7 +223,9 @@ def check_db_channel(id,logger):
         check.close()
         return test
     except Exception as e:
+        # Fail closed so a DB hiccup doesn't trigger channel re-creation
         logger.error("Error during check_db_channel: %s"%e)
+        return True
 
 def save_channel(channelid,channelname,jdata,logger):
     try:
@@ -229,10 +252,37 @@ def get_active_subscriptions(logger):
     except Exception as e:
         logger.error("Error during subscription poll")
 
+_pool = None
+_pool_lock = threading.Lock()
+
+def _conn_kwargs():
+    return dict(
+        host=os.environ['VAULTTUBE_DBHOST'],
+        user=os.environ['VAULTTUBE_DBUSER'],
+        password=os.environ['VAULTTUBE_DBPASS'],
+        database=os.environ['VAULTTUBE_DBNAME'],
+        autocommit=True,
+        port=int(os.environ['VAULTTUBE_DBPORT']),
+    )
+
 def get_connection(logger):
+    """Hand out a pooled connection (close() returns it to the pool). Falls
+    back to a one-off direct connection if the pool is exhausted, so bursts
+    degrade instead of failing."""
+    global _pool
     try:
-        con = mariadb.connect(host=os.environ['VAULTTUBE_DBHOST'],user=os.environ['VAULTTUBE_DBUSER'],password=os.environ['VAULTTUBE_DBPASS'],database=os.environ['VAULTTUBE_DBNAME'],autocommit=True,port=int(os.environ['VAULTTUBE_DBPORT']))
-        return con
+        if _pool is None:
+            with _pool_lock:
+                if _pool is None:
+                    _pool = mariadb.ConnectionPool(
+                        pool_name='vaulttube',
+                        pool_size=int(os.environ.get('VAULTTUBE_DBPOOL', '8')),
+                        pool_validation_interval=500,
+                        **_conn_kwargs())
+        try:
+            return _pool.get_connection()
+        except mariadb.PoolError:
+            return mariadb.connect(**_conn_kwargs())
     except Exception as e:
         logger.error("Unable to get connection: %s"%e)
 
@@ -243,14 +293,16 @@ def check_db_video_length(id,logger):
         check = get_connection(logger)
         cur = check.cursor()
         cur.execute("Select length FROM videos where id = %s",(id,))
-        data = cur.fetchone()[0]
-        if(not data == "0"):
+        row = cur.fetchone()
+        if(row and not row[0] == "0"):
             test = True
         cur.close()
         check.close()
         return test
     except Exception as e:
+        # Fail closed ("length is known") so errors don't trigger cv2 work
         logger.error("Error during check_db_video_length: %s"%e)
+        return True
 
 def update_length(id,length,logger):
     try:
@@ -301,7 +353,9 @@ def check_pl2vid_info(pl,vid,logger):
         check.close()
         return test
     except Exception as e:
+        # Fail closed so a DB hiccup doesn't trigger duplicate-insert attempts
         logger.error("Error during check_pl2vid_info: %s"%e)
+        return True
 
 def insert_pl2vid_info(pl,vid,logger):
     con = None
@@ -330,41 +384,39 @@ def insert_pl2vid_info(pl,vid,logger):
                 pass
 
 def find_next_previous(vid,logger):
+    """Neighbouring episodes of the same series: same channel, fuzzy title
+    match (>0.9), ordered by PublishedAt. Keys on channelId and the title
+    column — the legacy youtuber column is empty for Patreon/Reddit rows and
+    JSON_EXTRACT over every blob made this a full-table parse per player load."""
     try:
         con = get_connection(logger)
         cur = con.cursor()
-        #Get Video
-        sql = "Select youtuber,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where id = %s;"
-        cur.execute(sql,(vid,))
-        cur_data = cur.fetchone()
-        creator = cur_data[0]
-        title = cur_data[1]
-        #Get Other Videos by Same Creator
-        sql = "Select id,JSON_EXTRACT(json,'$.items[0].snippet.title') as title from videos where youtuber = %s order by PublishedAt desc;"
-        cur.execute(sql,(creator,))
-        np_data = cur.fetchall()
-        l = []
-        ret = {}
-        for index,row in enumerate(np_data):
-            np_title = row[1]
-            s = SequenceMatcher(None,title,np_title)
-            if(s.ratio() > 0.9):
-                l.append(row)
-        for index,row in enumerate(l):
-            np_title = row[1]
-            if(title == np_title):
-                if(len(l) > index+1):
-                    ret['PreviousID'] = l[index+1][0]
-                    ret['PreviousTitle'] = l[index+1][1].replace('"','')
-                if(index-1 > -1):
-                    ret['NextID'] = l[index-1][0]
-                    ret['NextTitle'] = l[index-1][1].replace('"','')
-        con.commit()
+        cur.execute("Select channelId, title from videos where id = %s;",(vid,))
+        row = cur.fetchone()
+        if not row or not row[0] or not row[1]:
+            cur.close()
+            con.close()
+            return {}
+        channel_id, title = row
+        cur.execute("Select id, title from videos where channelId = %s and title is not null order by PublishedAt desc;",(channel_id,))
+        series = [r for r in cur.fetchall() if SequenceMatcher(None, title, r[1]).ratio() > 0.9]
         cur.close()
         con.close()
+        ret = {}
+        for index, (rid, rtitle) in enumerate(series):
+            if rid == vid:
+                # Newest-first: the next episode is the row above, previous below
+                if index + 1 < len(series):
+                    ret['PreviousID'] = series[index+1][0]
+                    ret['PreviousTitle'] = series[index+1][1]
+                if index > 0:
+                    ret['NextID'] = series[index-1][0]
+                    ret['NextTitle'] = series[index-1][1]
+                break
         return ret
     except Exception as e:
         logger.error("Error during find_next_previous: %s"%e)
+        return {}
 
 def insert_not_found(vid,logger):
     """Mark an ID the source says doesn't exist so scanners never retry it.
@@ -377,16 +429,18 @@ def insert_not_found(vid,logger):
     con.close()
 
 def get_oldest_video_check(logger):
+    """(id, isDeleted) for the 1000 least-recently-checked YouTube videos."""
     try:
         con = get_connection(logger)
         cur = con.cursor()
-        cur.execute("Select * from videos where source = 'youtube' order by lastScanned asc limit 1000;")
+        cur.execute("Select id, isDeleted from videos where source = 'youtube' order by lastScanned asc limit 1000;")
         rv = cur.fetchall()
         cur.close()
         con.close()
         return rv
     except Exception as e:
         logger.error("Error during oldest video check")
+        return []
 
 def update_video_deleted(vid,isDeleted,logger):
     con = get_connection(logger)
@@ -396,7 +450,7 @@ def update_video_deleted(vid,isDeleted,logger):
     con.commit()
     cur.close()
     con.close()
-    logger.info("Updated video deleted status %s for vid %s",isDeleted,vid)
+    logger.debug("Updated video deleted status %s for vid %s",isDeleted,vid)
 
 def insert_download_error(url, error_type, error_msg, logger):
     try:
