@@ -675,14 +675,13 @@ def api_delete(vid):
     
 @api_bp.route("/stats")
 def api_stats():
-    """Dashboard data. youtuber='404' marks placeholder rows for videos that
-    were never found, so every count excludes them."""
+    """Dashboard data."""
     try:
         data = {}
         con = get_connection(current_app.logger)
         cur = con.cursor()
 
-        cur.execute("select count(*), coalesce(sum(watched=1),0), coalesce(sum(TIME_TO_SEC(`length`)),0), coalesce(round(avg(TIME_TO_SEC(`length`))),0) from videos where not youtuber='404'")
+        cur.execute("select count(*), coalesce(sum(watched=1),0), coalesce(sum(TIME_TO_SEC(`length`)),0), coalesce(round(avg(TIME_TO_SEC(`length`))),0) from videos")
         total, watched, total_seconds, avg_seconds = cur.fetchone()
         cur.execute("select count(*) from channels")
         channels = cur.fetchone()[0]
@@ -695,14 +694,14 @@ def api_stats():
         }
 
         # Deleted-at-source is only tracked for YouTube
-        cur.execute("select coalesce(sum(isDeleted=1),0), count(*) from videos where source='youtube' and not youtuber='404'")
+        cur.execute("select coalesce(sum(isDeleted=1),0), count(*) from videos where source='youtube'")
         deleted, yt_total = cur.fetchone()
         data['deleted'] = {'deleted': int(deleted), 'youtube_total': int(yt_total)}
 
-        cur.execute("select coalesce(source,'unknown'), count(*) from videos where not youtuber='404' group by source order by count(*) desc")
+        cur.execute("select coalesce(source,'unknown'), count(*) from videos group by source order by count(*) desc")
         data['by_source'] = [[r[0], int(r[1])] for r in cur.fetchall()]
 
-        cur.execute("select coalesce(c.channelname, v.channelId), count(*) as total, coalesce(sum(v.watched=0),0) from videos v left outer join channels c on v.channelId = c.channelid where not v.youtuber='404' group by v.channelId order by total desc limit 10")
+        cur.execute("select coalesce(c.channelname, v.channelId), count(*) as total, coalesce(sum(v.watched=0),0) from videos v left outer join channels c on v.channelId = c.channelid group by v.channelId order by total desc limit 10")
         data['top_channels'] = [[r[0], int(r[1]), int(r[2])] for r in cur.fetchall()]
 
         # Vault growth: videos added per week for the last 26 weeks, zero-filled
@@ -714,7 +713,7 @@ def api_stats():
             for i in range(25, -1, -1)
         ]
 
-        cur.execute("select case when TIME_TO_SEC(`length`) < 300 then 0 when TIME_TO_SEC(`length`) < 600 then 1 when TIME_TO_SEC(`length`) < 1800 then 2 when TIME_TO_SEC(`length`) < 3600 then 3 else 4 end as bucket, count(*) from videos where not youtuber='404' and TIME_TO_SEC(`length`) > 0 group by bucket")
+        cur.execute("select case when TIME_TO_SEC(`length`) < 300 then 0 when TIME_TO_SEC(`length`) < 600 then 1 when TIME_TO_SEC(`length`) < 1800 then 2 when TIME_TO_SEC(`length`) < 3600 then 3 else 4 end as bucket, count(*) from videos where TIME_TO_SEC(`length`) > 0 group by bucket")
         buckets = {int(r[0]): int(r[1]) for r in cur.fetchall()}
         labels = ['Under 5 min', '5–10 min', '10–30 min', '30–60 min', 'Over 60 min']
         data['duration_buckets'] = [[labels[i], buckets.get(i, 0)] for i in range(5)]

@@ -104,6 +104,15 @@ def checkdb(logger):
         if(not cur.fetchone()):
             logger.info("IgnoreVid Table not created, creating...")
             cur.execute("create table IgnoreVid (`id` varchar(50) COLLATE utf8mb4_bin NOT NULL,PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
+        # Migrate legacy not-found tombstones (youtuber='404' placeholder rows)
+        # into IgnoreVid; the videos table holds only real content
+        cur.execute("SELECT COUNT(*) FROM videos WHERE youtuber='404'")
+        tombstones = cur.fetchone()[0]
+        if tombstones:
+            logger.info("Migrating %s not-found tombstone rows from videos to IgnoreVid...", tombstones)
+            cur.execute("INSERT IGNORE INTO IgnoreVid(id) SELECT id FROM videos WHERE youtuber='404'")
+            cur.execute("DELETE images FROM images JOIN videos ON images.id = videos.id WHERE videos.youtuber='404'")
+            cur.execute("DELETE FROM videos WHERE youtuber='404'")
         #Queue
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'queue' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
@@ -358,10 +367,11 @@ def find_next_previous(vid,logger):
         logger.error("Error during find_next_previous: %s"%e)
 
 def insert_not_found(vid,logger):
+    """Mark an ID the source says doesn't exist so scanners never retry it.
+    A manual single-URL download still bypasses this (like deleted videos)."""
     con = get_connection(logger)
     cur = con.cursor()
-    sql = "insert into videos(id,youtuber,channelId,json,filepath,watched,timestamp,length) values(%s,'404','404','404','404',1,0,'0');"
-    cur.execute(sql,(vid,))
+    cur.execute("Insert ignore into IgnoreVid(id) values(%s);",(vid,))
     con.commit()
     cur.close()
     con.close()

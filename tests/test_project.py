@@ -373,6 +373,39 @@ def test_up_next_unknown_video(client):
     assert data == []
 
 
+def test_insert_not_found_goes_to_ignorevid(client):
+    import logging
+    from database import insert_not_found
+    insert_not_found('TombVid2', logging.getLogger('test'))
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Select count(*) from IgnoreVid where id = 'TombVid2'")
+    assert cur.fetchone()[0] == 1
+    cur.execute("Select count(*) from videos where id = 'TombVid2'")
+    assert cur.fetchone()[0] == 0
+    con.close()
+
+
+def test_tombstone_migration(client):
+    con = _db_connect()
+    cur = con.cursor()
+    # A legacy-style tombstone row, as old insert_not_found wrote them
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,watched,timestamp,length) values('TombVid1','404','404','404','404',1,0,'0');")
+    con.close()
+
+    response = client.get("/api/checkdb")
+    assert response.text == "True"
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Select count(*) from videos where id = 'TombVid1'")
+    assert cur.fetchone()[0] == 0
+    cur.execute("Select count(*) from IgnoreVid where id = 'TombVid1'")
+    assert cur.fetchone()[0] == 1
+    con.close()
+
+
 def test_getvids_deleted_filter(client):
     con = _db_connect()
     cur = con.cursor()

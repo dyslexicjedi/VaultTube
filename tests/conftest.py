@@ -10,6 +10,7 @@ _TEST_VIDEO_IDS   = [
     'WatchVid1', 'UnwatchVid1', 'TsVid1',
     'UpNext1', 'UpNext2', 'UpNext3',
     'DelVid1', 'DelVid2',
+    'TombVid1', 'TombVid2',
 ]
 _TEST_CHANNEL_IDS = [
     'Test123', 'SubTest123',
@@ -38,6 +39,7 @@ def _delete_test_rows():
         cur = con.cursor()
         for vid_id in _TEST_VIDEO_IDS:
             cur.execute("DELETE FROM videos WHERE id = %s", (vid_id,))
+            cur.execute("DELETE FROM IgnoreVid WHERE id = %s", (vid_id,))
         for ch_id in _TEST_CHANNEL_IDS:
             cur.execute("DELETE FROM channels WHERE channelid = %s", (ch_id,))
         for q_url in _TEST_QUEUE_URLS:
