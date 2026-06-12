@@ -1,288 +1,241 @@
 {% extends "base.html" %}
 {% block content %}
 
-<style>
-  .st-page {
-    position: relative;
-    z-index: 1;
-    animation: fade-up 0.45s ease both;
-  }
-  .st-header {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: #e8e8f0;
-    margin-bottom: 1.75rem;
-    letter-spacing: -0.01em;
-  }
-  .st-header svg { opacity: 0.75; }
-
-  /* Grid */
-  .st-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1.25rem;
-  }
-  @media (max-width: 900px) {
-    .st-grid { grid-template-columns: repeat(2, 1fr); }
-    .st-span { grid-column: span 2 !important; }
-  }
-  @media (max-width: 540px) {
-    .st-grid { grid-template-columns: 1fr; }
-    .st-span { grid-column: span 1 !important; }
-  }
-
-  /* Base card */
-  .st-card {
-    background: rgba(255,255,255,0.05);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 16px;
-    padding: 1.5rem;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.3);
-    transition: transform 0.22s ease, box-shadow 0.22s ease;
-  }
-  .st-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 14px 36px rgba(124,58,237,0.2);
-  }
-
-  /* Stat cards */
-  .st-stat {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 0.4rem;
-  }
-  .st-stat-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: #9090a8;
-  }
-  .st-stat-value {
-    font-size: 2rem;
-    font-weight: 700;
-    line-height: 1;
-    background: linear-gradient(135deg, #a78bfa, #818cf8);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  /* Chart cards */
-  .st-chart-card {
-    display: flex;
-    flex-direction: column;
-  }
-  .st-chart-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: #9090a8;
-    margin-bottom: 1rem;
-  }
-  .st-chart-wrap {
-    position: relative;
-    flex: 1;
-    min-height: 260px;
-  }
-  .st-span {
-    grid-column: span 4;
-  }
-  .st-span .st-chart-wrap {
-    min-height: 300px;
-  }
-</style>
-
-<div class="st-page">
-
-  <div class="st-header">
-    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M0 0h1v15h15v1H0V0zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.15-5.073a.5.5 0 0 1 .704-.07z"/>
-    </svg>
-    Stats
-  </div>
-
-  <div class="st-grid">
-
-    <div class="st-card st-stat">
-      <span class="st-stat-label">Total Videos</span>
-      <span class="st-stat-value" id="totalcount">—</span>
-    </div>
-
-    <div class="st-card st-stat">
-      <span class="st-stat-label">Avg. Video Length</span>
-      <span class="st-stat-value" id="avglength">—</span>
-    </div>
-
-    <div class="st-card st-chart-card">
-      <div class="st-chart-label">Watched vs Unwatched</div>
-      <div class="st-chart-wrap"><canvas id="watchedChart"></canvas></div>
-    </div>
-
-    <div class="st-card st-chart-card">
-      <div class="st-chart-label">Deleted vs Active</div>
-      <div class="st-chart-wrap"><canvas id="deletedChart"></canvas></div>
-    </div>
-
-    <div class="st-card st-chart-card st-span">
-      <div class="st-chart-label">Video Breakdown by Channel</div>
-      <div class="st-chart-wrap"><canvas id="channelChart"></canvas></div>
-    </div>
-
-  </div>
+<div class="vt-rail-header" style="margin-bottom:18px">
+    <h2>Stats</h2>
 </div>
 
-<script src=" https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js "></script>
-<script src="/static/js/scripts.js"></script>
+<div class="vt-kpi-grid">
+    <a class="vt-kpi" href="/browse.html?show=all">
+        <span class="vt-kpi-label">Videos</span>
+        <span class="vt-kpi-value" id="kpi-videos">—</span>
+        <span class="vt-kpi-sub" id="kpi-videos-sub"></span>
+    </a>
+    <a class="vt-kpi" href="/browse.html">
+        <span class="vt-kpi-label">Unwatched</span>
+        <span class="vt-kpi-value" id="kpi-unwatched">—</span>
+        <div class="vt-meter"><div id="kpi-watched-meter" style="width:0%"></div></div>
+        <span class="vt-kpi-sub" id="kpi-watched-sub"></span>
+    </a>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Runtime stored</span>
+        <span class="vt-kpi-value" id="kpi-runtime">—</span>
+        <span class="vt-kpi-sub">total play time</span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Avg length</span>
+        <span class="vt-kpi-value" id="kpi-avg">—</span>
+        <span class="vt-kpi-sub">per video</span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Channels</span>
+        <span class="vt-kpi-value" id="kpi-channels">—</span>
+        <span class="vt-kpi-sub" id="kpi-channels-sub"></span>
+    </div>
+    <a class="vt-kpi" href="/browse.html?show=deleted">
+        <span class="vt-kpi-label">Gone from source</span>
+        <span class="vt-kpi-value" id="kpi-deleted">—</span>
+        <span class="vt-kpi-sub" id="kpi-deleted-sub"></span>
+    </a>
+</div>
+
+<div class="vt-dash">
+    <div class="vt-chart span-8">
+        <span class="vt-chart-title">Added to vault — last 6 months</span>
+        <div class="vt-chart-wrap"><canvas id="growthChart"></canvas></div>
+    </div>
+    <div class="vt-chart span-4">
+        <span class="vt-chart-title">By source</span>
+        <div class="vt-chart-wrap"><canvas id="sourceChart"></canvas></div>
+    </div>
+    <div class="vt-chart span-8">
+        <span class="vt-chart-title">Top channels</span>
+        <div class="vt-chart-wrap"><canvas id="channelChart"></canvas></div>
+    </div>
+    <div class="vt-chart span-4">
+        <span class="vt-chart-title">Duration mix</span>
+        <div class="vt-chart-wrap"><canvas id="durationChart"></canvas></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
 <script>
-get_stats();
-function get_stats(){
-        $.getJSON("/api/stats",function(data){
-            $("#totalcount").html(data.totalcount)
-            $("#avglength").text(secondsToHms(data.avg_length_seconds));
-            // watched: [[0, countUnwatched], [1, countWatched]]
-            const watchedCounts = unpackFlagCount(data.watched);
-            drawWatchedChart(watchedCounts[1] || 0, watchedCounts[0] || 0);
+(function () {
+    var ACCENT = '#e6a23c';
+    var DIM = '#9aa0a6';
+    var GRID = 'rgba(255,255,255,0.05)';
+    var GRAY = 'rgba(154,160,166,0.35)';
+    var PALETTE = ['#e6a23c', '#6aa1e0', '#e06a6a', '#7fbf7f', '#b08ad6'];
 
-            // deleted: [[0, countActive], [1, countDeleted]]
-            const deletedCounts = unpackFlagCount(data.deleted);
-            drawDeletedChart(deletedCounts[1] || 0, deletedCounts[0] || 0);
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.font.size = 11;
+    Chart.defaults.color = DIM;
+    Chart.defaults.plugins.tooltip.backgroundColor = '#1b1f26';
+    Chart.defaults.plugins.tooltip.titleColor = '#e8eaed';
+    Chart.defaults.plugins.tooltip.bodyColor = '#9aa0a6';
+    Chart.defaults.plugins.tooltip.borderColor = 'rgba(255,255,255,0.12)';
+    Chart.defaults.plugins.tooltip.borderWidth = 1;
+    Chart.defaults.plugins.tooltip.padding = 10;
+    Chart.defaults.plugins.tooltip.cornerRadius = 8;
+    Chart.defaults.plugins.tooltip.displayColors = false;
 
-            // countbyyoutuber is array of [name, count]
-            drawChannelChart(data.countbyyoutuber);
+    function fmtRuntime(sec) {
+        if (!sec) return '—';
+        var d = Math.floor(sec / 86400);
+        var h = Math.floor((sec % 86400) / 3600);
+        if (d > 0) return d + 'd ' + h + 'h';
+        var m = Math.floor((sec % 3600) / 60);
+        return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+    }
+    function fmtLength(sec) {
+        if (!sec) return '—';
+        var m = Math.floor(sec / 60);
+        var s = sec % 60;
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function monthLabel(iso) {
+        var d = new Date(iso + 'T00:00:00');
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    fetch('/api/stats').then(function (r) { return r.json(); }).then(function (data) {
+        var t = data.totals;
+
+        // --- KPIs ---
+        document.getElementById('kpi-videos').textContent = t.videos.toLocaleString();
+        var thisWeek = data.added_per_week[data.added_per_week.length - 1][1];
+        document.getElementById('kpi-videos-sub').innerHTML = thisWeek > 0
+            ? '<span class="up">+' + thisWeek + '</span> this week' : 'none added this week';
+
+        document.getElementById('kpi-unwatched').textContent = t.unwatched.toLocaleString();
+        var watchedPct = t.videos ? Math.round((t.watched / t.videos) * 100) : 0;
+        document.getElementById('kpi-watched-meter').style.width = watchedPct + '%';
+        document.getElementById('kpi-watched-sub').textContent = watchedPct + '% watched';
+
+        document.getElementById('kpi-runtime').textContent = fmtRuntime(t.total_seconds);
+        document.getElementById('kpi-avg').textContent = fmtLength(t.avg_seconds);
+        document.getElementById('kpi-channels').textContent = t.channels.toLocaleString();
+        document.getElementById('kpi-channels-sub').textContent = t.playlists + ' playlist' + (t.playlists === 1 ? '' : 's');
+
+        document.getElementById('kpi-deleted').textContent = data.deleted.deleted.toLocaleString();
+        var delPct = data.deleted.youtube_total ? ((data.deleted.deleted / data.deleted.youtube_total) * 100).toFixed(1) : 0;
+        document.getElementById('kpi-deleted-sub').textContent = delPct + '% of YouTube videos';
+
+        // --- Growth: area chart, weekly adds ---
+        var growthCtx = document.getElementById('growthChart').getContext('2d');
+        var grad = growthCtx.createLinearGradient(0, 0, 0, 220);
+        grad.addColorStop(0, 'rgba(230,162,60,0.28)');
+        grad.addColorStop(1, 'rgba(230,162,60,0)');
+        new Chart(growthCtx, {
+            type: 'line',
+            data: {
+                labels: data.added_per_week.map(function (w) { return monthLabel(w[0]); }),
+                datasets: [{
+                    data: data.added_per_week.map(function (w) { return w[1]; }),
+                    borderColor: ACCENT,
+                    borderWidth: 2,
+                    backgroundColor: grad,
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    pointHoverBackgroundColor: ACCENT
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { intersect: false, mode: 'index' } },
+                scales: {
+                    x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } },
+                    y: { grid: { color: GRID }, border: { display: false }, beginAtZero: true, ticks: { maxTicksLimit: 5, precision: 0 } }
+                }
+            }
         });
-    }
-// Unwrap arrays like [[value]] to value
-function unwrapSingleValue(nestedArr) {
-  if(Array.isArray(nestedArr) && nestedArr.length > 0) {
-    let val = nestedArr[0];
-    if(Array.isArray(val)) return val[0];
-    return val;
-  }
-  return null;
-}
 
-// Convert [[flag, count], ...] to {flag: count}
-function unpackFlagCount(arr) {
-  const obj = {};
-  if(Array.isArray(arr)) {
-    arr.forEach(pair => {
-      if(Array.isArray(pair) && pair.length === 2) {
-        obj[pair[0]] = pair[1];
-      }
+        // --- Sources: slim doughnut ---
+        new Chart(document.getElementById('sourceChart'), {
+            type: 'doughnut',
+            data: {
+                labels: data.by_source.map(function (s) { return s[0]; }),
+                datasets: [{
+                    data: data.by_source.map(function (s) { return s[1]; }),
+                    backgroundColor: PALETTE,
+                    borderWidth: 2,
+                    borderColor: '#14171c',
+                    hoverOffset: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '72%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { usePointStyle: true, pointStyleWidth: 8, boxHeight: 5, padding: 14 } }
+                }
+            }
+        });
+
+        // --- Top channels: horizontal stacked unwatched/watched ---
+        new Chart(document.getElementById('channelChart'), {
+            type: 'bar',
+            data: {
+                labels: data.top_channels.map(function (c) { return c[0]; }),
+                datasets: [
+                    {
+                        label: 'Unwatched',
+                        data: data.top_channels.map(function (c) { return c[2]; }),
+                        backgroundColor: ACCENT,
+                        borderRadius: 3,
+                        barThickness: 12
+                    },
+                    {
+                        label: 'Watched',
+                        data: data.top_channels.map(function (c) { return c[1] - c[2]; }),
+                        backgroundColor: GRAY,
+                        borderRadius: 3,
+                        barThickness: 12
+                    }
+                ]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { usePointStyle: true, pointStyleWidth: 8, boxHeight: 5, padding: 14 } }
+                },
+                scales: {
+                    x: { stacked: true, grid: { color: GRID }, border: { display: false }, ticks: { maxTicksLimit: 6, precision: 0 } },
+                    y: { stacked: true, grid: { display: false }, border: { display: false } }
+                }
+            }
+        });
+
+        // --- Duration mix ---
+        new Chart(document.getElementById('durationChart'), {
+            type: 'bar',
+            data: {
+                labels: data.duration_buckets.map(function (b) { return b[0]; }),
+                datasets: [{
+                    data: data.duration_buckets.map(function (b) { return b[1]; }),
+                    backgroundColor: 'rgba(230,162,60,0.55)',
+                    hoverBackgroundColor: ACCENT,
+                    borderRadius: 4,
+                    barThickness: 22
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, font: { size: 10 } } },
+                    y: { grid: { color: GRID }, border: { display: false }, beginAtZero: true, ticks: { maxTicksLimit: 5, precision: 0 } }
+                }
+            }
+        });
     });
-  }
-  return obj;
-}
-
-const chartDefaults = {
-  color: '#9090a8',
-  borderColor: 'rgba(255,255,255,0.07)',
-  plugins: {
-    legend: {
-      labels: { color: '#c0c0d0', font: { family: 'Inter, sans-serif', size: 12 }, padding: 16 }
-    }
-  },
-  scales: {
-    x: {
-      ticks: { color: '#9090a8', font: { family: 'Inter, sans-serif' } },
-      grid: { color: 'rgba(255,255,255,0.06)' }
-    },
-    y: {
-      ticks: { color: '#9090a8', font: { family: 'Inter, sans-serif' } },
-      grid: { color: 'rgba(255,255,255,0.06)' },
-      beginAtZero: true
-    }
-  }
-};
-
-function drawChannelChart(data) {
-  var ctx = document.getElementById('channelChart').getContext('2d');
-  new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: data.map(item => item[0]),
-      datasets: [{
-        label: '# of Videos',
-        data: data.map(item => item[1]),
-        backgroundColor: 'rgba(124,58,237,0.6)',
-        borderColor: 'rgba(167,139,250,0.9)',
-        borderWidth: 1,
-        borderRadius: 6,
-        borderSkipped: false
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: chartDefaults.scales
-    }
-  });
-}
-
-function drawWatchedChart(watched, unwatched) {
-  var ctx = document.getElementById('watchedChart').getContext('2d');
-  new Chart(ctx, {
-    type: 'pie',
-    data: {
-      labels: ['Watched', 'Unwatched'],
-      datasets: [{
-        data: [watched, unwatched],
-        backgroundColor: ['rgba(52,211,153,0.75)', 'rgba(248,113,113,0.75)'],
-        borderColor: ['rgba(52,211,153,0.4)', 'rgba(248,113,113,0.4)'],
-        borderWidth: 2,
-        hoverOffset: 8
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom', labels: chartDefaults.plugins.legend.labels } }
-    }
-  });
-}
-
-function drawDeletedChart(deleted, active) {
-  var ctx = document.getElementById('deletedChart').getContext('2d');
-  new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: ['Deleted', 'Active'],
-      datasets: [{
-        data: [deleted, active],
-        backgroundColor: ['rgba(251,146,60,0.75)', 'rgba(129,140,248,0.75)'],
-        borderColor: ['rgba(251,146,60,0.4)', 'rgba(129,140,248,0.4)'],
-        borderWidth: 2,
-        hoverOffset: 8
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom', labels: chartDefaults.plugins.legend.labels } }
-    }
-  });
-}
-
-// Convert seconds into HH:MM:SS format
-function secondsToHms(d) {
-  if(isNaN(d) || d <= 0) return "Unknown";
-  const h = Math.floor(d / 3600);
-  const m = Math.floor((d % 3600) / 60);
-  const s = Math.floor(d % 60);
-  const hDisplay = h > 0 ? h + ":" : "";
-  const mDisplay = (m < 10 ? "0" : "") + m + ":";
-  const sDisplay = (s < 10 ? "0" : "") + s;
-  return hDisplay + mDisplay + sDisplay;
-}
+})();
 </script>
-
 {% endblock %}

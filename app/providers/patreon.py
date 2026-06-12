@@ -40,7 +40,8 @@ def ensure_channel(campaign_id, logger):
             return
         if check_db_channel(campaign_id, logger):
             return
-        data = _api_get('https://www.patreon.com/api/campaigns/%s?fields[campaign]=name&json-api-version=1.0' % campaign_id, logger)
+        # url is the creator's public page, used for the source link in the UI
+        data = _api_get('https://www.patreon.com/api/campaigns/%s?fields[campaign]=name,url&json-api-version=1.0' % campaign_id, logger)
         name = data['data']['attributes']['name']
         save_channel(campaign_id, name, data, logger)
         logger.info("Created channel entry for Patreon campaign %s (%s)" % (campaign_id, name))

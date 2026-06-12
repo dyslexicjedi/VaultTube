@@ -300,9 +300,16 @@ def test_stats(client):
     response = client.get("/api/stats")
     data = json.loads(response.get_data(as_text=True))
     assert isinstance(data, dict)
-    assert 'countbyyoutuber' in data
-    assert 'totalcount' in data
-    assert 'watched' in data
+    totals = data['totals']
+    for key in ('videos', 'watched', 'unwatched', 'total_seconds', 'avg_seconds', 'channels', 'playlists'):
+        assert isinstance(totals[key], int)
+    assert totals['watched'] + totals['unwatched'] == totals['videos']
+    assert isinstance(data['by_source'], list)
+    assert isinstance(data['top_channels'], list)
+    assert len(data['top_channels']) <= 10
+    assert len(data['added_per_week']) == 26
+    assert len(data['duration_buckets']) == 5
+    assert 'deleted' in data['deleted'] and 'youtube_total' in data['deleted']
 
 
 def test_random_video(client):
@@ -321,6 +328,190 @@ def test_channels_page(client):
     response = client.get("/api/channels/0")
     data = json.loads(response.get_data(as_text=True))
     assert isinstance(data, list)
+    for ch in data:
+        assert 'unwatched' in ch
+        assert 'vidcount' in ch
+
+
+def test_channels_order_activity(client):
+    response = client.get("/api/channels/0?order=activity")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+
+
+def test_browse_page(client):
+    response = client.get("/browse.html")
+    assert response.status_code == 200
+    assert b'browse-grid' in response.data
+
+
+def test_up_next(client):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('UpNextCh1','UpNextCh1','{}',0);")
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext1','UpNextCh1','UpNextCh1','{}','/videos/1','2023-01-02 12:00:00',0,0);")
+    # Published after the current video and unwatched -> must be first in the list
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext2','UpNextCh1','UpNextCh1','{}','/videos/2','2023-01-03 12:00:00',0,0);")
+    # Watched -> must never appear
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext3','UpNextCh1','UpNextCh1','{}','/videos/3','2023-01-01 12:00:00',1,0);")
+    con.close()
+
+    response = client.get("/api/up_next/UpNext1?limit=5")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert data[0]['id'] == 'UpNext2'
+    ids = [v['id'] for v in data]
+    assert 'UpNext1' not in ids   # never suggest the current video
+    assert 'UpNext3' not in ids   # never suggest watched videos
+    assert len(data) <= 5
+
+
+def test_up_next_unknown_video(client):
+    response = client.get("/api/up_next/NonexistentVid123")
+    data = json.loads(response.get_data(as_text=True))
+    assert data == []
+
+
+def test_channel_source_url(client):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('UCVtTestChannel1','YT Test','{}',0);")
+    cur.execute("""Insert into channels(channelid,channelname,json,subscribed) values('987654321099','Patreon Test','{"data":{"attributes":{"name":"Patreon Test","url":"https://www.patreon.com/vttest"}}}',0);""")
+    cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('VtTestRedditUser','VtTestRedditUser','{}',0);")
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('RedVid1','VtTestRedditUser','VtTestRedditUser','{}','/videos/1','2023-03-01 12:00:00',0,0);")
+    cur.execute("Update videos set source='reddit' where id='RedVid1';")
+    con.close()
+
+    cases = {
+        'UCVtTestChannel1': 'https://www.youtube.com/channel/UCVtTestChannel1',
+        '987654321099': 'https://www.patreon.com/vttest',
+        'VtTestRedditUser': 'https://www.reddit.com/user/VtTestRedditUser',
+    }
+    for channelid, expected in cases.items():
+        response = client.get("/api/channel/" + channelid)
+        data = json.loads(response.get_data(as_text=True))
+        assert data['source_url'] == expected, channelid
+
+
+def test_channel_source_url_unknown(client):
+    response = client.get("/api/channel/NoSuchChannelXyz")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['source_url'] is None
+    assert data['channelname'] is None
+
+
+def test_insert_not_found_goes_to_ignorevid(client):
+    import logging
+    from database import insert_not_found
+    insert_not_found('TombVid2', logging.getLogger('test'))
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Select count(*) from IgnoreVid where id = 'TombVid2'")
+    assert cur.fetchone()[0] == 1
+    cur.execute("Select count(*) from videos where id = 'TombVid2'")
+    assert cur.fetchone()[0] == 0
+    con.close()
+
+
+def test_tombstone_migration(client):
+    con = _db_connect()
+    cur = con.cursor()
+    # A legacy-style tombstone row, as old insert_not_found wrote them
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,watched,timestamp,length) values('TombVid1','404','404','404','404',1,0,'0');")
+    con.close()
+
+    response = client.get("/api/checkdb")
+    assert response.text == "True"
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Select count(*) from videos where id = 'TombVid1'")
+    assert cur.fetchone()[0] == 0
+    cur.execute("Select count(*) from IgnoreVid where id = 'TombVid1'")
+    assert cur.fetchone()[0] == 1
+    con.close()
+
+
+def test_getvids_deleted_filter(client):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted) values('DelVid1','GetVidCh1','GetVidCh1','{}','/videos/1','2023-02-01 12:00:00',0,0,1);")
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted) values('DelVid2','GetVidCh1','GetVidCh1','{}','/videos/2','2023-02-02 12:00:00',0,0,0);")
+    con.close()
+
+    response = client.get("/api/getvids/all/PublishedAt/desc/0?deleted=1&channel_ids[]=GetVidCh1")
+    data = json.loads(response.get_data(as_text=True))
+    ids = [v['id'] for v in data]
+    assert 'DelVid1' in ids
+    assert 'DelVid2' not in ids
+
+
+def test_queue_page(client):
+    response = client.get("/queue.html")
+    assert response.status_code == 200
+    assert b'active-list' in response.data
+
+
+def test_download_upload_redirect_to_queue(client):
+    for path in ("/download.html", "/upload.html"):
+        response = client.get(path)
+        assert response.status_code == 301
+        assert response.headers['Location'].endswith('/queue.html')
+
+
+def test_retry_download(client):
+    import queue as _queue
+    with client.application.app_context():
+        if 'queue' not in client.application.config:
+            client.application.config['queue'] = _queue.Queue()
+        q = client.application.config['queue']
+    while not q.empty():
+        try:
+            q.get_nowait()
+        except _queue.Empty:
+            break
+
+    # URL is registered in conftest's _TEST_QUEUE_URLS for DB cleanup
+    response = client.post("/api/downloads/retry", json={"url": "https://example.com/vt-test-queue-row"})
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+    assert data['data']['enqueued'] is True
+    assert q.qsize() == 1
+
+    # Same URL again: still pending, so it must be skipped
+    response = client.post("/api/downloads/retry", json={"url": "https://example.com/vt-test-queue-row"})
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+    assert data['data']['enqueued'] is False
+    assert q.qsize() == 1
+
+
+def test_retry_download_missing_url(client):
+    response = client.post("/api/downloads/retry", json={})
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is False
+
+
+@pytest.mark.parametrize("path,marker", [
+    ("/", b"vt-hero"),
+    ("/browse.html", b"browse-grid"),
+    ("/player.html", b"upnext-list"),
+    ("/queue.html", b"active-list"),
+    ("/channels.html", b"channels-grid"),
+    ("/creator.html", b"creator-grid"),
+    ("/search.html", b"search-grid"),
+    ("/stats.html", b"channelChart"),
+    ("/playlists.html", b"playlists-grid"),
+    ("/playlist.html", b"playlist-grid"),
+    ("/random.html", b"random-grid"),
+])
+def test_page_renders(client, path, marker):
+    response = client.get(path)
+    assert response.status_code == 200
+    assert marker in response.data
+    assert b"vt-sidebar" in response.data  # every page carries the app shell
 
 
 def test_playlists_page(client):

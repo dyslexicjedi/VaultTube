@@ -1,42 +1,83 @@
 {% extends "base.html" %}
 {% block content %}
 
+<div class="vt-page-head">
+    <h1 id="creator-name"></h1>
+    <span class="vt-sub" id="creator-count"></span>
+    <button type="button" class="vt-sub-btn" id="creator-sub" hidden></button>
+    <a class="vt-btn-ghost vt-btn-sm" id="creator-source" target="_blank" rel="noopener" hidden>
+        <span id="creator-source-label"></span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+    </a>
+</div>
 
-<div class="toprow"><img id="subimg"><h3 id="creatorlabel"></h3></div>
-<div class="row row-cols-3 row-cols-md-4 g-4" id="carddeck"></div>
-<nav aria-label="..." class="pt-4 pb-4">
-    <ul id="pagelist" class="pagination"></ul>
-</nav>
+<div class="vt-grid" id="creator-grid"></div>
+<div class="vt-empty" id="creator-empty" hidden>No videos from this channel yet.</div>
+<ul class="vt-pages" id="creator-pages"></ul>
 
-<script src="/static/js/scripts.js"></script>
+<script src="/static/js/cards.js"></script>
 <script>
-const querystring = window.location.search;
-const urlparams = new URLSearchParams(querystring);
-const creator = urlparams.get('creator');
-var currentId = 1;
-update(1);
-subscribe_status(creator);
-function update(id){
-    currentId = id;
-    get_videos(id-1, creator).then(() => {
-        get_creator_count(creator).then(totalCount => {
-            const totalPages = Math.ceil(totalCount / 40);
-            pagination(id, totalPages);
+(function () {
+    var creator = new URLSearchParams(window.location.search).get('creator');
+    var totalPages = null;
+
+    document.getElementById('creator-name').textContent = creator;
+
+    function getJSON(url) {
+        return fetch(url).then(function (r) { return r.json(); });
+    }
+
+    function load(p) {
+        getJSON('/api/creator/' + encodeURIComponent(creator) + '/' + (p - 1)).then(function (vids) {
+            if (vids.length) {
+                var name = vids[0].youtuber || creator;
+                document.getElementById('creator-name').textContent = name;
+                document.title = name + ' — VaultTube';
+            }
+            VT.render(document.getElementById('creator-grid'), vids, { dot: true });
+            document.getElementById('creator-empty').hidden = vids.length > 0;
+            VT.pager(document.getElementById('creator-pages'), { page: p, totalPages: totalPages, hasNext: vids.length === 40, onPage: load });
+            window.scrollTo({ top: 0 });
         });
+    }
+
+    getJSON('/api/creator/count/' + encodeURIComponent(creator)).then(function (data) {
+        document.getElementById('creator-count').textContent = data.count + ' videos';
+        totalPages = Math.max(1, Math.ceil(data.count / 40));
+        load(1);
+    }).catch(function () { load(1); });
+
+    // Link to the creator's page at the source
+    getJSON('/api/channel/' + encodeURIComponent(creator)).then(function (info) {
+        if (!info.source_url) return;
+        var host = new URL(info.source_url).hostname;
+        var label = host.indexOf('youtube') !== -1 ? 'YouTube'
+            : host.indexOf('patreon') !== -1 ? 'Patreon'
+            : host.indexOf('reddit') !== -1 ? 'Reddit' : host;
+        document.getElementById('creator-source-label').textContent = 'Open on ' + label;
+        var link = document.getElementById('creator-source');
+        link.href = info.source_url;
+        link.hidden = false;
+    }).catch(function () {});
+
+    // Subscribe toggle (sub_status returns "0", "1", or "" for unknown channels)
+    var subBtn = document.getElementById('creator-sub');
+    function setSub(on) {
+        subBtn.hidden = false;
+        subBtn.classList.toggle('on', on);
+        subBtn.textContent = on ? '✓ Subscribed' : '+ Subscribe';
+        subBtn.dataset.on = on ? '1' : '0';
+    }
+    fetch('/api/sub_status/channel/' + encodeURIComponent(creator))
+        .then(function (r) { return r.text(); })
+        .then(function (txt) {
+            if (txt === '0' || txt === '1') setSub(txt === '1');
+        });
+    subBtn.addEventListener('click', function () {
+        var on = subBtn.dataset.on === '1';
+        fetch('/api/' + (on ? 'unsubscribe' : 'subscribe') + '/channel/' + encodeURIComponent(creator))
+            .then(function () { setSub(!on); });
     });
-}
-$("#creatorlabel").text(creator);
-function get_videos(currentpage, creator){
-    return $.getJSON("/api/creator/" + creator + "/" + currentpage, function(data){
-        $("#creatorlabel").text(data[0]['youtuber']);
-        processdata(data);
-    });
-}
-function contentChange(){
-    update(currentId);
-}
-function get_creator_count(creator) {
-    return $.getJSON('/api/creator/count/' + creator).then(data => data.count);
-}
+})();
 </script>
 {% endblock %}

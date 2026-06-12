@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="vt-rail-header" style="margin-bottom:18px">
+    <h2>Browse</h2>
+    <span class="vt-sub" id="browse-count"></span>
+</div>
+
+<div class="vt-filterbar">
+    <div class="vt-field">
+        <label>Show</label>
+        <div class="vt-seg" id="status-seg">
+            <button type="button" data-value="unwatched" class="active">Unwatched</button>
+            <button type="button" data-value="all">All</button>
+            <button type="button" data-value="deleted">Gone from source</button>
+        </div>
+    </div>
+    <div class="vt-field">
+        <label>Sort by</label>
+        <div class="vt-seg" id="sort-seg">
+            <button type="button" data-value="PublishedAt" class="active">Published</button>
+            <button type="button" data-value="AddedAt">Added</button>
+        </div>
+    </div>
+    <div class="vt-field">
+        <label>Channel</label>
+        <select id="channel-filter" class="vt-select" multiple size="3" style="min-width:180px"></select>
+    </div>
+    <div class="vt-field">
+        <label>Published between</label>
+        <div style="display:flex;gap:6px">
+            <input type="date" id="from-date" class="vt-input">
+            <input type="date" id="to-date" class="vt-input">
+        </div>
+    </div>
+    <div class="vt-field">
+        <label>Duration</label>
+        <select id="duration-filter" class="vt-select">
+            <option value="">Any</option>
+            <option value="0-300">Under 5 min</option>
+            <option value="300-600">5–10 min</option>
+            <option value="600-1800">10–30 min</option>
+            <option value="1800-3600">30–60 min</option>
+            <option value="3600-">Over 60 min</option>
+        </select>
+    </div>
+    <div class="vt-actions">
+        <button type="button" class="vt-btn" onclick="applyFilters()">Apply</button>
+        <button type="button" class="vt-btn-ghost" onclick="clearFilters()">Clear</button>
+    </div>
+</div>
+
+<div class="vt-grid" id="browse-grid"></div>
+<div class="vt-empty" id="browse-empty" hidden>No videos match these filters.</div>
+<ul class="vt-pages" id="browse-pages"></ul>
+
+<script src="/static/js/cards.js"></script>
+<script>
+    var state = {
+        page: 1,
+        status: 'unwatched',
+        sort: 'PublishedAt',
+        deleted: false,
+        channel_ids: [],
+        from_date: '',
+        to_date: '',
+        min_duration: null,
+        max_duration: null
+    };
+
+    function getJSON(url) {
+        return fetch(url).then(function (r) { return r.json(); });
+    }
+
+    function hasFilters() {
+        return state.deleted || state.channel_ids.length > 0 || state.from_date || state.to_date
+            || state.min_duration !== null || state.max_duration !== null;
+    }
+
+    function buildUrl() {
+        var url = '/api/getvids/' + state.status + '/' + state.sort + '/desc/' + ((state.page - 1) * 40);
+        var params = [];
+        state.channel_ids.forEach(function (cid) {
+            params.push('channel_ids[]=' + encodeURIComponent(cid));
+        });
+        if (state.deleted) params.push('deleted=1');
+        if (state.from_date) params.push('from_date=' + encodeURIComponent(state.from_date));
+        if (state.to_date) params.push('to_date=' + encodeURIComponent(state.to_date));
+        if (state.min_duration !== null) params.push('min_duration=' + state.min_duration);
+        if (state.max_duration !== null) params.push('max_duration=' + state.max_duration);
+        return params.length ? url + '?' + params.join('&') : url;
+    }
+
+    function update(page) {
+        state.page = page;
+        getJSON(buildUrl()).then(function (vids) {
+            VT.render(document.getElementById('browse-grid'), vids, { dot: state.status === 'all' });
+            document.getElementById('browse-empty').hidden = vids.length > 0;
+            window.scrollTo({ top: 0 });
+
+            if (hasFilters()) {
+                // Filtered totals aren't cheap to count; offer prev/next based on page fill
+                document.getElementById('browse-count').textContent = '';
+                renderPrevNext(vids.length === 40);
+            } else {
+                var countApi = state.status === 'all' ? '/api/stats/video/count' : '/api/stats/video/unwatched';
+                fetch(countApi).then(function (r) { return r.text(); }).then(function (txt) {
+                    var total = parseInt(txt, 10) || 0;
+                    document.getElementById('browse-count').textContent = total + ' videos';
+                    renderPages(Math.max(1, Math.ceil(total / 40)));
+                });
+            }
+        });
+    }
+
+    function pageBtn(label, page, opts) {
+        opts = opts || {};
+        return '<li><button type="button" class="vt-page' + (opts.active ? ' active' : '') + '"'
+            + (opts.disabled ? ' disabled' : ' onclick="update(' + page + ')"') + '>' + label + '</button></li>';
+    }
+
+    function renderPages(totalPages) {
+        var cur = state.page;
+        var txt = pageBtn('‹', cur - 1, { disabled: cur === 1 });
+        var start = Math.max(1, cur - 2);
+        var end = Math.min(totalPages, cur + 2);
+        if (end - start < 4) {
+            if (start === 1) end = Math.min(totalPages, start + 4);
+            else if (end === totalPages) start = Math.max(1, end - 4);
+        }
+        if (start > 1) {
+            txt += pageBtn(1, 1);
+            if (start > 2) txt += pageBtn('…', 0, { disabled: true });
+        }
+        for (var i = start; i <= end; i++) txt += pageBtn(i, i, { active: i === cur });
+        if (end < totalPages) {
+            if (end < totalPages - 1) txt += pageBtn('…', 0, { disabled: true });
+            txt += pageBtn(totalPages, totalPages);
+        }
+        txt += pageBtn('›', cur + 1, { disabled: cur === totalPages });
+        document.getElementById('browse-pages').innerHTML = txt;
+    }
+
+    function renderPrevNext(hasNext) {
+        var cur = state.page;
+        document.getElementById('browse-pages').innerHTML =
+            pageBtn('‹ Prev', cur - 1, { disabled: cur === 1 })
+            + pageBtn('Page ' + cur, cur, { active: true })
+            + pageBtn('Next ›', cur + 1, { disabled: !hasNext });
+    }
+
+    function segInit(id, onChange) {
+        var seg = document.getElementById(id);
+        seg.addEventListener('click', function (e) {
+            var btn = e.target.closest('button[data-value]');
+            if (!btn || btn.classList.contains('active')) return;
+            seg.querySelectorAll('button').forEach(function (b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            onChange(btn.dataset.value);
+        });
+    }
+
+    function setShow(v) {
+        // "deleted" is an isDeleted filter on top of all videos, not a watch status
+        state.deleted = (v === 'deleted');
+        state.status = (v === 'unwatched') ? 'unwatched' : 'all';
+    }
+    segInit('status-seg', function (v) { setShow(v); update(1); });
+    segInit('sort-seg', function (v) { state.sort = v; update(1); });
+
+    function applyFilters() {
+        state.channel_ids = Array.from(document.getElementById('channel-filter').selectedOptions)
+            .map(function (o) { return o.value; });
+        state.from_date = document.getElementById('from-date').value;
+        state.to_date = document.getElementById('to-date').value;
+        var dur = document.getElementById('duration-filter').value;
+        state.min_duration = null;
+        state.max_duration = null;
+        if (dur) {
+            var parts = dur.split('-');
+            if (parts[0]) state.min_duration = parseInt(parts[0], 10);
+            if (parts[1]) state.max_duration = parseInt(parts[1], 10);
+        }
+        update(1);
+    }
+
+    function clearFilters() {
+        state.channel_ids = [];
+        state.from_date = '';
+        state.to_date = '';
+        state.min_duration = null;
+        state.max_duration = null;
+        document.getElementById('channel-filter').selectedIndex = -1;
+        document.getElementById('from-date').value = '';
+        document.getElementById('to-date').value = '';
+        document.getElementById('duration-filter').value = '';
+        update(1);
+    }
+
+    getJSON('/api/channels/0').then(function (channels) {
+        var select = document.getElementById('channel-filter');
+        channels.forEach(function (c) {
+            var opt = document.createElement('option');
+            opt.value = c.channelid;
+            opt.textContent = c.channelname;
+            select.appendChild(opt);
+        });
+    });
+
+    // Deep link: /browse.html?show=all|deleted (e.g. from the stats KPIs)
+    var show = new URLSearchParams(window.location.search).get('show');
+    if (show === 'all' || show === 'deleted') {
+        setShow(show);
+        var seg = document.getElementById('status-seg');
+        seg.querySelectorAll('button').forEach(function (b) {
+            b.classList.toggle('active', b.dataset.value === show);
+        });
+    }
+
+    update(1);
+</script>
+{% endblock %}

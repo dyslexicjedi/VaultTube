@@ -8,10 +8,15 @@ _TEST_VIDEO_IDS   = [
     'Test123', 'SearchFT1', 'SearchLIKE1',
     'GetVid1', 'GetVidMp4',
     'WatchVid1', 'UnwatchVid1', 'TsVid1',
+    'UpNext1', 'UpNext2', 'UpNext3',
+    'DelVid1', 'DelVid2',
+    'TombVid1', 'TombVid2',
+    'RedVid1',
 ]
 _TEST_CHANNEL_IDS = [
     'Test123', 'SubTest123',
-    'GetVidCh1', 'TestCh1',
+    'GetVidCh1', 'TestCh1', 'UpNextCh1',
+    'UCVtTestChannel1', '987654321099', 'VtTestRedditUser',
 ]
 # Every URL a test may enqueue — queue rows persist to the real DB, so any
 # test that hits an enqueue path MUST list its URL here or clean up itself.
@@ -36,6 +41,7 @@ def _delete_test_rows():
         cur = con.cursor()
         for vid_id in _TEST_VIDEO_IDS:
             cur.execute("DELETE FROM videos WHERE id = %s", (vid_id,))
+            cur.execute("DELETE FROM IgnoreVid WHERE id = %s", (vid_id,))
         for ch_id in _TEST_CHANNEL_IDS:
             cur.execute("DELETE FROM channels WHERE channelid = %s", (ch_id,))
         for q_url in _TEST_QUEUE_URLS:

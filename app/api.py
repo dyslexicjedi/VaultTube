@@ -4,7 +4,7 @@ import subprocess
 from backend import get_video
 from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse
 from backend import process_channel,save_uploaded_video_metadata
-from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors
+from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors,delete_download_error
 from flask import request,jsonify
 import shutil
 import datetime
@@ -97,6 +97,9 @@ def getvids(status,opt,direction,page):
         if to_date:
             where_clauses.append(f"v.PublishedAt <= %s")
         
+        if request.args.get('deleted') == '1':
+            where_clauses.append("v.isDeleted = 1")
+
         min_duration = request.args.get('min_duration', '').strip()
         max_duration = request.args.get('max_duration', '').strip()
         min_dur_sec = int(min_duration) if min_duration and min_duration.isdigit() else None
@@ -277,11 +280,47 @@ def channels(page):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         page_num = int(page) if page.isdigit() else 0
-        cur.execute("select channels.*,count(*) as vidcount,max(PublishedAt) as lastvidtime from channels left outer join videos on channels.channelId = videos.channelId group by channelId order by channelname limit 40 offset %s;",(page_num,))
+        # order=activity sorts by most recent video (used by the home page rails)
+        order_by = "lastvidtime desc" if request.args.get('order') == 'activity' else "channelname"
+        cur.execute(f"select channels.*,count(videos.id) as vidcount,max(PublishedAt) as lastvidtime,coalesce(sum(videos.watched = 0),0) as unwatched from channels left outer join videos on channels.channelId = videos.channelId group by channels.channelId order by {order_by} limit 40 offset %s;",(page_num,))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
 
+
+@api_bp.route('/channel/<string:channelid>')
+def api_channel(channelid):
+    """Single channel row plus a derived link to the creator's page at the
+    source (YouTube by UC-prefixed ID, Patreon from the stored campaign json,
+    Reddit by author name)."""
+    try:
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select channelname, subscribed, json from channels where channelid = %s;", (channelid,))
+        row = cur.fetchone()
+        name, subscribed, jdata = row if row else (None, None, None)
+
+        source_url = None
+        if channelid.startswith('UC'):
+            source_url = 'https://www.youtube.com/channel/' + channelid
+        elif channelid.isdigit():
+            try:
+                url = json.loads(jdata)['data']['attributes']['url']
+                if url:
+                    source_url = url if url.startswith('http') else 'https://www.patreon.com' + url
+            except Exception:
+                pass
+        elif channelid != 'unknown':
+            cur.execute("select source from videos where channelId = %s order by AddedAt desc limit 1;", (channelid,))
+            vrow = cur.fetchone()
+            if vrow and vrow[0] == 'reddit':
+                source_url = 'https://www.reddit.com/user/' + channelid
+        cur.close()
+        con.close()
+        return json.dumps({'channelid': channelid, 'channelname': name, 'subscribed': subscribed, 'source_url': source_url}, default=str)
+    except Exception as e:
+        current_app.logger.error("API Channel Info Failed: %s" % e)
+        return api_error(str(e), 500)
 
 @api_bp.route('/creator/<string:creator>/<string:page>')
 def api_creator(creator,page):
@@ -476,6 +515,24 @@ def get_download_errors_api():
         current_app.logger.error("API Get Download Errors Failed: %s" % e)
         return json.dumps([])
 
+@api_bp.route('/downloads/retry', methods=['POST'])
+def retry_download_api():
+    """Re-enqueue a failed URL. Optional 'id' removes the download_errors row
+    once the URL is back in the queue."""
+    try:
+        body = request.get_json(force=True)
+        url = (body.get('url') or '').strip()
+        if not url:
+            return api_error("Missing URL", 400)
+        qo = QueueObject(url, "", body.get('source') or 'youtube', 0, "")
+        enqueued = enqueue(qo, current_app.config['queue'], current_app.logger)
+        if body.get('id') is not None:
+            delete_download_error(body['id'], current_app.logger)
+        return api_success({"enqueued": enqueued})
+    except Exception as e:
+        current_app.logger.error("API Retry Download Failed: %s" % e)
+        return api_error(str(e), 500)
+
 @api_bp.route('/downloads/errors/', methods=['DELETE'])
 def clear_download_errors_api():
     try:
@@ -572,6 +629,52 @@ def api_random():
     except Exception as e:
         current_app.logger.error("API Random Fail: %s"%e)
 
+@api_bp.route("/up_next/<string:vid>")
+def api_up_next(vid):
+    """Ordered list of what to play after <vid>: unwatched videos from the same
+    channel in series order (published after the current one first, then older
+    ones newest-first), topped up with recent unwatched from other channels."""
+    try:
+        current_app.logger.debug("Called Up Next %s" % vid)
+        try:
+            limit = min(max(int(request.args.get('limit', 10)), 1), 25)
+        except ValueError:
+            limit = 10
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select channelId, PublishedAt from videos where id = %s;", (vid,))
+        if not cur.rowcount:
+            cur.close()
+            con.close()
+            return "[]"
+        channel_id, published_at = cur.fetchone()
+        cols = "v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title"
+        base = f"select {cols} from videos v left outer join channels c on v.channelId = c.channelid where v.watched = 0 and v.id != %s and "
+        queries = [
+            (base + "v.channelId = %s and v.PublishedAt > %s order by v.PublishedAt asc limit %s;", (vid, channel_id, published_at, limit)),
+            (base + "v.channelId = %s and v.PublishedAt <= %s order by v.PublishedAt desc limit %s;", (vid, channel_id, published_at, limit)),
+            (base + "v.channelId != %s order by v.PublishedAt desc limit %s;", (vid, channel_id, limit)),
+        ]
+        results = []
+        seen = {vid}
+        for sql, params in queries:
+            if len(results) >= limit:
+                break
+            cur.execute(sql, params)
+            headers = [x[0] for x in cur.description]
+            for row in cur.fetchall():
+                item = dict(zip(headers, row))
+                if item['id'] in seen or len(results) >= limit:
+                    continue
+                seen.add(item['id'])
+                results.append(item)
+        cur.close()
+        con.close()
+        return json.dumps(results, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API Up Next Failed: %s" % e)
+        return "[]"
+
 @api_bp.route("/find_next_previous/<string:vid>")
 def api_fnp(vid):
     try:
@@ -606,22 +709,52 @@ def api_delete(vid):
     
 @api_bp.route("/stats")
 def api_stats():
+    """Dashboard data."""
     try:
         data = {}
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute(f"Select Youtuber,count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos Group By Youtuber Having count(*) > 1 and not Youtuber = '404'")
-        data['countbyyoutuber'] = cur.fetchall()
-        cur.execute(f"Select count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos Where not youtuber = '404'")
-        data['totalcount'] = cur.fetchall()
-        cur.execute(f"select videos.watched,count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos where not youtuber = '404' group by videos.watched")
-        data['watched'] = cur.fetchall()
-        cur.execute(f"select round(avg(TIME_TO_SEC(videos.length)),0) from {os.environ['VAULTTUBE_DBNAME']}.videos where not youtuber = '404'")
-        data['avg_length_seconds'] = cur.fetchall()
-        cur.execute(f"select isDeleted,count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos where source='youtube' group by isDeleted ")
-        data['deleted'] = cur.fetchall()
+
+        cur.execute("select count(*), coalesce(sum(watched=1),0), coalesce(sum(TIME_TO_SEC(`length`)),0), coalesce(round(avg(TIME_TO_SEC(`length`))),0) from videos")
+        total, watched, total_seconds, avg_seconds = cur.fetchone()
+        cur.execute("select count(*) from channels")
+        channels = cur.fetchone()[0]
+        cur.execute("select count(*) from playlists")
+        playlists = cur.fetchone()[0]
+        data['totals'] = {
+            'videos': int(total), 'watched': int(watched), 'unwatched': int(total - watched),
+            'total_seconds': int(total_seconds), 'avg_seconds': int(avg_seconds),
+            'channels': int(channels), 'playlists': int(playlists),
+        }
+
+        # Deleted-at-source is only tracked for YouTube
+        cur.execute("select coalesce(sum(isDeleted=1),0), count(*) from videos where source='youtube'")
+        deleted, yt_total = cur.fetchone()
+        data['deleted'] = {'deleted': int(deleted), 'youtube_total': int(yt_total)}
+
+        cur.execute("select coalesce(source,'unknown'), count(*) from videos group by source order by count(*) desc")
+        data['by_source'] = [[r[0], int(r[1])] for r in cur.fetchall()]
+
+        cur.execute("select coalesce(c.channelname, v.channelId), count(*) as total, coalesce(sum(v.watched=0),0) from videos v left outer join channels c on v.channelId = c.channelid group by v.channelId order by total desc limit 10")
+        data['top_channels'] = [[r[0], int(r[1]), int(r[2])] for r in cur.fetchall()]
+
+        # Vault growth: videos added per week for the last 26 weeks, zero-filled
+        cur.execute("select date(date_sub(AddedAt, interval weekday(AddedAt) day)) as wk, count(*) from videos where AddedAt >= date_sub(curdate(), interval 26 week) group by wk order by wk")
+        weekly = {str(r[0]): int(r[1]) for r in cur.fetchall()}
+        monday = datetime.date.today() - datetime.timedelta(days=datetime.date.today().weekday())
+        data['added_per_week'] = [
+            [str(monday - datetime.timedelta(weeks=i)), weekly.get(str(monday - datetime.timedelta(weeks=i)), 0)]
+            for i in range(25, -1, -1)
+        ]
+
+        cur.execute("select case when TIME_TO_SEC(`length`) < 300 then 0 when TIME_TO_SEC(`length`) < 600 then 1 when TIME_TO_SEC(`length`) < 1800 then 2 when TIME_TO_SEC(`length`) < 3600 then 3 else 4 end as bucket, count(*) from videos where TIME_TO_SEC(`length`) > 0 group by bucket")
+        buckets = {int(r[0]): int(r[1]) for r in cur.fetchall()}
+        labels = ['Under 5 min', '5–10 min', '10–30 min', '30–60 min', 'Over 60 min']
+        data['duration_buckets'] = [[labels[i], buckets.get(i, 0)] for i in range(5)]
+
         cur.close()
-        return json.dumps(data, indent=4, sort_keys=True, default=str)
+        con.close()
+        return json.dumps(data, default=str)
     except Exception as e:
         current_app.logger.error("API Stats Error: %s"%e)
         return api_error(str(e), 500)

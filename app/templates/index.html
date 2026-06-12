@@ -1,341 +1,123 @@
 {% extends "base.html" %}
 {% block content %}
 
-<!-- Animated background orbs -->
-<div class="index-orb index-orb-1" aria-hidden="true"></div>
-<div class="index-orb index-orb-2" aria-hidden="true"></div>
-
-<!-- Resume Section -->
-<section class="index-section" id="resumeSection" style="display:none;">
-    <div class="index-section-header">
-        <h5 id="resumelabel" class="index-section-title">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="me-2" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M11.596 8.697l-6.363 3.692A.5.5 0 0 1 4.5 12V4a.5.5 0 0 1 .733-.441l6.363 3.692a.5.5 0 0 1 0 .882z"/>
-            </svg>
-            Resume
-        </h5>
-    </div>
-    <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4" id="resumedeck"></div>
-</section>
-
-<!-- Latest Section -->
-<section class="index-section">
-    <div class="index-section-header">
-        <h5 id="latestlabel" class="index-section-title">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="me-2" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
-                <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
-            </svg>
-            Latest
-        </h5>
-        <div class="index-filters advanced-filters" id="advancedFilters" style="display:none; margin-top: 1rem;">
-            <div class="advanced-filter-group advanced-filter-toggles">
-                <div class="index-filter-pill">
-                    <span class="index-filter-label">Unwatched</span>
-                    <div class="form-check form-switch index-switch">
-                        <input class="form-check-input" type="checkbox" role="switch" id="contentToggle" onclick="contentChange();" aria-label="Toggle content filter">
-                        <label class="form-check-label" for="contentToggle"></label>
-                    </div>
-                    <span class="index-filter-label">All</span>
-                </div>
-                <div class="index-filter-pill">
-                    <span class="index-filter-label">Published</span>
-                    <div class="form-check form-switch index-switch">
-                        <input class="form-check-input" type="checkbox" role="switch" id="dateToggle" onclick="contentChange();" aria-label="Toggle date sort">
-                        <label class="form-check-label" for="dateToggle"></label>
-                    </div>
-                    <span class="index-filter-label">Added</span>
-                </div>
-            </div>
-            <div class="advanced-filter-group">
-                <label class="advanced-filter-label">Channel</label>
-                <select id="channelFilter" class="advanced-filter-select" multiple aria-label="Filter by channel">
-                </select>
-            </div>
-            <div class="advanced-filter-group">
-                <label class="advanced-filter-label">Date Range</label>
-                <div class="advanced-filter-dates">
-                    <input type="date" id="fromDate" class="advanced-filter-input" aria-label="From date">
-                    <input type="date" id="toDate" class="advanced-filter-input" aria-label="To date">
-                </div>
-                <div class="advanced-filter-presets">
-                    <button type="button" class="filter-preset-btn" onclick="setDatePreset('today')">Today</button>
-                    <button type="button" class="filter-preset-btn" onclick="setDatePreset('week')">This Week</button>
-                    <button type="button" class="filter-preset-btn" onclick="setDatePreset('month')">This Month</button>
-                    <button type="button" class="filter-preset-btn" onclick="setDatePreset('year')">This Year</button>
-                    <button type="button" class="filter-preset-btn" onclick="clearDatePreset()">Clear</button>
-                </div>
-            </div>
-            <div class="advanced-filter-group">
-                <label class="advanced-filter-label">Duration</label>
-                <select id="durationFilter" class="advanced-filter-select" onchange="applyFilters()">
-                    <option value="">Any Duration</option>
-                    <option value="<5">Under 5 min</option>
-                    <option value="5-10">5-10 min</option>
-                    <option value="10-30">10-30 min</option>
-                    <option value="30-60">30-60 min</option>
-                    <option value=">60">Over 60 min</option>
-                </select>
-            </div>
-            <div class="advanced-filter-actions">
-                <button type="button" class="btn btn-primary btn-sm" onclick="applyFilters()">Apply Filters</button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="clearFilters()">Clear All</button>
-                <button type="button" class="btn btn-link btn-sm" onclick="toggleAdvancedFilters()">Hide Filters</button>
-            </div>
-        </div>
-        <div class="text-center mt-2">
-            <button type="button" class="btn btn-link btn-sm" onclick="toggleAdvancedFilters()" id="showAdvancedBtn">Show Advanced Filters</button>
+<!-- Hero: most recently added unwatched video -->
+<section class="vt-hero" id="hero" hidden>
+    <div class="vt-hero-backdrop"><img id="hero-img" src="" alt=""></div>
+    <div class="vt-hero-shade"></div>
+    <div class="vt-hero-content">
+        <div class="vt-hero-kicker">Newest addition</div>
+        <h1 class="vt-hero-title" id="hero-title"></h1>
+        <div class="vt-hero-meta" id="hero-meta"></div>
+        <div class="vt-hero-actions">
+            <a class="vt-btn" id="hero-play" href="#">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                Play
+            </a>
+            <a class="vt-btn-ghost" id="hero-channel" href="#">View channel</a>
         </div>
     </div>
-    <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4" id="carddeck"></div>
-    <nav aria-label="Video page navigation" class="pt-4 pb-2 d-flex justify-content-center">
-        <ul id="pagelist" class="pagination index-pagination" style="gap: 0.4rem;"></ul>
-    </nav>
 </section>
 
-<script src="/static/js/scripts.js"></script>
+<section class="vt-section" id="resume-section" hidden>
+    <div class="vt-rail-header">
+        <h2>Continue watching</h2>
+    </div>
+    <div class="vt-rail-track" id="resume-rail"></div>
+</section>
+
+<section class="vt-section" id="new-section" hidden>
+    <div class="vt-rail-header">
+        <h2>New this week</h2>
+        <span class="vt-sub" id="new-sub"></span>
+        <a class="vt-all" href="/browse.html">Browse all</a>
+    </div>
+    <div class="vt-rail-track" id="new-rail"></div>
+</section>
+
+<div id="channel-rails"></div>
+
+<div class="vt-empty" id="home-empty" hidden>
+    Nothing unwatched right now — you're all caught up.
+    <div style="margin-top:16px"><a class="vt-btn-ghost" href="/browse.html">Browse the vault</a></div>
+</div>
+
+<script src="/static/js/cards.js"></script>
 <script>
+(function () {
+    var sectionsWithContent = 0;
 
-    var activeFilters = {
-        channel_ids: [],
-        from_date: '',
-        to_date: '',
-        min_duration: null,
-        max_duration: null
-    };
-
-    update(1);
-    function update(id){
-        currentId = id;
-        let totalCount = 0;
-        if($("#dateToggle").prop('checked')){
-            sortRelease='AddedAt'
-        }
-        else{
-            sortRelease='PublishedAt'
-        }
-        
-        var status = $("#contentToggle").prop('checked') ? 'all' : 'unwatched';
-        var apiUrl = "/api/getvids/" + status + "/" + sortRelease + "/desc/" + ((id-1)*40);
-        
-        var queryParams = [];
-        if (activeFilters.channel_ids && activeFilters.channel_ids.length > 0) {
-            $.each(activeFilters.channel_ids, function(i, cid) {
-                queryParams.push("channel_ids[]=" + encodeURIComponent(cid));
-            });
-        }
-        if (activeFilters.from_date) {
-            queryParams.push("from_date=" + encodeURIComponent(activeFilters.from_date));
-        }
-        if (activeFilters.to_date) {
-            queryParams.push("to_date=" + encodeURIComponent(activeFilters.to_date));
-        }
-        if (activeFilters.min_duration !== null) {
-            queryParams.push("min_duration=" + activeFilters.min_duration);
-        }
-        if (activeFilters.max_duration !== null) {
-            queryParams.push("max_duration=" + activeFilters.max_duration);
-        }
-        
-        if (queryParams.length > 0) {
-            apiUrl += "?" + queryParams.join("&");
-        }
-        
-        var countApi = status === 'all' ? "/api/stats/video/count" : "/api/stats/video/unwatched";
-        
-        if($("#contentToggle").prop('checked') && activeFilters.channel_ids.length === 0 && !activeFilters.from_date && !activeFilters.to_date && !activeFilters.min_duration && !activeFilters.max_duration){
-            $.get(countApi,function(data){
-                totalCount = parseInt(data);
-                let totalPages = Math.ceil(totalCount / 40);
-                pagination(id, totalPages);
-            });
-        } else {
-            $.get(apiUrl, function(data){
-                var total = data.length;
-                paginationWithTotal(id, total);
-            });
-        }
-        
-        $.getJSON(apiUrl,function(data){
-            processdata(data);
-        });
+    function show(id) {
+        document.getElementById(id).hidden = false;
+        sectionsWithContent++;
     }
 
-    $.getJSON("/api/list/resume/",function(data){
-        processresume(data);
+    function getJSON(url) {
+        return fetch(url).then(function (r) { return r.json(); });
+    }
+
+    // Hero + "New this week" share nothing; fire everything in parallel
+    var heroDone = getJSON('/api/getvids/unwatched/AddedAt/desc/0').then(function (vids) {
+        if (!vids.length) return;
+        var v = vids[0];
+        document.getElementById('hero-img').src = '/api/images/' + encodeURIComponent(v.id);
+        document.getElementById('hero-title').textContent = v.title;
+        var meta = [];
+        if (v.youtuber) meta.push('<a href="/creator.html?creator=' + encodeURIComponent(v.channelId) + '">' + VT.esc(v.youtuber) + '</a>');
+        if (v.PublishedAt) meta.push(VT.esc(VT.fmtDate(v.PublishedAt)));
+        if (v.length) meta.push(VT.esc(VT.fmtDur(v.length)));
+        document.getElementById('hero-meta').innerHTML = meta.join(' &nbsp;·&nbsp; ');
+        document.getElementById('hero-play').href = '/player.html?id=' + encodeURIComponent(v.id);
+        var ch = document.getElementById('hero-channel');
+        if (v.channelId) ch.href = '/creator.html?creator=' + encodeURIComponent(v.channelId);
+        else ch.hidden = true;
+        show('hero');
     });
 
-    function processresume(data){
-        if(data.length > 0){
-            $("#resumeSection").fadeIn(300);
-            $("#resumedeck").empty();
-            $.each(data,function(i,item){
-                var jobj = jQuery.parseJSON(data[i]["json"]);
-                var s = data[i]['length'].split(":")
-                var total = (+s[0]) * 60 * 60 + (+s[1]) * 60 + (+s[2]);
-                var current = parseInt(data[i]['timestamp']);
-                var p = parseInt((current / total) * 100);
-                var txt = "<div class=\"col index-card-col\"><div class=\"card index-card h-100\" onclick=\"playvid('"+data[i].id+"')\" role=\"button\" tabindex=\"0\" aria-label=\"Resume: "+data[i].title+"\">";
-                txt += "<div class=\"index-card-thumb-wrap\"><img src=\"/api/images/"+data[i].id+"\" class=\"card-img-top index-card-thumb\" alt=\"Thumbnail\">";
-                txt += "<div class=\"index-card-overlay\"><svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' fill='white' viewBox='0 0 16 16'><path d='M11.596 8.697l-6.363 3.692A.5.5 0 0 1 4.5 12V4a.5.5 0 0 1 .733-.441l6.363 3.692a.5.5 0 0 1 0 .882z'/></svg></div>";
-                txt += "<div class=\"index-resume-bar\"><div class=\"index-resume-fill\" style=\"width:"+p+"%\"></div></div>";
-                txt += "</div>";
-                txt += "<div class=\"card-body\"><h5 class=\"card-title\">"+data[i].title+"</h5>";
-                txt += "<p class=\"index-card-channel\"><a href='/creator.html?creator="+data[i]['channelId']+"'>"+data[i]['youtuber']+"</a></p>";
-                txt += "</div><div class=\"card-footer\"><small>Published: "+data[i].PublishedAt+"</small></div></div></div>";
-                $("#resumedeck").append(txt);
-            });
-        }
-    }
+    var resumeDone = getJSON('/api/list/resume/').then(function (vids) {
+        if (!vids.length) return;
+        VT.render(document.getElementById('resume-rail'), vids, { progress: true });
+        show('resume-section');
+    });
 
-    function contentChange(){
-            update(currentId);
-    }
+    var weekAgo = new Date(Date.now() - 7 * 86400 * 1000);
+    var fromDate = weekAgo.getFullYear() + '-'
+        + String(weekAgo.getMonth() + 1).padStart(2, '0') + '-'
+        + String(weekAgo.getDate()).padStart(2, '0');
+    var newDone = getJSON('/api/getvids/unwatched/PublishedAt/desc/0?from_date=' + fromDate).then(function (vids) {
+        if (!vids.length) return;
+        document.getElementById('new-sub').textContent = vids.length >= 40 ? '40+ videos' : vids.length + (vids.length === 1 ? ' video' : ' videos');
+        VT.render(document.getElementById('new-rail'), vids, { dot: true });
+        show('new-section');
+    });
 
-    function paginationWithTotal(current, totalItems) {
-        $("#pagelist").empty();
-        var totalPages = Math.ceil(totalItems / 40);
-        if (totalItems === 0) totalPages = 1;
-        
-        var txt = "";
-
-        function pageItem(page, label = page, active = false, disabled = false) {
-            return `<li class="page-item${active ? ' active' : ''}${disabled ? ' disabled' : ''}">
-                <a class="page-link" href="#" onclick="update(${page});return false;">${label}</a>
-            </li>`;
-        }
-
-        txt += current == 1 ? pageItem(current - 1, "Previous", false, true) : pageItem(current - 1, "Previous");
-
-        var startPage = Math.max(1, current - 2);
-        var endPage = Math.min(totalPages, current + 2);
-
-        if (endPage - startPage < 4) {
-            if (startPage == 1) {
-                endPage = Math.min(totalPages, startPage + 4);
-            } else if (endPage == totalPages) {
-                startPage = Math.max(1, endPage - 4);
-            }
-        }
-
-        if (startPage > 1) {
-            txt += pageItem(1);
-            if (startPage > 2) txt += '<li class="page-item disabled"><a class="page-link">...</a></li>';
-        }
-
-        for (var i = startPage; i <= endPage; i++) {
-            txt += pageItem(i, i, i === current);
-        }
-
-        if (endPage < totalPages) {
-            if (endPage < totalPages - 1) txt += '<li class="page-item disabled"><a class="page-link">...</a></li>';
-            txt += pageItem(totalPages);
-        }
-
-        txt += current == totalPages ? pageItem(current + 1, "Next", false, true) : pageItem(current + 1, "Next");
-
-        $("#pagelist").append(txt);
-    }
-
-    function toggleAdvancedFilters() {
-        var filtersDiv = document.getElementById('advancedFilters');
-        var showBtn = document.getElementById('showAdvancedBtn');
-        if (filtersDiv.style.display === 'none') {
-            filtersDiv.style.display = 'block';
-            showBtn.textContent = 'Hide Filters';
-            loadChannelOptions();
-        } else {
-            filtersDiv.style.display = 'none';
-            showBtn.textContent = 'Show Advanced Filters';
-        }
-    }
-
-    function loadChannelOptions() {
-        $.getJSON('/api/channels/0', function(data) {
-            var select = $('#channelFilter');
-            select.empty();
-            $.each(data, function(i, item) {
-                select.append($('<option></option>').val(item.channelid).text(item.channelname));
+    // One rail per active channel that still has something unwatched
+    var railsDone = getJSON('/api/channels/0?order=activity').then(function (channels) {
+        var top = channels.filter(function (c) { return parseInt(c.unwatched, 10) > 0; }).slice(0, 4);
+        if (!top.length) return;
+        return Promise.all(top.map(function (c) {
+            return getJSON('/api/getvids/unwatched/PublishedAt/desc/0?channel_ids[]=' + encodeURIComponent(c.channelid));
+        })).then(function (lists) {
+            var host = document.getElementById('channel-rails');
+            top.forEach(function (c, i) {
+                if (!lists[i].length) return;
+                var section = document.createElement('section');
+                section.className = 'vt-section';
+                section.innerHTML =
+                    '<div class="vt-rail-header"><h2>' + VT.esc(c.channelname) + '</h2>'
+                    + '<span class="vt-sub">' + VT.esc(c.unwatched) + ' unwatched</span>'
+                    + '<a class="vt-all" href="/creator.html?creator=' + encodeURIComponent(c.channelid) + '">View all</a></div>'
+                    + '<div class="vt-rail-track"></div>';
+                VT.render(section.querySelector('.vt-rail-track'), lists[i].slice(0, 12), {});
+                host.appendChild(section);
+                sectionsWithContent++;
             });
         });
-    }
+    });
 
-    function setDatePreset(preset) {
-        var now = new Date();
-        var fromDate = new Date();
-        var toDate = new Date();
-        
-        switch(preset) {
-            case 'today':
-                fromDate.setHours(0,0,0,0);
-                break;
-            case 'week':
-                fromDate.setDate(now.getDate() - 7);
-                break;
-            case 'month':
-                fromDate.setMonth(now.getMonth() - 1);
-                break;
-            case 'year':
-                fromDate.setFullYear(now.getFullYear() - 1);
-                break;
-        }
-        
-        $('#fromDate').val(toISOStringDate(fromDate));
-        $('#toDate').val(toISOStringDate(toDate));
-        applyFilters();
-    }
-
-    function toISOStringDate(date) {
-        var year = date.getFullYear();
-        var month = String(date.getMonth() + 1).padStart(2, '0');
-        var day = String(date.getDate()).padStart(2, '0');
-        return year + '-' + month + '-' + day;
-    }
-
-    function clearDatePreset() {
-        $('#fromDate').val('');
-        $('#toDate').val('');
-        applyFilters();
-    }
-
-    function clearFilters() {
-        activeFilters.channel_ids = [];
-        activeFilters.from_date = '';
-        activeFilters.to_date = '';
-        activeFilters.min_duration = null;
-        activeFilters.max_duration = null;
-        $('#channelFilter').val([]);
-        $('#fromDate').val('');
-        $('#toDate').val('');
-        $('#durationFilter').val('');
-        update(currentId);
-    }
-
-    function applyFilters() {
-        activeFilters.channel_ids = $('#channelFilter').val() || [];
-        activeFilters.from_date = $('#fromDate').val();
-        activeFilters.to_date = $('#toDate').val();
-        
-        var durationVal = $('#durationFilter').val();
-        activeFilters.min_duration = null;
-        activeFilters.max_duration = null;
-        
-        if (durationVal === '<5') {
-            activeFilters.max_duration = 300;
-        } else if (durationVal === '5-10') {
-            activeFilters.min_duration = 300;
-            activeFilters.max_duration = 600;
-        } else if (durationVal === '10-30') {
-            activeFilters.min_duration = 600;
-            activeFilters.max_duration = 1800;
-        } else if (durationVal === '30-60') {
-            activeFilters.min_duration = 1800;
-            activeFilters.max_duration = 3600;
-        } else if (durationVal === '>60') {
-            activeFilters.min_duration = 3600;
-        }
-        
-        update(currentId);
-    }
+    Promise.allSettled([heroDone, resumeDone, newDone, railsDone]).then(function () {
+        if (sectionsWithContent === 0) document.getElementById('home-empty').hidden = false;
+    });
+})();
 </script>
 {% endblock %}
