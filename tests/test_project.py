@@ -412,6 +412,26 @@ def test_retry_download_missing_url(client):
     assert data['success'] is False
 
 
+@pytest.mark.parametrize("path,marker", [
+    ("/", b"vt-hero"),
+    ("/browse.html", b"browse-grid"),
+    ("/player.html", b"upnext-list"),
+    ("/queue.html", b"active-list"),
+    ("/channels.html", b"channels-grid"),
+    ("/creator.html", b"creator-grid"),
+    ("/search.html", b"search-grid"),
+    ("/stats.html", b"channelChart"),
+    ("/playlists.html", b"playlists-grid"),
+    ("/playlist.html", b"playlist-grid"),
+    ("/random.html", b"random-grid"),
+])
+def test_page_renders(client, path, marker):
+    response = client.get(path)
+    assert response.status_code == 200
+    assert marker in response.data
+    assert b"vt-sidebar" in response.data  # every page carries the app shell
+
+
 def test_playlists_page(client):
     response = client.get("/api/playlists/0")
     data = json.loads(response.get_data(as_text=True))

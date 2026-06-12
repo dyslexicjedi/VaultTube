@@ -48,6 +48,73 @@ function do_search() {
     });
 })();
 
+/* ---- Topbar search typeahead ---- */
+(function () {
+    var input = document.getElementById('searchtext');
+    var dd = document.getElementById('search-dd');
+    if (!input || !dd) return;
+
+    var debounce = null;
+    var lastQuery = '';
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    function close() {
+        dd.hidden = true;
+        dd.innerHTML = '';
+    }
+
+    function show(results, query) {
+        if (!results.length) { close(); return; }
+        dd.innerHTML = results.slice(0, 8).map(function (v) {
+            return '<div class="vt-search-hit" data-id="' + esc(v.id) + '">'
+                + '<img src="/api/images/' + encodeURIComponent(v.id) + '" alt="" loading="lazy">'
+                + '<div><div class="vt-search-hit-title">' + esc(v.title) + '</div>'
+                + '<div class="vt-search-hit-sub">' + esc(v.youtuber || v.channelId || '') + '</div></div>'
+                + '</div>';
+        }).join('')
+        + '<button type="button" class="vt-search-all">All results for “' + esc(query) + '”</button>';
+        dd.hidden = false;
+    }
+
+    input.addEventListener('input', function () {
+        var q = input.value.trim();
+        clearTimeout(debounce);
+        if (q.length < 2) { close(); return; }
+        debounce = setTimeout(function () {
+            lastQuery = q;
+            fetch('/api/search/' + encodeURIComponent(q) + '/0')
+                .then(function (r) { return r.json(); })
+                .then(function (results) {
+                    // A slower response for an old query must not clobber the current one
+                    if (q === lastQuery && input.value.trim() === q) show(results, q);
+                })
+                .catch(function () {});
+        }, 250);
+    });
+
+    dd.addEventListener('mousedown', function (e) {
+        // mousedown beats the input's blur, so clicks land before the dropdown closes
+        e.preventDefault();
+        var hit = e.target.closest('.vt-search-hit');
+        if (hit) {
+            window.location.href = '/player.html?id=' + encodeURIComponent(hit.dataset.id);
+            return;
+        }
+        if (e.target.closest('.vt-search-all')) do_search();
+    });
+
+    input.addEventListener('blur', function () { setTimeout(close, 150); });
+    input.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') close();
+        if (e.key === 'Enter') close();
+    });
+})();
+
 /* ---- "+ Add" modal: URL download / file upload / Reddit saved ---- */
 (function () {
     var modal = document.getElementById('add-modal');

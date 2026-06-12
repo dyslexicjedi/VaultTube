@@ -999,6 +999,229 @@ a {
   font-size: 12px;
 }
 
+/* ---------- Channel / playlist cards ---------- */
+.vt-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 14px;
+}
+.vt-tile {
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s ease;
+}
+.vt-tile:hover {
+  border-color: var(--vt-line-strong);
+}
+.vt-tile-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--vt-text);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+.vt-tile-name:hover {
+  color: var(--vt-accent);
+}
+.vt-tile-desc {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--vt-text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+  flex: 1;
+}
+.vt-tile-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.vt-tile-foot .vt-sub {
+  font-size: 12px;
+  color: var(--vt-text-dim);
+}
+.vt-tile-foot .vt-actions {
+  margin-left: auto;
+}
+.vt-sub-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--vt-line-strong);
+  border-radius: 999px;
+  color: var(--vt-text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+.vt-sub-btn:hover {
+  color: var(--vt-text);
+  border-color: var(--vt-text-dim);
+}
+.vt-sub-btn.on {
+  background: var(--vt-accent-soft);
+  border-color: var(--vt-accent);
+  color: var(--vt-accent);
+}
+
+/* ---------- Page header (creator / playlist detail) ---------- */
+.vt-page-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.vt-page-head h1 {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.vt-page-head .vt-sub {
+  font-size: 13px;
+  color: var(--vt-text-dim);
+}
+
+/* ---------- Stats tiles ---------- */
+.vt-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+.vt-stat {
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vt-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--vt-text-dim);
+}
+.vt-stat-value {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--vt-accent);
+}
+.vt-chart {
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+}
+.vt-chart-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 250px;
+}
+.vt-chart.wide {
+  grid-column: 1 / -1;
+}
+.vt-chart.wide .vt-chart-wrap {
+  min-height: 300px;
+}
+@media (max-width: 900px) {
+  .vt-stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ---------- Topbar search typeahead ---------- */
+.vt-search {
+  position: relative;
+}
+.vt-search-dd {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-line-strong);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  z-index: 60;
+}
+.vt-search-dd[hidden] {
+  display: none;
+}
+.vt-search-hit {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.vt-search-hit:hover,
+.vt-search-hit.sel {
+  background: var(--vt-surface-2);
+}
+.vt-search-hit img {
+  width: 64px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 5px;
+  background: var(--vt-surface-2);
+}
+.vt-search-hit-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--vt-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vt-search-hit-sub {
+  font-size: 11px;
+  color: var(--vt-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vt-search-all {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--vt-line);
+  color: var(--vt-accent);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 9px 10px;
+  cursor: pointer;
+  text-align: center;
+}
+.vt-search-all:hover {
+  background: var(--vt-surface-2);
+}
+
 /* ---------- Mobile: sidebar becomes bottom tab bar ---------- */
 @media (max-width: 768px) {
   .vt-shell {
