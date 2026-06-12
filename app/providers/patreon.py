@@ -7,10 +7,9 @@ from flask import current_app
 import datetime
 import json
 import subprocess
-import mariadb
 
 from providers.base import set_status, update_status, del_status
-from database import check_db_video, check_db_channel, save_channel
+from database import check_db_video, check_db_channel, save_channel, get_connection
 from QueueObject import QueueObject
 from queue_utils import enqueue
 
@@ -217,7 +216,7 @@ def patreon_screenshot(videoid,channelid,logger):
         output_img = videoid+".jpg"
         subprocess.call(['ffmpeg', '-i', input_video, '-ss', '00:00:01.000', '-vframes', '1', output_img])
         img = open(videoid+".jpg",'rb').read()
-        con = mariadb.connect(host=os.environ['VAULTTUBE_DBHOST'],user=os.environ['VAULTTUBE_DBUSER'],password=os.environ['VAULTTUBE_DBPASS'],database=os.environ['VAULTTUBE_DBNAME'],autocommit=True,port=int(os.environ['VAULTTUBE_DBPORT']))
+        con = get_connection(logger)
         cur = con.cursor()
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(videoid,img))
@@ -239,7 +238,7 @@ def patreon_db_info(videoid,channelid,PublishedAt,title,logger):
         t['items'][0]['id'] = videoid
         source = "patreon"
 
-        con = mariadb.connect(host=os.environ['VAULTTUBE_DBHOST'],user=os.environ['VAULTTUBE_DBUSER'],password=os.environ['VAULTTUBE_DBPASS'],database=os.environ['VAULTTUBE_DBNAME'],autocommit=True,port=int(os.environ['VAULTTUBE_DBPORT']))
+        con = get_connection(logger)
         cur = con.cursor()
         sql = "Select * from videos where id = %s"
         cur.execute(sql,(videoid,))

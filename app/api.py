@@ -17,6 +17,8 @@ api_bp = Blueprint('api',__name__)
 
 def parse_response(cur,con):
     if(not cur.rowcount):
+        cur.close()
+        con.close()
         return "[]"
     # serialize results into JSON
     row_headers=[x[0] for x in cur.description]

@@ -411,6 +411,67 @@ def test_uploads_playlist_id():
     assert uploads_playlist_id('UCVtTestChannel1') == 'UUVtTestChannel1'
 
 
+def test_parse_response_closes_connection_on_empty():
+    from api import parse_response
+
+    class FakeCur:
+        rowcount = 0
+        closed = False
+        def close(self):
+            self.closed = True
+
+    class FakeCon:
+        closed = False
+        def close(self):
+            self.closed = True
+
+    cur, con = FakeCur(), FakeCon()
+    assert parse_response(cur, con) == "[]"
+    assert cur.closed and con.closed
+
+
+def test_db_checks_fail_closed(monkeypatch):
+    """A DB error must read as 'already have it', never as 'missing' —
+    otherwise a DB blip makes scanners re-enqueue everything they see."""
+    import logging, database
+
+    def boom(logger):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(database, 'get_connection', boom)
+    log = logging.getLogger('test')
+    assert database.check_db_video('AnyVid', log) is True
+    assert database.check_db_channel('AnyChan', log) is True
+    assert database.check_pl2vid_info('AnyPl', 'AnyVid', log) is True
+    assert database.check_db_video_length('AnyVid', log) is True
+    assert database.get_video_index(log) is None
+
+
+def test_get_video_index(client):
+    import logging, database
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,length) values('GetVid1','X','GetVidCh1','{}','/videos/1','2024-01-01 10:00:00',0,0,'0:10:00');")
+    cur.execute("Insert ignore into IgnoreVid(id) values('TombVid1');")
+    con.close()
+
+    lengths, ignored = database.get_video_index(logging.getLogger('test'))
+    assert lengths.get('GetVid1') == '0:10:00'
+    assert 'TombVid1' in ignored
+
+
+def test_connection_pool_reuse(client):
+    import logging, database
+    log = logging.getLogger('test')
+    for _ in range(3):
+        con = database.get_connection(log)
+        cur = con.cursor()
+        cur.execute("SELECT 1")
+        assert cur.fetchone()[0] == 1
+        cur.close()
+        con.close()   # returns to the pool; next call must hand out a working one
+
+
 def test_error_type_classification():
     from downloader import get_error_type
     # Throttling responses must be transient (retried), not permanent failures

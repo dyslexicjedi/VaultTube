@@ -6,6 +6,7 @@ from flask import current_app
 from QueueObject import QueueObject
 from database import get_active_subscriptions,get_active_playlist_subs
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info
+from database import cleanup_old_errors, cleanup_old_queue_rows
 from providers.patreon import scan_campaign
 from queue_utils import enqueue
 
@@ -29,6 +30,9 @@ def start_scanner(logger,app):
             with app.app_context():
                 logger.info("Scanning Playlist: %s"%id)
                 get_playlist_video_list(id,logger)
+        # Retention used to run only at startup; long-lived containers need it here
+        cleanup_old_errors(logger, 7)
+        cleanup_old_queue_rows(logger, 7)
         time.sleep(3600)
 
 

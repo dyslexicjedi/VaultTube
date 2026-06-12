@@ -1,4 +1,4 @@
-import mariadb,requests,json,os
+import mariadb,requests,json,os,threading
 from difflib import SequenceMatcher
 
 #Perform database checks on startup
@@ -169,7 +169,28 @@ def check_db_video(id,logger):
         check.close()
         return test
     except Exception as e:
+        # Fail closed: a DB hiccup must read as "already have it", or a scan
+        # pass during an outage would re-enqueue everything it sees
         logger.error("Error during check_db_video: %s"%e)
+        return True
+
+def get_video_index(logger):
+    """The whole dedupe index in two queries: {video_id: length} plus the
+    ignored-ID set. Used by the vault sweep instead of two queries per file.
+    Returns None on DB failure so callers can skip the pass entirely."""
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("Select id, length FROM videos")
+        lengths = {row[0]: row[1] for row in cur.fetchall()}
+        cur.execute("Select id FROM IgnoreVid")
+        ignored = {row[0] for row in cur.fetchall()}
+        cur.close()
+        con.close()
+        return lengths, ignored
+    except Exception as e:
+        logger.error("Error during get_video_index: %s"%e)
+        return None
 
 def save_video(id,ret,img,logger,source='youtube'):
     try:
@@ -202,7 +223,9 @@ def check_db_channel(id,logger):
         check.close()
         return test
     except Exception as e:
+        # Fail closed so a DB hiccup doesn't trigger channel re-creation
         logger.error("Error during check_db_channel: %s"%e)
+        return True
 
 def save_channel(channelid,channelname,jdata,logger):
     try:
@@ -229,10 +252,37 @@ def get_active_subscriptions(logger):
     except Exception as e:
         logger.error("Error during subscription poll")
 
+_pool = None
+_pool_lock = threading.Lock()
+
+def _conn_kwargs():
+    return dict(
+        host=os.environ['VAULTTUBE_DBHOST'],
+        user=os.environ['VAULTTUBE_DBUSER'],
+        password=os.environ['VAULTTUBE_DBPASS'],
+        database=os.environ['VAULTTUBE_DBNAME'],
+        autocommit=True,
+        port=int(os.environ['VAULTTUBE_DBPORT']),
+    )
+
 def get_connection(logger):
+    """Hand out a pooled connection (close() returns it to the pool). Falls
+    back to a one-off direct connection if the pool is exhausted, so bursts
+    degrade instead of failing."""
+    global _pool
     try:
-        con = mariadb.connect(host=os.environ['VAULTTUBE_DBHOST'],user=os.environ['VAULTTUBE_DBUSER'],password=os.environ['VAULTTUBE_DBPASS'],database=os.environ['VAULTTUBE_DBNAME'],autocommit=True,port=int(os.environ['VAULTTUBE_DBPORT']))
-        return con
+        if _pool is None:
+            with _pool_lock:
+                if _pool is None:
+                    _pool = mariadb.ConnectionPool(
+                        pool_name='vaulttube',
+                        pool_size=int(os.environ.get('VAULTTUBE_DBPOOL', '8')),
+                        pool_validation_interval=500,
+                        **_conn_kwargs())
+        try:
+            return _pool.get_connection()
+        except mariadb.PoolError:
+            return mariadb.connect(**_conn_kwargs())
     except Exception as e:
         logger.error("Unable to get connection: %s"%e)
 
@@ -243,14 +293,16 @@ def check_db_video_length(id,logger):
         check = get_connection(logger)
         cur = check.cursor()
         cur.execute("Select length FROM videos where id = %s",(id,))
-        data = cur.fetchone()[0]
-        if(not data == "0"):
+        row = cur.fetchone()
+        if(row and not row[0] == "0"):
             test = True
         cur.close()
         check.close()
         return test
     except Exception as e:
+        # Fail closed ("length is known") so errors don't trigger cv2 work
         logger.error("Error during check_db_video_length: %s"%e)
+        return True
 
 def update_length(id,length,logger):
     try:
@@ -301,7 +353,9 @@ def check_pl2vid_info(pl,vid,logger):
         check.close()
         return test
     except Exception as e:
+        # Fail closed so a DB hiccup doesn't trigger duplicate-insert attempts
         logger.error("Error during check_pl2vid_info: %s"%e)
+        return True
 
 def insert_pl2vid_info(pl,vid,logger):
     con = None

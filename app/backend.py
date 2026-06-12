@@ -1,38 +1,66 @@
 import glob,time,os,requests,datetime,json,cv2,logging
 from flask import current_app
-from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted
+from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted,get_video_index
 
 def backend_thread(logger,app):
     logger.info("*Starting Backend")
     while 1:
         with app.app_context():
-            logger.info("Scanning Vault")
-            for filename in glob.iglob(os.environ['VAULTTUBE_VAULTDIR']+'/**/*', recursive=True):
-                if(os.path.isfile(os.path.abspath(filename))):
-                    if(not ".mp4.part" in filename):
-                        logger.debug("Path is file: %s"%filename)
-                        get_video(os.path.abspath(filename),logger)
-                        #time.sleep(5)
-                else:
-                    process_channel(filename,logger)
-                    #time.sleep(5)
-            time.sleep(5000)
+            scan_vault(logger)
+        time.sleep(5000)
+
+def scan_vault(logger):
+    """Walk the vault and reconcile it with the DB. The dedupe index is
+    fetched once up front (two queries) instead of two queries per file."""
+    started = time.time()
+    index = get_video_index(logger)
+    if index is None:
+        logger.error("Vault scan skipped: could not load video index")
+        return
+    lengths, ignored = index
+    files = 0
+    for filename in glob.iglob(os.environ['VAULTTUBE_VAULTDIR']+'/**/*', recursive=True):
+        fpath = os.path.abspath(filename)
+        if(os.path.isfile(fpath)):
+            if(".mp4.part" in filename):
+                continue
+            files += 1
+            id = os.path.basename(fpath).split('.')[0]
+            if id in ignored:
+                continue
+            if id in lengths:
+                if lengths[id] == "0":
+                    _update_video_length(id, fpath, logger)
+                    lengths[id] = "updated"
+            else:
+                logger.info("Processing New Video: %s"%fpath)
+                process_new_video(id,fpath,logger)
+                lengths[id] = "added"
+        else:
+            process_channel(filename,logger)
+    logger.info("Vault scan complete: %d files in %.1fs" % (files, time.time() - started))
+
+def _update_video_length(id, fpath, logger):
+    try:
+        logger.info("Updating Length for id: %s"%fpath)
+        data = cv2.VideoCapture(fpath)
+        frames = data.get(cv2.CAP_PROP_FRAME_COUNT)
+        fps = data.get(cv2.CAP_PROP_FPS)
+        seconds = round(frames / fps)
+        data.release()
+        update_length(id,datetime.timedelta(seconds=seconds),logger)
+    except Exception as e:
+        logger.error("Error updating video length for %s: %s"%(id,e))
 
 def get_video(fpath,logger):
+    """Reconcile a single just-downloaded file with the DB (provider path)."""
     try:
         fname = os.path.basename(fpath)
         id = fname.split('.')[0]
         if(check_db_video(id,logger)):
             #In database
             if(not check_db_video_length(id,logger)):
-                logger.info("Updating Length for id: %s"%fpath)
-                data = cv2.VideoCapture(fpath)
-                frames = data.get(cv2.CAP_PROP_FRAME_COUNT)
-                fps = data.get(cv2.CAP_PROP_FPS)
-                # calculate duration of the video
-                seconds = round(frames / fps)
-                data.release()
-                update_length(id,datetime.timedelta(seconds=seconds),logger)
+                _update_video_length(id, fpath, logger)
         else:
             #Missing from database
             logger.info("Processing New Video: %s"%fpath)
