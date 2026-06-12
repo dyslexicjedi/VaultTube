@@ -161,33 +161,51 @@ def deleted_check_thread(logger,app):
     logger.info("*Starting Deleted Check")
     while 1:
         with app.app_context():
-            logger.info("Getting Video List for deletion check")
-            videos = get_oldest_video_check(logger)
-            for video in videos:
-                r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+video[0]+'&key='+os.environ['VAULTTUBE_YTKEY'], timeout=30)
-                retj = r.json()
-                r.close()
-                if "error" in retj:
-                    logger.info("Found error: %s",retj['error'])
-                    #Error handling
-                    pass
-                else:
-                    if(retj['pageInfo']['totalResults'] > 0):
-                        #Video is still there
-                        update_video_deleted(video[0],0,logger)
-                        logger.info("Updating video as not deleted. Video ID: %s" %video[0])
-                        pass
-                    else:
-                        #Video has been deleted
-                        update_video_deleted(video[0],1,logger)
-                        logger.info("Updating video as deleted. Video ID: %s" %video[0])
-                        pass
+            run_deleted_check(logger)
         time.sleep(86400)
 
-def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source):
-    """
-    Save metadata about uploaded video to database. 
-    """
+def run_deleted_check(logger, rows=None, batch_size=50):
+    """Mark YouTube videos that were removed at the source (feeds the
+    isDeleted flag behind browse's "Gone from source" view). Batched 50 IDs
+    per videos.list call: a 1,000-video pass costs 20 quota units, not 1,000.
+    Only status *changes* are logged, plus one summary line per pass."""
+    if rows is None:
+        rows = get_oldest_video_check(logger)
+    if not rows:
+        return
+    checked = newly_gone = restored = 0
+    for i in range(0, len(rows), batch_size):
+        chunk = rows[i:i+batch_size]
+        try:
+            r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=id&maxResults=50&id='
+                             + ','.join(vid for vid, _ in chunk)
+                             + '&key=' + os.environ['VAULTTUBE_YTKEY'], timeout=30)
+            retj = r.json()
+            r.close()
+        except Exception as e:
+            logger.error("Deleted check batch failed: %s" % e)
+            return
+        if 'error' in retj:
+            logger.error("Deleted check API error: %s" % retj['error'].get('message', retj['error']))
+            return
+        alive = {item['id'] for item in retj.get('items', [])}
+        for vid, was_deleted in chunk:
+            is_deleted = 0 if vid in alive else 1
+            if is_deleted != (was_deleted or 0):
+                if is_deleted:
+                    newly_gone += 1
+                    logger.info("Video gone from YouTube: %s" % vid)
+                else:
+                    restored += 1
+                    logger.info("Video back on YouTube: %s" % vid)
+            update_video_deleted(vid, is_deleted, logger)
+            checked += 1
+    logger.info("Deleted check: %d checked, %d newly gone, %d restored" % (checked, newly_gone, restored))
+
+def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source,webpage_url=None):
+    """Save a non-YouTube video (Reddit download or manual upload) to the DB.
+    The json column gets a plain metadata dict; webpage_url, when known,
+    powers the player's copy-source-link button."""
     try:
         # For length, try to read video length as in get_video
         try:
@@ -216,17 +234,17 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         except Exception:
             current_app.logger.error("Unable to Extract Frame")
 
-        t = json.loads(open('template','r').read())
-        t['items'][0]['snippet']['title'] = title
-        t['items'][0]['snippet']['channelId'] = channel_id
-        t['items'][0]['snippet']['channelTitle'] = ""
-        t['items'][0]['snippet']['publishedAt'] = published_at.isoformat()
-        t['items'][0]['id'] = video_id
-        
         # Insert video record
         ret = {}
         ret["Youtuber"] = ""
-        ret["Json"] = t
+        ret["Json"] = {
+            'id': video_id,
+            'title': title,
+            'channelId': channel_id,
+            'publishedAt': published_at.isoformat(),
+            'source': source,
+            'webpage_url': webpage_url,
+        }
         ret["Filepath"] = db_path
         ret['PublishedAt'] = published_at.isoformat()
         ret['channelId'] = channel_id

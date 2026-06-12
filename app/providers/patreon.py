@@ -237,12 +237,14 @@ def patreon_screenshot(videoid,channelid,logger):
 
 def patreon_db_info(videoid,channelid,PublishedAt,title,logger):
     try:
-        t = json.loads(open('template','r').read())
-        t['items'][0]['snippet']['title'] = title
-        t['items'][0]['snippet']['channelId'] = channelid
-        t['items'][0]['snippet']['channelTitle'] = ""
-        t['items'][0]['snippet']['publishedAt'] = PublishedAt.strftime('%Y-%m-%d %H:%M:%S.%f')
-        t['items'][0]['id'] = videoid
+        t = {
+            'id': videoid,
+            'title': title,
+            'channelId': channelid,
+            'publishedAt': PublishedAt.strftime('%Y-%m-%d %H:%M:%S.%f'),
+            'source': 'patreon',
+            'webpage_url': 'https://www.patreon.com/posts/%s' % videoid,
+        }
         source = "patreon"
 
         con = get_connection(logger)

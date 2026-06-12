@@ -136,9 +136,9 @@ def start_background_threads():
     sc.start()
     dl = threading.Thread(target=start_dl_queue,args=(logger,app),daemon=True)
     dl.start()
-    #Removed - Too Noisy
-    # dc = threading.Thread(target=deleted_check_thread,args=(logger,app))
-    # dc.start()
+    #Re-enabled: lookups are batched 50/call now and only changes are logged
+    dc = threading.Thread(target=deleted_check_thread,args=(logger,app),daemon=True)
+    dc.start()
 
 def startup():
     #Check Database

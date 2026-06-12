@@ -472,6 +472,84 @@ def test_connection_pool_reuse(client):
         con.close()   # returns to the pool; next call must hand out a working one
 
 
+def test_find_next_previous_series(client):
+    """Series detection keys on channelId + title column, so it works for
+    Patreon/Reddit rows too (their legacy youtuber column is empty)."""
+    con = _db_connect()
+    cur = con.cursor()
+    # youtuber deliberately empty, like Patreon rows
+    for n in (1, 2, 3):
+        cur.execute(
+            "Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,title) "
+            "values(%s,'','UpNextCh1','{}','/videos/x',%s,0,0,%s);",
+            ('FnpVid%d' % n, '2024-01-0%d 10:00:00' % n, 'My Series Episode %d' % n))
+    con.close()
+
+    response = client.get("/api/find_next_previous/FnpVid2")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['NextID'] == 'FnpVid3'
+    assert data['NextTitle'] == 'My Series Episode 3'
+    assert data['PreviousID'] == 'FnpVid1'
+    assert data['PreviousTitle'] == 'My Series Episode 1'
+
+    # Unknown video: empty dict, not an error
+    response = client.get("/api/find_next_previous/NoSuchVidXyz")
+    assert json.loads(response.get_data(as_text=True)) == {}
+
+
+def test_patreon_db_info_json(client):
+    """Non-YouTube rows store honest metadata, not a fake YouTube API blob."""
+    import logging, datetime
+    from providers.patreon import patreon_db_info
+
+    assert patreon_db_info('PatVid1', '11752268', datetime.datetime(2024, 1, 1), 'Pat Title', logging.getLogger('test')) is True
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Select json, title, source from videos where id = 'PatVid1'")
+    jdata, title, source = cur.fetchone()
+    con.close()
+    j = json.loads(jdata)
+    assert j['webpage_url'] == 'https://www.patreon.com/posts/PatVid1'
+    assert j['title'] == 'Pat Title'
+    assert 'items' not in j          # the fake YouTube shape is gone
+    assert title == 'Pat Title' and source == 'patreon'
+
+
+def test_run_deleted_check_batched(client, monkeypatch):
+    """One API call per 50 IDs; videos absent from the response get
+    isDeleted=1, present ones get cleared. Rows are injected so the fake
+    API response can never touch real data."""
+    import logging, requests, backend
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted,source) values('DelVid1','X','GetVidCh1','{}','/videos/1','2024-01-01 10:00:00',0,0,0,'youtube');")
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted,source) values('DelVid2','X','GetVidCh1','{}','/videos/2','2024-01-02 10:00:00',0,0,1,'youtube');")
+    con.close()
+
+    calls = []
+    def fake_get(url, **kw):
+        calls.append(url)
+        # Only DelVid2 still exists at the source
+        return _FakeResp({'items': [{'id': 'DelVid2'}]})
+    monkeypatch.setattr(requests, 'get', fake_get)
+
+    with client.application.app_context():
+        backend.run_deleted_check(logging.getLogger('test'), rows=[('DelVid1', 0), ('DelVid2', 1)])
+
+    assert len(calls) == 1                       # both IDs in one batched call
+    assert 'DelVid1' in calls[0] and 'DelVid2' in calls[0]
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Select id, isDeleted from videos where id in ('DelVid1','DelVid2') order by id")
+    result = dict(cur.fetchall())
+    con.close()
+    assert result['DelVid1'] == 1   # vanished from the source
+    assert result['DelVid2'] == 0   # back/still up: flag cleared
+
+
 def test_partial_download_detection():
     from backend import is_partial_download
     # yt-dlp working files in all their shapes

@@ -13,6 +13,7 @@ _TEST_VIDEO_IDS   = [
     'TombVid1', 'TombVid2',
     'RedVid1',
     'VtScanVid1', 'VtScanVid2', 'VtScanVid3', 'VtPlVid1',
+    'FnpVid1', 'FnpVid2', 'FnpVid3', 'PatVid1',
 ]
 _TEST_CHANNEL_IDS = [
     'Test123', 'SubTest123',
