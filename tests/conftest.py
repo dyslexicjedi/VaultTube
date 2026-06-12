@@ -11,10 +11,12 @@ _TEST_VIDEO_IDS   = [
     'UpNext1', 'UpNext2', 'UpNext3',
     'DelVid1', 'DelVid2',
     'TombVid1', 'TombVid2',
+    'RedVid1',
 ]
 _TEST_CHANNEL_IDS = [
     'Test123', 'SubTest123',
     'GetVidCh1', 'TestCh1', 'UpNextCh1',
+    'UCVtTestChannel1', '987654321099', 'VtTestRedditUser',
 ]
 # Every URL a test may enqueue — queue rows persist to the real DB, so any
 # test that hits an enqueue path MUST list its URL here or clean up itself.

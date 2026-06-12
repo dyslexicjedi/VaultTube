@@ -373,6 +373,34 @@ def test_up_next_unknown_video(client):
     assert data == []
 
 
+def test_channel_source_url(client):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('UCVtTestChannel1','YT Test','{}',0);")
+    cur.execute("""Insert into channels(channelid,channelname,json,subscribed) values('987654321099','Patreon Test','{"data":{"attributes":{"name":"Patreon Test","url":"https://www.patreon.com/vttest"}}}',0);""")
+    cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('VtTestRedditUser','VtTestRedditUser','{}',0);")
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('RedVid1','VtTestRedditUser','VtTestRedditUser','{}','/videos/1','2023-03-01 12:00:00',0,0);")
+    cur.execute("Update videos set source='reddit' where id='RedVid1';")
+    con.close()
+
+    cases = {
+        'UCVtTestChannel1': 'https://www.youtube.com/channel/UCVtTestChannel1',
+        '987654321099': 'https://www.patreon.com/vttest',
+        'VtTestRedditUser': 'https://www.reddit.com/user/VtTestRedditUser',
+    }
+    for channelid, expected in cases.items():
+        response = client.get("/api/channel/" + channelid)
+        data = json.loads(response.get_data(as_text=True))
+        assert data['source_url'] == expected, channelid
+
+
+def test_channel_source_url_unknown(client):
+    response = client.get("/api/channel/NoSuchChannelXyz")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['source_url'] is None
+    assert data['channelname'] is None
+
+
 def test_insert_not_found_goes_to_ignorevid(client):
     import logging
     from database import insert_not_found

@@ -288,6 +288,40 @@ def channels(page):
         current_app.logger.error("API Channel Failed: %s"%e)
 
 
+@api_bp.route('/channel/<string:channelid>')
+def api_channel(channelid):
+    """Single channel row plus a derived link to the creator's page at the
+    source (YouTube by UC-prefixed ID, Patreon from the stored campaign json,
+    Reddit by author name)."""
+    try:
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select channelname, subscribed, json from channels where channelid = %s;", (channelid,))
+        row = cur.fetchone()
+        name, subscribed, jdata = row if row else (None, None, None)
+
+        source_url = None
+        if channelid.startswith('UC'):
+            source_url = 'https://www.youtube.com/channel/' + channelid
+        elif channelid.isdigit():
+            try:
+                url = json.loads(jdata)['data']['attributes']['url']
+                if url:
+                    source_url = url if url.startswith('http') else 'https://www.patreon.com' + url
+            except Exception:
+                pass
+        elif channelid != 'unknown':
+            cur.execute("select source from videos where channelId = %s order by AddedAt desc limit 1;", (channelid,))
+            vrow = cur.fetchone()
+            if vrow and vrow[0] == 'reddit':
+                source_url = 'https://www.reddit.com/user/' + channelid
+        cur.close()
+        con.close()
+        return json.dumps({'channelid': channelid, 'channelname': name, 'subscribed': subscribed, 'source_url': source_url}, default=str)
+    except Exception as e:
+        current_app.logger.error("API Channel Info Failed: %s" % e)
+        return api_error(str(e), 500)
+
 @api_bp.route('/creator/<string:creator>/<string:page>')
 def api_creator(creator,page):
     try:
