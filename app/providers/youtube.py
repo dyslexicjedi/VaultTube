@@ -14,9 +14,7 @@ from queue_utils import enqueue
 
 def dl_progress_hook(d):
     try:
-        video_id = d.get('info_dict', {}).get('id', None)
-        if not video_id:
-            video_id = globals().get('videoID', '')
+        video_id = d.get('info_dict', {}).get('id', '') or ''
         if d["status"] == "downloading":
             update_status(video_id, {
                 'progress': d['_percent_str'],

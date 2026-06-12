@@ -472,6 +472,28 @@ def test_connection_pool_reuse(client):
         con.close()   # returns to the pool; next call must hand out a working one
 
 
+def test_partial_download_detection():
+    from backend import is_partial_download
+    # yt-dlp working files in all their shapes
+    assert is_partial_download('abc12345678.mp4.part')
+    assert is_partial_download('abc12345678.mp4.part-Frag42')
+    assert is_partial_download('abc12345678.mp4.ytdl')
+    assert is_partial_download('abc12345678.f137.mp4')   # pre-merge video stream
+    assert is_partial_download('abc12345678.f140.m4a')   # pre-merge audio stream
+    # finished files
+    assert not is_partial_download('abc12345678.mp4')
+    assert not is_partial_download('abc12345678.webm')
+    assert not is_partial_download('partytime.mp4')
+
+
+def test_looks_like_youtube():
+    from backend import looks_like_youtube
+    assert looks_like_youtube('/videos/UCabc123/dQw4w9WgXcQ.mp4')
+    assert not looks_like_youtube('/videos/11752268/152769940.mp4')        # patreon
+    assert not looks_like_youtube('/videos/SomeRedditUser/abc123.mp4')     # reddit
+    assert not looks_like_youtube('/videos/UCabc123/152769940.mp4')        # wrong id length
+
+
 def test_error_type_classification():
     from downloader import get_error_type
     # Throttling responses must be transient (retried), not permanent failures

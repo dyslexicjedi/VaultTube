@@ -7,6 +7,7 @@ from flask import current_app
 import datetime
 import json
 import subprocess
+import tempfile
 
 from providers.base import set_status, update_status, del_status
 from database import check_db_video, check_db_channel, save_channel, get_connection
@@ -210,12 +211,15 @@ def _download_inline_video(url, logger):
         del_status(post_id)
 
 def patreon_screenshot(videoid,channelid,logger):
+    output_img = os.path.join(tempfile.gettempdir(), "%s.jpg" % videoid)
     try:
-        #print(t)
         input_video = os.environ['VAULTTUBE_VAULTDIR']+"/"+channelid+"/"+str(videoid)+".mp4"
-        output_img = videoid+".jpg"
-        subprocess.call(['ffmpeg', '-i', input_video, '-ss', '00:00:01.000', '-vframes', '1', output_img])
-        img = open(videoid+".jpg",'rb').read()
+        rc = subprocess.call(['ffmpeg', '-y', '-i', input_video, '-ss', '00:00:01.000', '-vframes', '1', output_img],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if rc != 0 or not os.path.exists(output_img):
+            logger.error("patreon_screenshot: ffmpeg failed for %s (exit %s)" % (videoid, rc))
+            return False
+        img = open(output_img,'rb').read()
         con = get_connection(logger)
         cur = con.cursor()
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
@@ -223,10 +227,13 @@ def patreon_screenshot(videoid,channelid,logger):
         con.commit()
         con.close()
         logger.debug("Screenshot saved")
-        os.remove(videoid+".jpg")
         return True
     except Exception as e:
+        logger.error("patreon_screenshot failed for %s: %s" % (videoid, e))
         return False
+    finally:
+        if os.path.exists(output_img):
+            os.remove(output_img)
 
 def patreon_db_info(videoid,channelid,PublishedAt,title,logger):
     try:
@@ -253,13 +260,12 @@ def patreon_db_info(videoid,channelid,PublishedAt,title,logger):
         logger.debug("Metadata saved")
         return True
     except Exception as e:
+        logger.error("patreon_db_info failed for %s: %s" % (videoid, e))
         return False
 
 def dl_progress_hook(d):
     try:
-        video_id = d.get('info_dict', {}).get('id', None)
-        if not video_id:
-            video_id = globals().get('videoID', '')
+        video_id = d.get('info_dict', {}).get('id', '') or ''
         if d["status"] == "downloading":
             update_status(video_id, {
                 'progress': d['_percent_str'],

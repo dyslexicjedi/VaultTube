@@ -1,6 +1,20 @@
-import glob,time,os,requests,datetime,json,cv2,logging
+import glob,time,os,re,requests,datetime,json,cv2,logging
 from flask import current_app
 from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted,get_video_index
+
+# yt-dlp working files: *.part, *.part-FragN, *.ytdl, and pre-merge *.fNNN.* streams
+_PARTIAL_RE = re.compile(r'\.part(-Frag\d+)?$|\.ytdl$|\.f\d+\.')
+
+def is_partial_download(fname):
+    return bool(_PARTIAL_RE.search(fname))
+
+def looks_like_youtube(fpath):
+    """Only files shaped like <UC-channel-dir>/<11-char-id>.<ext> may be sent
+    to the YouTube API; anything else (Patreon/Reddit strays, files caught
+    mid-pipeline) would come back not-found and poison IgnoreVid."""
+    vid = os.path.basename(fpath).split('.')[0]
+    parent = os.path.basename(os.path.dirname(fpath))
+    return parent.startswith('UC') and len(vid) == 11
 
 def backend_thread(logger,app):
     logger.info("*Starting Backend")
@@ -22,7 +36,7 @@ def scan_vault(logger):
     for filename in glob.iglob(os.environ['VAULTTUBE_VAULTDIR']+'/**/*', recursive=True):
         fpath = os.path.abspath(filename)
         if(os.path.isfile(fpath)):
-            if(".mp4.part" in filename):
+            if is_partial_download(os.path.basename(fpath)):
                 continue
             files += 1
             id = os.path.basename(fpath).split('.')[0]
@@ -32,10 +46,14 @@ def scan_vault(logger):
                 if lengths[id] == "0":
                     _update_video_length(id, fpath, logger)
                     lengths[id] = "updated"
-            else:
+            elif looks_like_youtube(fpath):
                 logger.info("Processing New Video: %s"%fpath)
                 process_new_video(id,fpath,logger)
                 lengths[id] = "added"
+            else:
+                # Likely a non-YouTube download caught before its DB row was
+                # written; the provider/upload paths own importing these
+                logger.debug("Skipping non-YouTube file with no DB row: %s"%fpath)
         else:
             process_channel(filename,logger)
     logger.info("Vault scan complete: %d files in %.1fs" % (files, time.time() - started))
@@ -71,7 +89,7 @@ def get_video(fpath,logger):
 def process_new_video(id,fpath,logger):
     ret = {}
     try:
-        r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'])
+        r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'], timeout=30)
         retj = r.json()
         r.close()
         if "error" in retj:
@@ -103,7 +121,7 @@ def process_new_video(id,fpath,logger):
             else:
                 logger.error("Unable to find Thumbnail")
             if('ImageURL' in ret):
-                data = requests.get(ret['ImageURL'])
+                data = requests.get(ret['ImageURL'], timeout=30)
                 img = data.content
             else:
                 img = None
@@ -130,14 +148,13 @@ def process_channel(fname,logger):
             pass
         else:
             logger.info("Processing Channel: "+id)
-            r = requests.get('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY']).json()
+            r = requests.get('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'], timeout=30).json()
             if(r['pageInfo']['totalResults'] > 0):
                 save_channel(r['items'][0]['id'],r['items'][0]['snippet']['title'],r,logger)
             else:
                 logger.info("Unable to find Channel: %s"%id)
     except Exception as e:
-        logger.error("Error in Channel: %s"%e)
-        logger.error(json.dumps(r, indent=4))
+        logger.error("Error in Channel %s: %s"%(id,e))
 
 
 def deleted_check_thread(logger,app):
@@ -147,7 +164,7 @@ def deleted_check_thread(logger,app):
             logger.info("Getting Video List for deletion check")
             videos = get_oldest_video_check(logger)
             for video in videos:
-                r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+video[0]+'&key='+os.environ['VAULTTUBE_YTKEY'])
+                r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+video[0]+'&key='+os.environ['VAULTTUBE_YTKEY'], timeout=30)
                 retj = r.json()
                 r.close()
                 if "error" in retj:

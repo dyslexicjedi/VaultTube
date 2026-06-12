@@ -36,7 +36,11 @@ def handle_failure(qo, q, error_type, error_msg, logger):
         qo.attempts += 1
         update_queue_status(qo.row_id, 'pending', logger, error=error_msg, attempts=qo.attempts)
         logger.info("Retrying %s in %ds (attempt %d/%d)" % (qo.url, RETRY_DELAY_SECONDS, qo.attempts + 1, MAX_ATTEMPTS))
-        threading.Timer(RETRY_DELAY_SECONDS, q.put, args=(qo,)).start()
+        timer = threading.Timer(RETRY_DELAY_SECONDS, q.put, args=(qo,))
+        # Daemon, or a pending retry blocks interpreter shutdown (the queue row
+        # is already back to 'pending', so the retry survives a restart anyway)
+        timer.daemon = True
+        timer.start()
     else:
         update_queue_status(qo.row_id, 'failed', logger, error=error_msg, attempts=qo.attempts + 1)
         insert_download_error(qo.url, error_type, error_msg, logger)
