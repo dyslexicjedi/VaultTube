@@ -1,9 +1,11 @@
 name: Build Docker
 
-on: 
+on:
   push:
     branches:
       - 'dev'
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
 
 
