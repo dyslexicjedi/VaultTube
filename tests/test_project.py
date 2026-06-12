@@ -338,6 +338,34 @@ def test_browse_page(client):
     assert b'browse-grid' in response.data
 
 
+def test_up_next(client):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('UpNextCh1','UpNextCh1','{}',0);")
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext1','UpNextCh1','UpNextCh1','{}','/videos/1','2023-01-02 12:00:00',0,0);")
+    # Published after the current video and unwatched -> must be first in the list
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext2','UpNextCh1','UpNextCh1','{}','/videos/2','2023-01-03 12:00:00',0,0);")
+    # Watched -> must never appear
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext3','UpNextCh1','UpNextCh1','{}','/videos/3','2023-01-01 12:00:00',1,0);")
+    con.close()
+
+    response = client.get("/api/up_next/UpNext1?limit=5")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert data[0]['id'] == 'UpNext2'
+    ids = [v['id'] for v in data]
+    assert 'UpNext1' not in ids   # never suggest the current video
+    assert 'UpNext3' not in ids   # never suggest watched videos
+    assert len(data) <= 5
+
+
+def test_up_next_unknown_video(client):
+    response = client.get("/api/up_next/NonexistentVid123")
+    data = json.loads(response.get_data(as_text=True))
+    assert data == []
+
+
 def test_playlists_page(client):
     response = client.get("/api/playlists/0")
     data = json.loads(response.get_data(as_text=True))

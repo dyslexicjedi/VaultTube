@@ -622,6 +622,232 @@ a {
   font-size: 14px;
 }
 
+/* ---------- Player page ---------- */
+.vt-player-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 28px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .vt-player-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.vt-player-frame {
+  position: relative;
+  border-radius: var(--vt-radius);
+  overflow: hidden;
+  background: #000;
+}
+.vt-player-frame.vertical {
+  max-width: 420px;
+  margin: 0 auto;
+}
+.vt-player-frame img#imageplayer {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+.vt-player-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  margin: 16px 0 4px;
+}
+.vt-player-sub {
+  font-size: 13.5px;
+  color: var(--vt-text-dim);
+  margin-bottom: 14px;
+}
+.vt-player-sub a {
+  color: var(--vt-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.vt-player-sub a:hover {
+  color: var(--vt-accent);
+}
+.vt-player-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.vt-player-row .vt-btn-ghost.danger {
+  color: var(--vt-danger);
+}
+.vt-player-row .vt-btn-ghost.on {
+  border-color: var(--vt-accent);
+  color: var(--vt-accent);
+  background: var(--vt-accent-soft);
+}
+
+/* Description with show more/less */
+.vt-desc {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--vt-text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  max-height: 7.8em;
+}
+.vt-desc.expanded {
+  max-height: none;
+}
+.vt-desc-toggle {
+  background: none;
+  border: none;
+  color: var(--vt-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.vt-desc-toggle:hover {
+  color: var(--vt-accent);
+}
+
+/* Up next sidebar */
+.vt-upnext-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.vt-upnext-header h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+.vt-autoplay {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--vt-text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.vt-autoplay input {
+  accent-color: var(--vt-accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+.vt-upnext-item {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 10px;
+  padding: 6px;
+  margin: 0 -6px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.vt-upnext-item:hover {
+  background: var(--vt-surface);
+}
+.vt-upnext-item .vt-thumb {
+  border-radius: 8px;
+}
+.vt-upnext-item:hover .vt-thumb {
+  transform: none;
+  box-shadow: none;
+}
+.vt-upnext-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--vt-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.vt-upnext-meta {
+  font-size: 11.5px;
+  color: var(--vt-text-dim);
+  margin-top: 3px;
+}
+
+/* Autoplay countdown overlay */
+.vt-countdown {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: rgba(11, 13, 16, 0.88);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  padding: 20px;
+}
+.vt-countdown[hidden] {
+  display: none;
+}
+.vt-countdown-kicker {
+  font-size: 12.5px;
+  color: var(--vt-text-dim);
+}
+.vt-countdown-title {
+  font-size: 17px;
+  font-weight: 700;
+  max-width: 480px;
+}
+.vt-countdown-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* ---------- Modal ---------- */
+.vt-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.vt-modal-backdrop[hidden] {
+  display: none;
+}
+.vt-modal {
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-line-strong);
+  border-radius: 14px;
+  padding: 22px;
+  max-width: 400px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.vt-modal h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+.vt-modal-text {
+  font-size: 13px;
+  color: var(--vt-text-dim);
+  line-height: 1.5;
+  margin: 0 0 18px;
+}
+.vt-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ---------- Mobile: sidebar becomes bottom tab bar ---------- */
 @media (max-width: 768px) {
   .vt-shell {

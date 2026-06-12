@@ -3,116 +3,308 @@
 <link href="/static/css/video-js.css" rel="stylesheet" />
 <script src="/static/js/video.min.js"></script>
 
-<div id="playerdiv" >
-    <video id="player" class="video-js vjs-default-skin vjs-big-play-centered videojs-overlay-player" data-setup='{}' controls playsinline preload="auto" width="auto" height="auto"></video>
-    <img id="imageplayer" style="display:none; max-width:100%; height:auto;">
+<div class="vt-player-layout">
+    <div class="vt-player-main">
+        <div class="vt-player-frame" id="playerdiv">
+            <video id="player" class="video-js vjs-default-skin vjs-big-play-centered" data-setup='{}' controls playsinline preload="auto" width="auto" height="auto"></video>
+            <img id="imageplayer" hidden>
+            <div class="vt-countdown" id="countdown" hidden>
+                <div class="vt-countdown-kicker">Up next in <span id="countdown-n">5</span>…</div>
+                <div class="vt-countdown-title" id="countdown-title"></div>
+                <div class="vt-countdown-actions">
+                    <button type="button" class="vt-btn" id="countdown-play">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                        Play now
+                    </button>
+                    <button type="button" class="vt-btn-ghost" id="countdown-cancel">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <h1 class="vt-player-title" id="title"></h1>
+        <div class="vt-player-sub" id="subline"></div>
+
+        <div class="vt-player-row">
+            <button type="button" class="vt-btn-ghost" id="btn-watched">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <span id="btn-watched-label">Mark watched</span>
+            </button>
+            <button type="button" class="vt-btn-ghost" id="btn-prev" hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Previous
+            </button>
+            <button type="button" class="vt-btn-ghost" id="btn-next" hidden>
+                Next
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <button type="button" class="vt-btn-ghost" id="btn-copy" hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <span id="btn-copy-label">Copy source link</span>
+            </button>
+            <button type="button" class="vt-btn-ghost danger" id="btn-delete">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                Delete
+            </button>
+        </div>
+
+        <div class="vt-desc" id="desc"></div>
+        <button type="button" class="vt-desc-toggle" id="desc-toggle" hidden>Show more</button>
+    </div>
+
+    <aside>
+        <div class="vt-upnext-header">
+            <h2>Up next</h2>
+            <label class="vt-autoplay"><input type="checkbox" id="autoplay-toggle"> Autoplay</label>
+        </div>
+        <div id="upnext-list"></div>
+    </aside>
 </div>
-<script src="/static/js/scripts.js"></script>
-<div class="row">
-    <div class="toprow" class="pl-3 pt-2 w-100"><img id="watchstatus" class="pe-1"><img id="delete" src="/static/imgs/slash.svg" class="pe-1" onclick='deletevid();'><h3 id="title"></h3></div>
-    <div><h5 id="creator"></h5></div>
-    <div><p id="desc"></p></div>
-    <div><p id="nextvideo"></p></div>
-    <div><p id="prevvideo"></p></div>
+
+<div class="vt-modal-backdrop" id="delete-modal" hidden>
+    <div class="vt-modal" role="dialog" aria-labelledby="delete-modal-title">
+        <h3 id="delete-modal-title">Delete this video?</h3>
+        <p class="vt-modal-text">The file is removed from the vault and the database, and the ID is added to the ignore list so it won't be downloaded again.</p>
+        <div class="vt-modal-actions">
+            <button type="button" class="vt-btn-ghost" id="delete-cancel">Cancel</button>
+            <button type="button" class="vt-btn vt-btn-danger" id="delete-confirm">Delete</button>
+        </div>
+    </div>
 </div>
+
+<script src="/static/js/cards.js"></script>
 <script>
-    const querystring = window.location.search;
-    const urlparams = new URLSearchParams(querystring);
-    const id = urlparams.get('id');
-    const video = document.querySelector("video");
-    const imageExts = ['jpg','jpeg','png','webp','gif'];
+    const id = new URLSearchParams(window.location.search).get('id');
+    const video = document.querySelector('video');
+    const imageExts = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
     var tspoll;
     var vPlayer;
-    watch_status(id);
-    $.getJSON("/api/video/"+id+".mp4",function(data){
-        var jobj = jQuery.parseJSON(data[0]["json"]);
-        var filepath = data[0]["filepath"];
+    var watched = false;
+    var upNext = [];
+    var countdownTimer = null;
+
+    function getJSON(url) {
+        return fetch(url).then(function (r) { return r.json(); });
+    }
+    function $id(x) { return document.getElementById(x); }
+
+    // --- Watched toggle ---
+    function setWatchedUI(w) {
+        watched = w;
+        $id('btn-watched').classList.toggle('on', w);
+        $id('btn-watched-label').textContent = w ? 'Watched' : 'Mark watched';
+    }
+    $id('btn-watched').addEventListener('click', function () {
+        fetch('/api/' + (watched ? 'unwatched' : 'watched') + '/' + encodeURIComponent(id))
+            .then(function () { setWatchedUI(!watched); });
+    });
+
+    // --- Video metadata + playback ---
+    getJSON('/api/video/' + encodeURIComponent(id) + '.mp4').then(function (data) {
+        var v = data[0];
+        var jobj = null;
+        try { jobj = JSON.parse(v.json); } catch (e) { /* non-JSON json column (e.g. "404") */ }
+        var filepath = v.filepath;
         var ext = filepath.split('.').pop().toLowerCase();
         var isImage = imageExts.includes(ext);
 
-        //Adding Info to Player
-        $("#title").text(data[0]['title']);
-        $("#desc").html(jobj['items'][0]["snippet"]['description'].replace('\n','<br>').replace('\r','<br>'));
-        $("#creator").html("<a href='/creator.html?creator="+data[0]['channelId']+"'>"+data[0]['youtuber']+"</a>");
+        document.title = v.title + ' — VaultTube';
+        $id('title').textContent = v.title;
+        var sub = [];
+        if (v.youtuber) sub.push('<a href="/creator.html?creator=' + encodeURIComponent(v.channelId) + '">' + VT.esc(v.youtuber) + '</a>');
+        if (v.PublishedAt) sub.push(VT.esc(VT.fmtDate(v.PublishedAt)));
+        if (v.length && v.length !== '0') sub.push(VT.esc(VT.fmtDur(v.length)));
+        $id('subline').innerHTML = sub.join(' &nbsp;·&nbsp; ');
+        setWatchedUI(String(v.watched) === '1');
 
-        if(isImage){
-            // Hide video player, show image
-            $("#player").hide();
-            $("#imageplayer").attr("src", filepath).show();
-            // Mark as watched immediately since there's nothing to play
-            $.ajax({url: "/api/watched/"+id, success: function(result){
-                watch_status(id);
-            }});
-        } else {
-            // Load as video
-            vPlayer = videojs('player',{techOrder: ["html5"],autoplay: false});
-            vPlayer.src([{type: "video/webm",src: filepath}]);
-            vPlayer.fluid(true);
-            //Set Timestamp if non-0
-            if(!data[0]['timestamp'] == 0){
-                vPlayer.currentTime(data[0]['timestamp']);
+        // Description lives in different places per source; YouTube uses the API snippet
+        var desc = '';
+        if (jobj) {
+            if (jobj.items && jobj.items[0] && jobj.items[0].snippet) desc = jobj.items[0].snippet.description || '';
+            else if (typeof jobj.description === 'string') desc = jobj.description;
+        }
+        if (desc) {
+            var descEl = $id('desc');
+            descEl.textContent = desc;
+            // Only offer the toggle when the text actually overflows the collapsed box
+            requestAnimationFrame(function () {
+                if (descEl.scrollHeight > descEl.clientHeight + 4) $id('desc-toggle').hidden = false;
+            });
+        }
+
+        // Copy source link (YouTube is reconstructable; others need a URL in the json)
+        var sourceUrl = null;
+        if (v.source === 'youtube') sourceUrl = 'https://www.youtube.com/watch?v=' + v.id;
+        else if (jobj && typeof jobj.webpage_url === 'string') sourceUrl = jobj.webpage_url;
+        if (sourceUrl) {
+            $id('btn-copy').hidden = false;
+            $id('btn-copy').addEventListener('click', function () {
+                navigator.clipboard.writeText(sourceUrl).then(function () {
+                    $id('btn-copy-label').textContent = 'Copied!';
+                    setTimeout(function () { $id('btn-copy-label').textContent = 'Copy source link'; }, 1500);
+                });
+            });
+        }
+
+        if (isImage) {
+            $id('player').hidden = true;
+            document.querySelector('#playerdiv .video-js').style.display = 'none';
+            $id('imageplayer').src = filepath;
+            $id('imageplayer').hidden = false;
+            // Nothing to play, so it counts as watched immediately
+            fetch('/api/watched/' + encodeURIComponent(id)).then(function () { setWatchedUI(true); });
+            return;
+        }
+
+        vPlayer = videojs('player', { techOrder: ['html5'], autoplay: false });
+        vPlayer.src([{ type: 'video/webm', src: filepath }]);
+        vPlayer.fluid(true);
+        if (v.timestamp && parseInt(v.timestamp, 10) !== 0) {
+            vPlayer.currentTime(parseInt(v.timestamp, 10));
+        }
+
+        // Pause: push timestamp once and stop polling
+        video.addEventListener('pause', function () {
+            clearInterval(tspoll);
+            fetch('/api/set_timestamp/' + video.currentTime + '/' + encodeURIComponent(id));
+        });
+        // Play: poll timestamp to the server every 5s
+        video.addEventListener('play', function () {
+            tspoll = window.setInterval(function () {
+                fetch('/api/set_timestamp/' + video.currentTime + '/' + encodeURIComponent(id));
+            }, 5000);
+        });
+        // Ended: mark watched, reset timestamp, maybe autoplay the next one
+        video.addEventListener('ended', function () {
+            clearInterval(tspoll);
+            fetch('/api/watched/' + encodeURIComponent(id)).then(function () { setWatchedUI(true); });
+            fetch('/api/set_timestamp/0/' + encodeURIComponent(id));
+            maybeAutoplayNext();
+        });
+        video.addEventListener('canplay', function () {
+            if (vPlayer.videoHeight() > vPlayer.videoWidth()) {
+                $id('playerdiv').classList.add('vertical');
             }
-            //Pause Listener - Push Timestamp to server and disable polling
-            video.addEventListener("pause",(event) => {
-                clearInterval(tspoll);
-                $.getJSON("/api/set_timestamp/"+video.currentTime+"/"+id,function(data){});
+        });
+
+        document.addEventListener('keydown', function (event) {
+            var tag = (event.target.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || event.target.isContentEditable) return;
+            if (event.key === 'ArrowRight') {
+                vPlayer.currentTime(vPlayer.currentTime() + 15);
+            }
+            if (event.key === 'ArrowLeft') {
+                vPlayer.currentTime(Math.max(0, vPlayer.currentTime() - 15));
+            }
+            if (event.key === ' ' || event.key === 'Spacebar') {
+                event.preventDefault();
+                if (vPlayer.paused()) vPlayer.play();
+                else vPlayer.pause();
+            }
+        });
+    });
+
+    // --- Description toggle ---
+    $id('desc-toggle').addEventListener('click', function () {
+        var expanded = $id('desc').classList.toggle('expanded');
+        this.textContent = expanded ? 'Show less' : 'Show more';
+    });
+
+    // --- Previous / Next in series (fuzzy title match within creator) ---
+    getJSON('/api/find_next_previous/' + encodeURIComponent(id)).then(function (data) {
+        if (!data) return;
+        if (data.NextID !== undefined) {
+            $id('btn-next').hidden = false;
+            $id('btn-next').title = data.NextTitle;
+            $id('btn-next').addEventListener('click', function () {
+                window.location.href = '/player.html?id=' + encodeURIComponent(data.NextID);
             });
-            //Play Listener - Start polling
-            video.addEventListener("play",(event) => {
-                tspoll = window.setInterval(function(){
-                    $.getJSON("/api/set_timestamp/"+video.currentTime+"/"+id,function(data){});
-                }, 5000);
-            });
-            //End Listener - Update watch status
-            video.addEventListener("ended",(event) => {
-                $.ajax({url: "/api/watched/"+id, success: function(result){
-                    watch_status(id);
-                }});
-                $.getJSON("/api/set_timestamp/0/"+id,function(data){});
-                clearInterval(tspoll);
-            });
-            video.addEventListener("canplay",(event) => {
-                if(vPlayer.videoHeight() > vPlayer.videoWidth()){
-                    $("#playerdiv").width(400);
-                    console.log("Suspected Vertical Video, changing player height");
-                }
-            });
-            // Keyboard arrow left/right => seek +/- 15s
-            document.addEventListener('keydown', function(event) {
-                if (event.target.tagName.toLowerCase() !== 'input' && event.target.tagName.toLowerCase() !== 'textarea') {
-                    if (event.key === "ArrowRight") {
-                        vPlayer.currentTime(vPlayer.currentTime() + 15);
-                    }
-                    if (event.key === "ArrowLeft") {
-                        vPlayer.currentTime(Math.max(0, vPlayer.currentTime() - 15));
-                    }
-                    if (event.key === " " || event.key === "Spacebar") {
-                        event.preventDefault();
-                        if (vPlayer.paused()) {
-                            vPlayer.play();
-                        } else {
-                            vPlayer.pause();
-                        }
-                    }
-                }
+        }
+        if (data.PreviousID !== undefined) {
+            $id('btn-prev').hidden = false;
+            $id('btn-prev').title = data.PreviousTitle;
+            $id('btn-prev').addEventListener('click', function () {
+                window.location.href = '/player.html?id=' + encodeURIComponent(data.PreviousID);
             });
         }
     });
-    $.getJSON("/api/find_next_previous/"+id,function(data){
-        if(data["NextID"] !== undefined){
-            $("#nextvideo").html("Next Up: <a href='/player.html?id="+data["NextID"]+"'>"+data["NextTitle"]+"</a>");
-        }
-        if(data["PreviousID"] !== undefined){
-            $("#prevvideo").html("Previous: <a href='/player.html?id="+data["PreviousID"]+"'>"+data["PreviousTitle"]+"</a>");
-        }
+
+    // --- Up next sidebar ---
+    getJSON('/api/up_next/' + encodeURIComponent(id) + '?limit=10').then(function (vids) {
+        upNext = vids;
+        var html = vids.map(function (v) {
+            return '<div class="vt-upnext-item" role="button" tabindex="0" data-href="/player.html?id=' + encodeURIComponent(v.id) + '">'
+                + '<div class="vt-thumb"><img src="/api/images/' + encodeURIComponent(v.id) + '" alt="" loading="lazy">'
+                + (v.length && v.length !== '0' ? '<span class="vt-dur">' + VT.esc(VT.fmtDur(v.length)) + '</span>' : '')
+                + '</div>'
+                + '<div><div class="vt-upnext-title">' + VT.esc(v.title) + '</div>'
+                + '<div class="vt-upnext-meta">' + VT.esc(v.youtuber || v.channelId || '') + (v.PublishedAt ? ' · ' + VT.esc(VT.fmtDate(v.PublishedAt)) : '') + '</div></div>'
+                + '</div>';
+        }).join('');
+        $id('upnext-list').innerHTML = html || '<div class="vt-empty" style="padding:20px 0">Nothing else unwatched.</div>';
     });
-    function contentChange(){}
-    function deletevid(){
-        if (confirm("Are you sure you want to delete this video?") == true){
-            $.ajax({url: "/api/delete/"+id, success: function(result){
-                window.location.href='/';
-            }});
-        }
+    $id('upnext-list').addEventListener('click', function (e) {
+        var item = e.target.closest('.vt-upnext-item');
+        if (item) window.location.href = item.dataset.href;
+    });
+    $id('upnext-list').addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        var item = e.target.closest('.vt-upnext-item');
+        if (item) window.location.href = item.dataset.href;
+    });
+
+    // --- Autoplay next with countdown ---
+    var autoplayToggle = $id('autoplay-toggle');
+    autoplayToggle.checked = localStorage.getItem('vt_autoplay') !== '0';
+    autoplayToggle.addEventListener('change', function () {
+        localStorage.setItem('vt_autoplay', this.checked ? '1' : '0');
+        if (!this.checked) cancelCountdown();
+    });
+
+    function maybeAutoplayNext() {
+        if (!autoplayToggle.checked || !upNext.length) return;
+        var next = upNext[0];
+        $id('countdown-title').textContent = next.title;
+        $id('countdown').hidden = false;
+        var n = 5;
+        $id('countdown-n').textContent = n;
+        countdownTimer = window.setInterval(function () {
+            n--;
+            if (n <= 0) playNext();
+            else $id('countdown-n').textContent = n;
+        }, 1000);
     }
+    function playNext() {
+        clearInterval(countdownTimer);
+        window.location.href = '/player.html?id=' + encodeURIComponent(upNext[0].id) + '&autoplay=1';
+    }
+    function cancelCountdown() {
+        clearInterval(countdownTimer);
+        $id('countdown').hidden = true;
+    }
+    $id('countdown-play').addEventListener('click', playNext);
+    $id('countdown-cancel').addEventListener('click', cancelCountdown);
+
+    // Arriving via autoplay: start playback without another click
+    if (new URLSearchParams(window.location.search).get('autoplay') === '1') {
+        var tryPlay = window.setInterval(function () {
+            if (vPlayer) {
+                clearInterval(tryPlay);
+                vPlayer.play();
+            }
+        }, 200);
+        setTimeout(function () { clearInterval(tryPlay); }, 5000);
+    }
+
+    // --- Delete with confirm modal ---
+    $id('btn-delete').addEventListener('click', function () { $id('delete-modal').hidden = false; });
+    $id('delete-cancel').addEventListener('click', function () { $id('delete-modal').hidden = true; });
+    $id('delete-modal').addEventListener('click', function (e) {
+        if (e.target === this) this.hidden = true;
+    });
+    $id('delete-confirm').addEventListener('click', function () {
+        fetch('/api/delete/' + encodeURIComponent(id)).then(function () {
+            window.location.href = '/';
+        });
+    });
 </script>
 {% endblock %}

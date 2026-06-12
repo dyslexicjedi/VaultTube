@@ -574,6 +574,52 @@ def api_random():
     except Exception as e:
         current_app.logger.error("API Random Fail: %s"%e)
 
+@api_bp.route("/up_next/<string:vid>")
+def api_up_next(vid):
+    """Ordered list of what to play after <vid>: unwatched videos from the same
+    channel in series order (published after the current one first, then older
+    ones newest-first), topped up with recent unwatched from other channels."""
+    try:
+        current_app.logger.debug("Called Up Next %s" % vid)
+        try:
+            limit = min(max(int(request.args.get('limit', 10)), 1), 25)
+        except ValueError:
+            limit = 10
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select channelId, PublishedAt from videos where id = %s;", (vid,))
+        if not cur.rowcount:
+            cur.close()
+            con.close()
+            return "[]"
+        channel_id, published_at = cur.fetchone()
+        cols = "v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title"
+        base = f"select {cols} from videos v left outer join channels c on v.channelId = c.channelid where v.watched = 0 and v.id != %s and "
+        queries = [
+            (base + "v.channelId = %s and v.PublishedAt > %s order by v.PublishedAt asc limit %s;", (vid, channel_id, published_at, limit)),
+            (base + "v.channelId = %s and v.PublishedAt <= %s order by v.PublishedAt desc limit %s;", (vid, channel_id, published_at, limit)),
+            (base + "v.channelId != %s order by v.PublishedAt desc limit %s;", (vid, channel_id, limit)),
+        ]
+        results = []
+        seen = {vid}
+        for sql, params in queries:
+            if len(results) >= limit:
+                break
+            cur.execute(sql, params)
+            headers = [x[0] for x in cur.description]
+            for row in cur.fetchall():
+                item = dict(zip(headers, row))
+                if item['id'] in seen or len(results) >= limit:
+                    continue
+                seen.add(item['id'])
+                results.append(item)
+        cur.close()
+        con.close()
+        return json.dumps(results, indent=4, sort_keys=True, default=str)
+    except Exception as e:
+        current_app.logger.error("API Up Next Failed: %s" % e)
+        return "[]"
+
 @api_bp.route("/find_next_previous/<string:vid>")
 def api_fnp(vid):
     try:
