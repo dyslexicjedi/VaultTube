@@ -216,9 +216,7 @@ def set_timestamp(id,ts):
         ts = ts.split('.')[0]
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        sql = "Update videos set timestamp = %s where id = %s;"
-        current_app.logger.info(sql)
-        cur.execute(sql,(ts,id))
+        cur.execute("Update videos set timestamp = %s where id = %s;",(ts,id))
         con.commit()
         cur.close()
         con.close()
