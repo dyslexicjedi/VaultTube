@@ -1,9 +1,13 @@
 /* =============================================================
    VaultTube design system — "Streaming shell" redesign
-   Loaded after bootstrap.min.css / stylesheet.css (legacy) and
-   overrides them. Legacy sheets are removed once every page is
-   converted to these components.
+   The app's only stylesheet (video-js.css loads on the player).
    ============================================================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
 
 :root {
   --vt-bg: #0b0d10;
@@ -20,7 +24,7 @@
   --vt-radius: 12px;
 }
 
-/* ---------- Global overrides of legacy styles ---------- */
+/* ---------- Document defaults ---------- */
 html {
   background: var(--vt-bg);
 }
