@@ -1022,6 +1022,46 @@ a {
 .vt-tile:hover {
   border-color: var(--vt-line-strong);
 }
+/* Source color-coding: outline + label chip (chip carries the meaning, so the
+   distinction is never color-only) */
+.vt-tile.src-youtube {
+  border-color: rgba(255, 92, 92, 0.4);
+}
+.vt-tile.src-youtube:hover {
+  border-color: #ff5c5c;
+}
+.vt-tile.src-patreon {
+  border-color: rgba(176, 138, 214, 0.45);
+}
+.vt-tile.src-patreon:hover {
+  border-color: #b08ad6;
+}
+.vt-tile.src-reddit {
+  border-color: rgba(255, 140, 46, 0.45);
+}
+.vt-tile.src-reddit:hover {
+  border-color: #ff8c2e;
+}
+.vt-source-chip {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.vt-source-chip.src-youtube {
+  background: rgba(255, 92, 92, 0.14);
+  color: #ff5c5c;
+}
+.vt-source-chip.src-patreon {
+  background: rgba(176, 138, 214, 0.14);
+  color: #b08ad6;
+}
+.vt-source-chip.src-reddit {
+  background: rgba(255, 140, 46, 0.14);
+  color: #ff8c2e;
+}
 .vt-tile-name {
   font-size: 15px;
   font-weight: 700;

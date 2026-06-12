@@ -331,6 +331,7 @@ def test_channels_page(client):
     for ch in data:
         assert 'unwatched' in ch
         assert 'vidcount' in ch
+        assert 'source' in ch
 
 
 def test_channels_order_activity(client):

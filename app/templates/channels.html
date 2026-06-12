@@ -15,6 +15,14 @@
 (function () {
     var page = 1;
 
+    function channelSource(c) {
+        if (c.source) return c.source;
+        // Empty channels: fall back to the ID shape (same heuristic as /api/channel)
+        if (c.channelid.indexOf('UC') === 0) return 'youtube';
+        if (/^\d+$/.test(c.channelid)) return 'patreon';
+        return 'reddit';
+    }
+
     function tileHTML(c) {
         var desc = '';
         try {
@@ -25,10 +33,13 @@
         } catch (e) {}
         var unwatched = parseInt(c.unwatched, 10) || 0;
         var subbed = String(c.subscribed) === '1';
-        return '<div class="vt-tile">'
+        var src = channelSource(c);
+        var srcLabel = { youtube: 'YouTube', patreon: 'Patreon', reddit: 'Reddit' }[src] || src;
+        return '<div class="vt-tile src-' + VT.esc(src) + '">'
             + '<a class="vt-tile-name" href="/creator.html?creator=' + encodeURIComponent(c.channelid) + '">' + VT.esc(c.channelname) + '</a>'
             + '<p class="vt-tile-desc">' + VT.esc(desc) + '</p>'
             + '<div class="vt-tile-foot">'
+            + '<span class="vt-source-chip src-' + VT.esc(src) + '">' + VT.esc(srcLabel) + '</span>'
             + '<span class="vt-sub">' + VT.esc(c.vidcount) + ' videos</span>'
             + (unwatched ? '<span class="vt-chip">' + unwatched + ' unwatched</span>' : '')
             + (c.lastvidtime ? '<span class="vt-sub">Last: ' + VT.esc(VT.fmtDate(c.lastvidtime)) + '</span>' : '')
