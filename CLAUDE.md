@@ -28,7 +28,7 @@ are not in it; copy them in or replicate their logic in the test script.
 ## Local development
 
 ```bash
-.venv/bin/python -m pytest tests/ -q   # run tests (36 tests, ~1s)
+.venv/bin/python -m pytest tests/ -q   # run tests (82 tests, a few seconds)
 ```
 
 - Tests need a reachable MariaDB; connection info comes from `.env` at the repo
@@ -109,5 +109,7 @@ Required: `VAULTTUBE_VAULTDIR`, `VAULTTUBE_DBHOST/DBUSER/DBPASS/DBNAME/DBPORT`,
 Optional: `VAULTTUBE_YTCOOKIE`, `VAULTTUBE_PATREONCOOKIE` (Netscape cookies.txt
 paths), `VAULTTUBE_DENOPATH` (deno binary for yt-dlp JS runtime;
 `/root/.deno/bin/deno` in the image), `VAULTTUBE_REDDIT_CLIENT_ID/
-CLIENT_SECRET/USERNAME/PASSWORD`, `VAULTTUBE_PORT`, `VAULTTUBE_DEBUG`,
-`VAULTTUBE_DISABLEBACK`.
+CLIENT_SECRET/USERNAME/PASSWORD/USER_AGENT` (all five needed for the Reddit
+provider), `VAULTTUBE_PORT`, `VAULTTUBE_DEBUG`, `VAULTTUBE_DISABLEBACK`,
+`VAULTTUBE_DL_DELAY` (seconds between queued downloads, default 10; single
+adds unaffected), `VAULTTUBE_DBPOOL` (DB connection pool size, default 8).

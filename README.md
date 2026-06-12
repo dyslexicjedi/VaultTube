@@ -1,7 +1,7 @@
 [![Dev Build](https://github.com/dyslexicjedi/VaultTube/actions/workflows/docker.yml/badge.svg?branch=dev)](https://github.com/dyslexicjedi/VaultTube/actions/workflows/docker.yml)
 # VaultTube
 
-VaultTube is a video archive and player application written in Python/Flask/Bootstrap5/HTML5
+VaultTube is a video archive and player application written in Python/Flask with a vanilla-JS/HTML5 frontend
 
 ## Status: 
 [![Build Docker](https://github.com/dyslexicjedi/VaultTube/actions/workflows/docker.yml/badge.svg?branch=dev)](https://github.com/dyslexicjedi/VaultTube/actions/workflows/docker.yml)
@@ -65,10 +65,12 @@ Optional:
 | `VAULTTUBE_YTCOOKIE` | Path to a Netscape-format cookies.txt for YouTube |
 | `VAULTTUBE_PATREONCOOKIE` | Path to a Netscape-format cookies.txt for Patreon |
 | `VAULTTUBE_DENOPATH` | Path to a deno binary for yt-dlp's JS runtime |
-| `VAULTTUBE_REDDIT_CLIENT_ID` / `CLIENT_SECRET` / `USERNAME` / `PASSWORD` | Reddit API credentials |
+| `VAULTTUBE_REDDIT_CLIENT_ID` / `CLIENT_SECRET` / `USERNAME` / `PASSWORD` / `USER_AGENT` | Reddit API credentials (all five required to use the Reddit provider) |
 | `VAULTTUBE_PORT` | Listen port (default 5000) |
 | `VAULTTUBE_DEBUG` | Enable Flask debug mode |
 | `VAULTTUBE_DISABLEBACK` | Set to anything but `False` to disable background scan/download threads |
+| `VAULTTUBE_DL_DELAY` | Seconds between queued downloads (default 10) |
+| `VAULTTUBE_DBPOOL` | Database connection pool size (default 8) |
 
 ## Contributing / Architecture
 
