@@ -97,6 +97,9 @@ def getvids(status,opt,direction,page):
         if to_date:
             where_clauses.append(f"v.PublishedAt <= %s")
         
+        if request.args.get('deleted') == '1':
+            where_clauses.append("v.isDeleted = 1")
+
         min_duration = request.args.get('min_duration', '').strip()
         max_duration = request.args.get('max_duration', '').strip()
         min_dur_sec = int(min_duration) if min_duration and min_duration.isdigit() else None
@@ -672,22 +675,53 @@ def api_delete(vid):
     
 @api_bp.route("/stats")
 def api_stats():
+    """Dashboard data. youtuber='404' marks placeholder rows for videos that
+    were never found, so every count excludes them."""
     try:
         data = {}
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute(f"Select Youtuber,count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos Group By Youtuber Having count(*) > 1 and not Youtuber = '404'")
-        data['countbyyoutuber'] = cur.fetchall()
-        cur.execute(f"Select count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos Where not youtuber = '404'")
-        data['totalcount'] = cur.fetchall()
-        cur.execute(f"select videos.watched,count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos where not youtuber = '404' group by videos.watched")
-        data['watched'] = cur.fetchall()
-        cur.execute(f"select round(avg(TIME_TO_SEC(videos.length)),0) from {os.environ['VAULTTUBE_DBNAME']}.videos where not youtuber = '404'")
-        data['avg_length_seconds'] = cur.fetchall()
-        cur.execute(f"select isDeleted,count(*) from {os.environ['VAULTTUBE_DBNAME']}.videos where source='youtube' group by isDeleted ")
-        data['deleted'] = cur.fetchall()
+
+        cur.execute("select count(*), coalesce(sum(watched=1),0), coalesce(sum(TIME_TO_SEC(`length`)),0), coalesce(round(avg(TIME_TO_SEC(`length`))),0) from videos where not youtuber='404'")
+        total, watched, total_seconds, avg_seconds = cur.fetchone()
+        cur.execute("select count(*) from channels")
+        channels = cur.fetchone()[0]
+        cur.execute("select count(*) from playlists")
+        playlists = cur.fetchone()[0]
+        data['totals'] = {
+            'videos': int(total), 'watched': int(watched), 'unwatched': int(total - watched),
+            'total_seconds': int(total_seconds), 'avg_seconds': int(avg_seconds),
+            'channels': int(channels), 'playlists': int(playlists),
+        }
+
+        # Deleted-at-source is only tracked for YouTube
+        cur.execute("select coalesce(sum(isDeleted=1),0), count(*) from videos where source='youtube' and not youtuber='404'")
+        deleted, yt_total = cur.fetchone()
+        data['deleted'] = {'deleted': int(deleted), 'youtube_total': int(yt_total)}
+
+        cur.execute("select coalesce(source,'unknown'), count(*) from videos where not youtuber='404' group by source order by count(*) desc")
+        data['by_source'] = [[r[0], int(r[1])] for r in cur.fetchall()]
+
+        cur.execute("select coalesce(c.channelname, v.channelId), count(*) as total, coalesce(sum(v.watched=0),0) from videos v left outer join channels c on v.channelId = c.channelid where not v.youtuber='404' group by v.channelId order by total desc limit 10")
+        data['top_channels'] = [[r[0], int(r[1]), int(r[2])] for r in cur.fetchall()]
+
+        # Vault growth: videos added per week for the last 26 weeks, zero-filled
+        cur.execute("select date(date_sub(AddedAt, interval weekday(AddedAt) day)) as wk, count(*) from videos where AddedAt >= date_sub(curdate(), interval 26 week) group by wk order by wk")
+        weekly = {str(r[0]): int(r[1]) for r in cur.fetchall()}
+        monday = datetime.date.today() - datetime.timedelta(days=datetime.date.today().weekday())
+        data['added_per_week'] = [
+            [str(monday - datetime.timedelta(weeks=i)), weekly.get(str(monday - datetime.timedelta(weeks=i)), 0)]
+            for i in range(25, -1, -1)
+        ]
+
+        cur.execute("select case when TIME_TO_SEC(`length`) < 300 then 0 when TIME_TO_SEC(`length`) < 600 then 1 when TIME_TO_SEC(`length`) < 1800 then 2 when TIME_TO_SEC(`length`) < 3600 then 3 else 4 end as bucket, count(*) from videos where not youtuber='404' and TIME_TO_SEC(`length`) > 0 group by bucket")
+        buckets = {int(r[0]): int(r[1]) for r in cur.fetchall()}
+        labels = ['Under 5 min', '5–10 min', '10–30 min', '30–60 min', 'Over 60 min']
+        data['duration_buckets'] = [[labels[i], buckets.get(i, 0)] for i in range(5)]
+
         cur.close()
-        return json.dumps(data, indent=4, sort_keys=True, default=str)
+        con.close()
+        return json.dumps(data, default=str)
     except Exception as e:
         current_app.logger.error("API Stats Error: %s"%e)
         return api_error(str(e), 500)

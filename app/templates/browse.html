@@ -12,6 +12,7 @@
         <div class="vt-seg" id="status-seg">
             <button type="button" data-value="unwatched" class="active">Unwatched</button>
             <button type="button" data-value="all">All</button>
+            <button type="button" data-value="deleted">Gone from source</button>
         </div>
     </div>
     <div class="vt-field">
@@ -59,6 +60,7 @@
         page: 1,
         status: 'unwatched',
         sort: 'PublishedAt',
+        deleted: false,
         channel_ids: [],
         from_date: '',
         to_date: '',
@@ -71,7 +73,7 @@
     }
 
     function hasFilters() {
-        return state.channel_ids.length > 0 || state.from_date || state.to_date
+        return state.deleted || state.channel_ids.length > 0 || state.from_date || state.to_date
             || state.min_duration !== null || state.max_duration !== null;
     }
 
@@ -81,6 +83,7 @@
         state.channel_ids.forEach(function (cid) {
             params.push('channel_ids[]=' + encodeURIComponent(cid));
         });
+        if (state.deleted) params.push('deleted=1');
         if (state.from_date) params.push('from_date=' + encodeURIComponent(state.from_date));
         if (state.to_date) params.push('to_date=' + encodeURIComponent(state.to_date));
         if (state.min_duration !== null) params.push('min_duration=' + state.min_duration);
@@ -157,7 +160,12 @@
         });
     }
 
-    segInit('status-seg', function (v) { state.status = v; update(1); });
+    function setShow(v) {
+        // "deleted" is an isDeleted filter on top of all videos, not a watch status
+        state.deleted = (v === 'deleted');
+        state.status = (v === 'unwatched') ? 'unwatched' : 'all';
+    }
+    segInit('status-seg', function (v) { setShow(v); update(1); });
     segInit('sort-seg', function (v) { state.sort = v; update(1); });
 
     function applyFilters() {
@@ -198,6 +206,16 @@
             select.appendChild(opt);
         });
     });
+
+    // Deep link: /browse.html?show=all|deleted (e.g. from the stats KPIs)
+    var show = new URLSearchParams(window.location.search).get('show');
+    if (show === 'all' || show === 'deleted') {
+        setShow(show);
+        var seg = document.getElementById('status-seg');
+        seg.querySelectorAll('button').forEach(function (b) {
+            b.classList.toggle('active', b.dataset.value === show);
+        });
+    }
 
     update(1);
 </script>

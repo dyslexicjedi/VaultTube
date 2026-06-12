@@ -9,6 +9,7 @@ _TEST_VIDEO_IDS   = [
     'GetVid1', 'GetVidMp4',
     'WatchVid1', 'UnwatchVid1', 'TsVid1',
     'UpNext1', 'UpNext2', 'UpNext3',
+    'DelVid1', 'DelVid2',
 ]
 _TEST_CHANNEL_IDS = [
     'Test123', 'SubTest123',

@@ -300,9 +300,16 @@ def test_stats(client):
     response = client.get("/api/stats")
     data = json.loads(response.get_data(as_text=True))
     assert isinstance(data, dict)
-    assert 'countbyyoutuber' in data
-    assert 'totalcount' in data
-    assert 'watched' in data
+    totals = data['totals']
+    for key in ('videos', 'watched', 'unwatched', 'total_seconds', 'avg_seconds', 'channels', 'playlists'):
+        assert isinstance(totals[key], int)
+    assert totals['watched'] + totals['unwatched'] == totals['videos']
+    assert isinstance(data['by_source'], list)
+    assert isinstance(data['top_channels'], list)
+    assert len(data['top_channels']) <= 10
+    assert len(data['added_per_week']) == 26
+    assert len(data['duration_buckets']) == 5
+    assert 'deleted' in data['deleted'] and 'youtube_total' in data['deleted']
 
 
 def test_random_video(client):
@@ -364,6 +371,20 @@ def test_up_next_unknown_video(client):
     response = client.get("/api/up_next/NonexistentVid123")
     data = json.loads(response.get_data(as_text=True))
     assert data == []
+
+
+def test_getvids_deleted_filter(client):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted) values('DelVid1','GetVidCh1','GetVidCh1','{}','/videos/1','2023-02-01 12:00:00',0,0,1);")
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted) values('DelVid2','GetVidCh1','GetVidCh1','{}','/videos/2','2023-02-02 12:00:00',0,0,0);")
+    con.close()
+
+    response = client.get("/api/getvids/all/PublishedAt/desc/0?deleted=1&channel_ids[]=GetVidCh1")
+    data = json.loads(response.get_data(as_text=True))
+    ids = [v['id'] for v in data]
+    assert 'DelVid1' in ids
+    assert 'DelVid2' not in ids
 
 
 def test_queue_page(client):
