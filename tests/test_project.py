@@ -373,6 +373,149 @@ def test_up_next_unknown_video(client):
     assert data == []
 
 
+class _FakeResp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+    def close(self):
+        pass
+
+
+def _playlist_page(video_ids, next_token=None):
+    page = {'items': [{'contentDetails': {'videoId': v}} for v in video_ids]}
+    if next_token:
+        page['nextPageToken'] = next_token
+    return page
+
+
+def _ensure_queue(client):
+    import queue as _queue
+    with client.application.app_context():
+        if 'queue' not in client.application.config:
+            client.application.config['queue'] = _queue.Queue()
+        q = client.application.config['queue']
+    while not q.empty():
+        try:
+            q.get_nowait()
+        except _queue.Empty:
+            break
+    return q
+
+
+def test_uploads_playlist_id():
+    from scanner import uploads_playlist_id
+    assert uploads_playlist_id('UCVtTestChannel1') == 'UUVtTestChannel1'
+
+
+def test_error_type_classification():
+    from downloader import get_error_type
+    # Throttling responses must be transient (retried), not permanent failures
+    assert get_error_type('HTTP Error 429: Too Many Requests') == 'Network Error'
+    assert get_error_type('Download throttled by server') == 'Network Error'
+    assert get_error_type('Connection reset by peer') == 'Network Error'
+    assert get_error_type('Video not found') == 'Content Not Found'
+    assert get_error_type('HTTP Error 403: Forbidden') == 'Authentication Error'
+    assert get_error_type('something exploded') == 'Provider Error'
+
+
+def test_channel_scan_paginates(client, monkeypatch):
+    """The scan must walk every playlistItems page, not just the first."""
+    import logging, requests, scanner
+    q = _ensure_queue(client)
+
+    pages = [
+        _playlist_page(['VtScanVid1', 'VtScanVid2'], next_token='p2'),
+        _playlist_page(['VtScanVid3']),
+    ]
+    calls = []
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(pages[len(calls) - 1]))[1])
+
+    with client.application.app_context():
+        scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
+
+    assert len(calls) == 2
+    assert 'UUVtTestChannel1' in calls[0]          # uploads playlist derived, no channels.list call
+    assert 'maxResults=50' in calls[0]
+    assert 'pageToken=p2' in calls[1]
+    assert q.qsize() == 3
+    urls = sorted(qo.url for qo in list(q.queue))
+    assert urls == [
+        'https://www.youtube.com/watch?v=VtScanVid1',
+        'https://www.youtube.com/watch?v=VtScanVid2',
+        'https://www.youtube.com/watch?v=VtScanVid3',
+    ]
+
+
+def test_channel_scan_stops_when_caught_up(client, monkeypatch):
+    """A page with nothing new means everything older is known: stop paging."""
+    import logging, requests, scanner
+    q = _ensure_queue(client)
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
+    con.close()
+
+    calls = []
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(_playlist_page(['VtScanVid1'], next_token='p2')))[1])
+
+    with client.application.app_context():
+        scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
+
+    assert len(calls) == 1   # did not fetch page 2
+    assert q.qsize() == 0
+
+
+def test_channel_scan_mixed_page_takes_new_only(client, monkeypatch):
+    """New uploads on a page with known videos are enqueued, but paging stops
+    there — a subscription must not backfill deep history."""
+    import logging, requests, scanner
+    q = _ensure_queue(client)
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
+    con.close()
+
+    calls = []
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(_playlist_page(['VtScanVid3', 'VtScanVid1'], next_token='p2')))[1])
+
+    with client.application.app_context():
+        scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
+
+    assert len(calls) == 1
+    assert q.qsize() == 1
+    assert list(q.queue)[0].url == 'https://www.youtube.com/watch?v=VtScanVid3'
+
+
+def test_download_playlist_writes_queue_rows(client, monkeypatch):
+    """Playlist expansion must go through enqueue() so queue rows persist."""
+    import logging, requests
+    import providers.youtube as yt
+    q = _ensure_queue(client)
+
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: _FakeResp(_playlist_page(['VtPlVid1'])))
+
+    from QueueObject import QueueObject
+    with client.application.app_context():
+        result = yt.download_playlist(QueueObject('PLVtTest123', '', 'youtube', 0, ''), logging.getLogger('test'))
+
+    assert result is True
+    assert q.qsize() == 1
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("Select status from queue where url = 'https://www.youtube.com/watch?v=VtPlVid1'")
+    row = cur.fetchone()
+    assert row is not None and row[0] == 'pending'
+    cur.execute("Select count(*) from pl2vid where playlistId = 'PLVtTest123' and videoId = 'VtPlVid1'")
+    assert cur.fetchone()[0] == 1
+    con.close()
+
+
 def test_channel_source_url(client):
     con = _db_connect()
     cur = con.cursor()

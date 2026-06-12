@@ -1,3 +1,5 @@
+import os
+import time
 import threading
 import providers
 from QueueObject import QueueObject
@@ -6,12 +8,16 @@ from database import insert_download_error, update_queue_status
 
 MAX_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 60
+# Pause between consecutive downloads so a long queue drain doesn't look like
+# bot traffic to the source (which throttles or soft-blocks the cookie)
+DOWNLOAD_DELAY_SECONDS = int(os.environ.get('VAULTTUBE_DL_DELAY', 10))
 
 def get_error_type(error_msg):
     msg_lower = error_msg.lower()
     if 'not found' in msg_lower or '404' in msg_lower or 'content was not found' in msg_lower:
         return 'Content Not Found'
-    elif 'timeout' in msg_lower or 'connection' in msg_lower or 'network' in msg_lower:
+    elif ('timeout' in msg_lower or 'connection' in msg_lower or 'network' in msg_lower
+          or '429' in msg_lower or 'too many requests' in msg_lower or 'throttl' in msg_lower):
         return 'Network Error'
     elif 'cookie' in msg_lower or 'auth' in msg_lower or '403' in msg_lower:
         return 'Authentication Error'
@@ -62,3 +68,6 @@ def start_dl_queue(logger, app):
                 logger.error("No provider found for URL: %s" % qo.url)
                 update_queue_status(qo.row_id, 'failed', logger, error='No provider found for URL')
                 insert_download_error(qo.url, 'Provider Error', 'No provider found for URL', logger)
+        # Only pace back-to-back items; a single add still starts instantly
+        if DOWNLOAD_DELAY_SECONDS and not q.empty():
+            time.sleep(DOWNLOAD_DELAY_SECONDS)
