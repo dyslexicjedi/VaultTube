@@ -321,6 +321,21 @@ def test_channels_page(client):
     response = client.get("/api/channels/0")
     data = json.loads(response.get_data(as_text=True))
     assert isinstance(data, list)
+    for ch in data:
+        assert 'unwatched' in ch
+        assert 'vidcount' in ch
+
+
+def test_channels_order_activity(client):
+    response = client.get("/api/channels/0?order=activity")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+
+
+def test_browse_page(client):
+    response = client.get("/browse.html")
+    assert response.status_code == 200
+    assert b'browse-grid' in response.data
 
 
 def test_playlists_page(client):

@@ -68,6 +68,10 @@ app.register_blueprint(api_bp,url_prefix='/api')
 def home():
     return render_template('/index.html')
 
+@app.route('/browse.html')
+def browse():
+    return render_template('/browse.html')
+
 @app.route('/player.html')
 def player():
     return render_template('/player.html')

@@ -423,6 +423,205 @@ a {
   color: var(--vt-accent);
 }
 
+/* ---------- Hero banner ---------- */
+.vt-hero {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  min-height: 320px;
+  display: flex;
+  align-items: flex-end;
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-line);
+  margin-bottom: 34px;
+}
+.vt-hero-backdrop {
+  position: absolute;
+  inset: 0;
+}
+.vt-hero-backdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.vt-hero-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(11, 13, 16, 0.95) 0%,
+    rgba(11, 13, 16, 0.55) 45%,
+    rgba(11, 13, 16, 0.15) 100%
+  );
+}
+.vt-hero-content {
+  position: relative;
+  padding: 28px 32px;
+  max-width: 680px;
+}
+.vt-hero-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vt-accent);
+  margin-bottom: 8px;
+}
+.vt-hero-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0 0 8px;
+  color: var(--vt-text);
+}
+.vt-hero-meta {
+  font-size: 13.5px;
+  color: var(--vt-text-dim);
+  margin-bottom: 18px;
+}
+.vt-hero-meta a {
+  color: var(--vt-text);
+  text-decoration: none;
+  font-weight: 600;
+}
+.vt-hero-meta a:hover {
+  color: var(--vt-accent);
+}
+.vt-hero-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ---------- Form controls ---------- */
+.vt-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.vt-field > label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--vt-text-dim);
+}
+.vt-input,
+.vt-select {
+  background: var(--vt-surface-2);
+  border: 1px solid var(--vt-line-strong);
+  border-radius: 8px;
+  color: var(--vt-text);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color 0.15s ease;
+  color-scheme: dark;
+}
+.vt-input:focus,
+.vt-select:focus {
+  border-color: var(--vt-accent);
+}
+.vt-select option {
+  background: var(--vt-surface-2);
+  color: var(--vt-text);
+}
+
+/* Segmented toggle (e.g. Unwatched/All) */
+.vt-seg {
+  display: inline-flex;
+  background: var(--vt-surface-2);
+  border: 1px solid var(--vt-line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.vt-seg button {
+  background: transparent;
+  border: none;
+  color: var(--vt-text-dim);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.vt-seg button.active {
+  background: var(--vt-accent-soft);
+  color: var(--vt-accent);
+}
+
+/* ---------- Filter bar (browse page) ---------- */
+.vt-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius);
+  padding: 14px 16px;
+  margin-bottom: 22px;
+}
+.vt-filterbar .vt-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ---------- Pagination ---------- */
+.vt-pages {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 30px 0 0;
+}
+.vt-page {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-line-strong);
+  border-radius: 8px;
+  color: var(--vt-text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.vt-page:hover {
+  background: var(--vt-surface-2);
+  color: var(--vt-text);
+}
+.vt-page.active {
+  background: var(--vt-accent);
+  border-color: var(--vt-accent);
+  color: var(--vt-bg);
+}
+.vt-page:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.vt-page:disabled:hover {
+  background: var(--vt-surface);
+  color: var(--vt-text-dim);
+}
+
+/* ---------- Empty state ---------- */
+.vt-empty {
+  padding: 50px 20px;
+  text-align: center;
+  color: var(--vt-text-dim);
+  font-size: 14px;
+}
+
 /* ---------- Mobile: sidebar becomes bottom tab bar ---------- */
 @media (max-width: 768px) {
   .vt-shell {
@@ -475,5 +674,17 @@ a {
   }
   .vt-footer {
     margin-bottom: 60px;
+  }
+  .vt-hero {
+    min-height: 220px;
+  }
+  .vt-hero-content {
+    padding: 18px 20px;
+  }
+  .vt-hero-title {
+    font-size: 20px;
+  }
+  .vt-filterbar .vt-actions {
+    margin-left: 0;
   }
 }
