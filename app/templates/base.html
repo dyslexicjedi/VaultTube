@@ -1,77 +1,73 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <!-- Required meta tags -->
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-        <!-- CSS -->
+        <!-- Legacy CSS: kept until every page is converted to theme.css components -->
         <link href="/static/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
         <link href="/static/css/stylesheet.css" rel="stylesheet">
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <link href="/static/css/theme.css" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
         <title>VaultTube</title>
     </head>
-    <body>
-        <!-- Javascript -->
+    <body class="vt-shell">
         <script src="/static/js/jquery.min.js"></script>
-        <div class="container-lg py-4">
-            <nav class="navbar navbar-expand-lg navbar-dark rounded shadow-sm mb-4" id="main-navbar">
-                <div class="container-fluid">
-                  <a class="navbar-brand fw-bold fs-4" href="/">VaultTube</a>
-                  <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                  </button>
-                  <div class="collapse navbar-collapse" id="navbarSupportedContent">
-                    <ul class="navbar-nav me-auto mb-2 mb-lg-0 fs-6">
-                      <li class="nav-item">
-                        <a class="nav-link px-3" href="/download.html">Download</a>
-                      </li>
-                      <li class="nav-item">
-                        <a class="nav-link px-3" href="/channels.html">Channels</a>
-                      </li>
-                      <li class="nav-item">
-                        <a class="nav-link px-3" href="/playlists.html">Playlists</a>
-                      </li>
-                      <li class="nav-item">
-                        <a class="nav-link px-3" href="/stats.html">Stats</a>
-                      </li>
-                      <li class="nav-item">
-                        <a class="nav-link px-3" href="/random.html">Random</a>
-                      </li>
-                      <li class="nav-item">
-                        <a class="nav-link px-3" href="/upload.html">Upload</a>
-                      </li>
-                    </ul>
 
-                    <form class="d-flex ms-3 navbar-search" onsubmit="do_search(); return false;">
-                      <div class="navbar-search-wrap">
-                        <svg class="navbar-search-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
-                          <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.099zm-5.242 1.156a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11z"/>
-                        </svg>
-                        <input class="navbar-search-input" type="search" placeholder="Search…" aria-label="Search" id="searchtext">
-                        <button class="navbar-search-btn" type="button" onclick="do_search();">Search</button>
-                      </div>
-                    </form>
-                  </div>
-                </div>
+        <aside class="vt-sidebar">
+            <a class="vt-logo" href="/" aria-label="VaultTube home">V</a>
+            <nav class="vt-nav" aria-label="Main navigation">
+                <a class="vt-nav-item{{ ' active' if request.path == '/' }}" href="/" title="Home" aria-label="Home">
+                    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                </a>
+                <a class="vt-nav-item{{ ' active' if request.path == '/channels.html' }}" href="/channels.html" title="Channels" aria-label="Channels">
+                    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>
+                </a>
+                <a class="vt-nav-item{{ ' active' if request.path == '/playlists.html' }}" href="/playlists.html" title="Playlists" aria-label="Playlists">
+                    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                </a>
+                <a class="vt-nav-item{{ ' active' if request.path == '/download.html' }}" href="/download.html" title="Queue" aria-label="Download queue">
+                    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span class="vt-badge" id="queue-badge" hidden>0</span>
+                </a>
+                <a class="vt-nav-item{{ ' active' if request.path == '/stats.html' }}" href="/stats.html" title="Stats" aria-label="Stats">
+                    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                </a>
+                <a class="vt-nav-item{{ ' active' if request.path == '/random.html' }}" href="/random.html" title="Random" aria-label="Play something random">
+                    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/></svg>
+                </a>
             </nav>
+            <span class="vt-spacer"></span>
+            <!-- Upload keeps a sidebar slot until it merges into the "+ Add" modal (Phase 4) -->
+            <a class="vt-nav-item{{ ' active' if request.path == '/upload.html' }}" href="/upload.html" title="Upload" aria-label="Upload a file">
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </a>
+        </aside>
+
+        <div class="vt-main">
+            <header class="vt-topbar">
+                <form class="vt-search" onsubmit="do_search(); return false;" role="search">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="search" placeholder="Search videos, channels…" aria-label="Search" id="searchtext">
+                    <kbd>/</kbd>
+                </form>
+                <a class="vt-btn" href="/download.html">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Add
+                </a>
+            </header>
+
+            <main class="vt-content">
         {% block content %}
         {% endblock %}
-        </div>
-        <hr class="my-4">
-        <footer id="footer" class="py-3 shadow-sm mt-auto">
-            <div class="container text-center">
-                <p class="mb-0 fst-italic text-secondary">VaultTube v1.0.0-alpha &nbsp;
-                  |&nbsp; <a href="https://github.com/jedihomelab/VaultTube" target="_blank" class="link-secondary"><img src="/static/imgs/github.svg" height="20" width="20" alt="GitHub" /></a>
-                  &nbsp;|&nbsp; <a href="https://hub.docker.com/repository/docker/dyslexicjedi/vaulttube/general" target="_blank" class="link-secondary"><img src="/static/imgs/package.svg" height="20" width="20" alt="Docker" /></a>
-                </p>
-            </div>
-        </footer>
-        <script>
-          function do_search(){
-            var searchterm = $("#searchtext").val();
-            window.location.href='/search.html?txt='+encodeURIComponent(searchterm);
-          }
-        </script>
+            </main>
 
+            <footer class="vt-footer">
+                <span>VaultTube v1.0.0-alpha</span>
+                <a href="https://github.com/jedihomelab/VaultTube" target="_blank" aria-label="GitHub"><img src="/static/imgs/github.svg" height="18" width="18" alt="GitHub" /></a>
+                <a href="https://hub.docker.com/repository/docker/dyslexicjedi/vaulttube/general" target="_blank" aria-label="Docker Hub"><img src="/static/imgs/package.svg" height="18" width="18" alt="Docker" /></a>
+            </footer>
+        </div>
+
+        <script src="/static/js/shell.js"></script>
     </body>
 </html>
