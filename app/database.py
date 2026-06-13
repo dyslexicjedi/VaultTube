@@ -29,11 +29,6 @@ def checkdb(logger):
         if(not cur.fetchone()):
             logger.info("Images Table not created, creating...")
             cur.execute("CREATE TABLE `images` (`id` varchar(50) NOT NULL,`image` longblob DEFAULT NULL,PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
-        #Tag Table
-        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'tags' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
-        if(not cur.fetchone()):
-            logger.info("Tags Table not created, creating...")
-            cur.execute("CREATE TABLE `tags` (`id` varchar(25) NOT NULL,`tag` varchar(250) NOT NULL,PRIMARY KEY (`id`,`tag`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
         #Playlists
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'playlists' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):

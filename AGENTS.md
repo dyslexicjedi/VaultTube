@@ -43,7 +43,6 @@ by `q.source` as a fallback (see `downloader.py`).
 - `playlists` - Playlist metadata, subscription status
 - `pl2vid` - Playlist-to-video mappings
 - `images` - Thumbnail blobs
-- `tags` - Video tags
 - `IgnoreVid` - Ignored videos + not-found tombstones (videos gone from the source; these used to be fake `youtuber='404'` rows in `videos`)
 - `download_errors` - Download error logging
 - `queue` - Persisted download queue (status, attempts, last_error); done/failed rows auto-pruned after 7 days
@@ -160,4 +159,5 @@ Optional:
 - `/api/search/<query>/<page>` - Search
 - `/api/stats` - Statistics dashboard data
 - `/api/status/stream` - SSE: live queue/download progress
+- `/api/health` - Liveness probe (one SELECT 1; used by the Docker HEALTHCHECK)
 - `/api/subscribe/unsubscribe/<type>/<value>` - Manage subscriptions

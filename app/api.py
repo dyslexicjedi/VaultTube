@@ -473,6 +473,22 @@ def watch_status(vid):
 def api_checkdb():
     return str(checkdb(current_app.logger))
 
+@api_bp.route("/health")
+def api_health():
+    """Liveness probe for the Docker HEALTHCHECK: one pooled SELECT 1
+    (checkdb is too heavy to run every probe interval)."""
+    try:
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        cur.close()
+        con.close()
+        return api_success()
+    except Exception as e:
+        current_app.logger.error("Health check failed: %s" % e)
+        return api_error("unhealthy: %s" % e, 503)
+
 @api_bp.route('/status/queue/')
 def queue_status():
     data = {}

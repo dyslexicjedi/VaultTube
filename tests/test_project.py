@@ -853,6 +853,13 @@ def test_creator_count(client):
     assert isinstance(data['count'], int)
 
 
+def test_health(client):
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    data = json.loads(response.get_data(as_text=True))
+    assert data['success'] is True
+
+
 def test_video_getvids_unwatched(client):
     response = client.get("/api/getvids/unwatched/PublishedAt/desc/0")
     data = json.loads(response.get_data(as_text=True))
