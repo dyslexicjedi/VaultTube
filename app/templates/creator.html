@@ -28,7 +28,7 @@
     }
 
     function load(p) {
-        getJSON('/api/creator/' + encodeURIComponent(creator) + '/' + (p - 1)).then(function (vids) {
+        getJSON('/api/creator/' + encodeURIComponent(creator) + '/' + ((p - 1) * 40)).then(function (vids) {
             if (vids.length) {
                 var name = vids[0].youtuber || creator;
                 document.getElementById('creator-name').textContent = name;

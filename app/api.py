@@ -135,6 +135,7 @@ def imgid(id):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select image from images where id = %s;",(id,))
+        fallback = False
         if cur.rowcount > 0:
             img = cur.fetchone()[0]
         else:
@@ -142,13 +143,26 @@ def imgid(id):
             result = cur.fetchone()
             if result:
                 img = result[0]
+                fallback = True
             else:
                 cur.close()
                 con.close()
                 return "Image not found", 404
         cur.close()
         con.close()
-        return send_file(io.BytesIO(img),mimetype='image/jpeg',as_attachment=True,download_name='%s.jpg' % id)
+        resp = send_file(io.BytesIO(img), mimetype='image/jpeg')
+        # send_file defaults BytesIO responses to no-cache, which would
+        # override max-age below
+        resp.cache_control.no_cache = None
+        resp.cache_control.public = True
+        if fallback:
+            # Placeholder: keep it short so the real thumbnail shows up soon
+            resp.cache_control.max_age = 300
+        else:
+            # A video's thumbnail never changes once stored
+            resp.cache_control.max_age = 30 * 86400
+            resp.cache_control.immutable = True
+        return resp
     except Exception as e:
         current_app.logger.error("API Image Failed: %s"%e)
         return "Image error", 500
@@ -340,7 +354,8 @@ def api_creator(creator,page):
         current_app.logger.debug("Called Creator %s %s"%(creator,page))
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        offset = int(page) * 40  # fixed offset
+        # Raw row offset, pre-multiplied by the caller like every other endpoint
+        offset = int(page) if page.isdigit() else 0
         cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.channelId = %s order by v.PublishedAt desc limit 40 offset %s;", (creator, offset))
         return parse_response(cur,con)
     except Exception as e:
