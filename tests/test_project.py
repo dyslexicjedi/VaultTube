@@ -340,6 +340,27 @@ def test_channels_order_activity(client):
     assert isinstance(data, list)
 
 
+def test_channels_source_filter(client):
+    def displayed_source(ch):
+        if ch['source']:
+            return ch['source']
+        cid = ch.get('channelId') or ch.get('channelid')
+        if cid.startswith('UC'):
+            return 'youtube'
+        return 'patreon' if cid.isdigit() else 'reddit'
+
+    for src in ('youtube', 'patreon', 'reddit'):
+        response = client.get("/api/channels/0?source=" + src)
+        data = json.loads(response.get_data(as_text=True))
+        assert isinstance(data, list)
+        for ch in data:
+            assert displayed_source(ch) == src
+
+    # unknown values are ignored, not an error
+    response = client.get("/api/channels/0?source=bogus")
+    assert isinstance(json.loads(response.get_data(as_text=True)), list)
+
+
 def test_browse_page(client):
     response = client.get("/browse.html")
     assert response.status_code == 200

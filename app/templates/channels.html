@@ -3,6 +3,12 @@
 
 <div class="vt-rail-header" style="margin-bottom:18px">
     <h2>Channels</h2>
+    <div class="vt-seg" id="source-seg">
+        <button type="button" data-value="" class="active">All</button>
+        <button type="button" data-value="youtube">YouTube</button>
+        <button type="button" data-value="patreon">Patreon</button>
+        <button type="button" data-value="reddit">Reddit</button>
+    </div>
     <span class="vt-sub" id="channels-count"></span>
 </div>
 
@@ -14,6 +20,7 @@
 <script>
 (function () {
     var page = 1;
+    var source = '';
 
     function channelSource(c) {
         if (c.source) return c.source;
@@ -50,11 +57,13 @@
 
     function load(p) {
         page = p;
-        fetch('/api/channels/' + ((p - 1) * 40))
+        fetch('/api/channels/' + ((p - 1) * 40) + (source ? '?source=' + source : ''))
             .then(function (r) { return r.json(); })
             .then(function (channels) {
                 document.getElementById('channels-grid').innerHTML = channels.map(tileHTML).join('');
-                document.getElementById('channels-empty').hidden = channels.length > 0;
+                var empty = document.getElementById('channels-empty');
+                empty.hidden = channels.length > 0;
+                empty.textContent = source ? 'No ' + source + ' channels.' : 'No channels yet — download something first.';
                 document.getElementById('channels-count').textContent = channels.length === 40 ? '' : channels.length + ' channels';
                 VT.pager(document.getElementById('channels-pages'), { page: p, hasNext: channels.length === 40, onPage: load });
                 window.scrollTo({ top: 0 });
@@ -71,6 +80,15 @@
                 btn.classList.toggle('on', !subbed);
                 btn.textContent = subbed ? '+ Subscribe' : '✓ Subscribed';
             });
+    });
+
+    document.getElementById('source-seg').addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-value]');
+        if (!btn || btn.classList.contains('active')) return;
+        this.querySelectorAll('button').forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        source = btn.dataset.value;
+        load(1);
     });
 
     load(1);

@@ -281,7 +281,15 @@ def channels(page):
         page_num = int(page) if page.isdigit() else 0
         # order=activity sorts by most recent video (used by the home page rails)
         order_by = "lastvidtime desc" if request.args.get('order') == 'activity' else "channelname"
-        cur.execute(f"select channels.*,count(videos.id) as vidcount,max(PublishedAt) as lastvidtime,coalesce(sum(videos.watched = 0),0) as unwatched,max(videos.source) as source from channels left outer join videos on channels.channelId = videos.channelId group by channels.channelId order by {order_by} limit 40 offset %s;",(page_num,))
+        having = ""
+        params = []
+        src = request.args.get('source')
+        if src in ('youtube', 'patreon', 'reddit'):
+            # Empty channels have no videos.source; classify by ID shape, same
+            # heuristic as channels.html / /api/channel
+            having = " having coalesce(source, case when left(channels.channelId, 2) = 'UC' then 'youtube' when channels.channelId regexp '^[0-9]+$' then 'patreon' else 'reddit' end) = %s"
+            params.append(src)
+        cur.execute(f"select channels.*,count(videos.id) as vidcount,max(PublishedAt) as lastvidtime,coalesce(sum(videos.watched = 0),0) as unwatched,max(videos.source) as source from channels left outer join videos on channels.channelId = videos.channelId group by channels.channelId{having} order by {order_by} limit 40 offset %s;",(*params, page_num))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
