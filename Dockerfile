@@ -1,18 +1,20 @@
 FROM python:3.12-slim
 
-COPY . /app/
-WORKDIR /app
-
-RUN apt update && apt install -y python3-pip libmariadb-dev ffmpeg curl unzip
+# Expensive layers first so code changes don't invalidate them
+RUN apt update && apt install -y --no-install-recommends \
+      libmariadb-dev ffmpeg curl unzip \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Deno — pass -y to suppress any interactive prompts
 ENV DENO_INSTALL="/root/.deno"
 ENV PATH="${DENO_INSTALL}/bin:${PATH}"
 RUN curl -fsSL https://deno.land/install.sh | sh -s -- -y
 
-RUN rm -rf /var/lib/apt/lists/*
-
+COPY requirements.txt /app/requirements.txt
+WORKDIR /app
 RUN pip install -r requirements.txt
+
+COPY . /app/
 
 # Shell form so ${VAULTTUBE_PORT} expands; /api/health is one SELECT 1
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
