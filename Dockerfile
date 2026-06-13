@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 # Expensive layers first so code changes don't invalidate them
 RUN apt update && apt install -y --no-install-recommends \
-      libmariadb-dev ffmpeg curl unzip \
+      libmariadb-dev gcc ffmpeg curl unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Deno — pass -y to suppress any interactive prompts
