@@ -25,7 +25,7 @@ streamHandler.setLevel(logging.INFO)
 logger.addHandler(streamHandler)
 
 #File
-logfile = os.path.abspath(os.curdir)+"VaultTube.log"
+logfile = os.path.join(os.path.abspath(os.curdir), "VaultTube.log")
 timedHandler = TimedRotatingFileHandler(logfile,when="d",interval=1,backupCount=7)
 timedHandler.setFormatter(formatter)
 timedHandler.setLevel(logging.INFO)

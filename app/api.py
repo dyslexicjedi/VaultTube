@@ -126,6 +126,7 @@ def getvids(status,opt,direction,page):
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Latest Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route('/images/<string:id>')
 def imgid(id):
@@ -208,6 +209,7 @@ def unwatched(id):
         return api_success()
     except Exception as e:
         current_app.logger.error("Mark Unwatched Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/set_timestamp/<string:ts>/<string:id>")
 def set_timestamp(id,ts):
@@ -235,6 +237,7 @@ def list_resume():
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API List Resume Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/download/single", methods=["POST"])
 def api_download():
@@ -270,7 +273,8 @@ def get_video_count():
         con.close()
         return str(count)
     except Exception as e:
-        current_app.logger.error("API Image Failed: %s"%e)
+        current_app.logger.error("API Video Count Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route('/channels/<string:page>')
 def channels(page):
@@ -293,6 +297,7 @@ def channels(page):
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Channel Failed: %s"%e)
+        return api_error(str(e), 500)
 
 
 @api_bp.route('/channel/<string:channelid>')
@@ -340,6 +345,7 @@ def api_creator(creator,page):
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
+        return api_error(str(e), 500)
 
 #Removed 11/20/25
 # @api_bp.route('/unwatched/<string:opt>/<string:page>')
@@ -399,6 +405,7 @@ def api_search(searchtxt,page):
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Search Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/sub_status/<string:type>/<string:value>")
 def sub_status(type,value):
@@ -428,6 +435,7 @@ def sub_status(type,value):
         return str(data)
     except Exception as e:
         current_app.logger.error("sub_status Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/watch_status/<string:vid>")
 def watch_status(vid):
@@ -444,6 +452,7 @@ def watch_status(vid):
         return str(data)
     except Exception as e:
         current_app.logger.error("Watch Status Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/checkdb")
 def api_checkdb():
@@ -607,7 +616,8 @@ def playlists(page):
         cur.execute("select * from playlists order by playlistName desc limit 40 offset %s;",(page_num,))
         return parse_response(cur,con)
     except Exception as e:
-        current_app.logger.error("API Channel Failed: %s"%e)
+        current_app.logger.error("API Playlists Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route('/playlist/<string:playlist>/<string:page>')
 def api_playlist(playlist,page):
@@ -620,6 +630,7 @@ def api_playlist(playlist,page):
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Playlist Failed: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route('/random')
 def api_random():
@@ -635,6 +646,7 @@ def api_random():
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Random Fail: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/up_next/<string:vid>")
 def api_up_next(vid):
@@ -690,6 +702,7 @@ def api_fnp(vid):
         return json.dumps(ret, indent=4, sort_keys=True, default=str)
     except Exception as e:
         current_app.logger.error("API FNP Fail: %s"%e)
+        return api_error(str(e), 500)
 
 @api_bp.route("/delete/<string:vid>")
 def api_delete(vid):
@@ -698,7 +711,8 @@ def api_delete(vid):
         cur = con.cursor()
         cur.execute("select filepath from videos where id = %s",(vid,))
         filepath = cur.fetchone()[0]
-        filepath = '/videos'+filepath
+        # DB stores the path relative to the vault root (with a leading slash)
+        filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], filepath.lstrip('/'))
         try:
             os.remove(filepath)
         except Exception as e:
@@ -813,6 +827,11 @@ def api_upload_video():
         if not video_file or not video_id or not title or not channel_id or not published_at_str:
             return "Missing required fields", 400
 
+        # Both IDs become path components under the vault
+        for component in (video_id, channel_id):
+            if '/' in component or '\\' in component or component in ('.', '..'):
+                return "Invalid videoId or channelId", 400
+
         try:
             published_at = datetime.datetime.strptime(published_at_str, "%Y-%m-%d")
         except Exception:
@@ -821,6 +840,7 @@ def api_upload_video():
         # Save to vault directory
         vault_dir = os.environ['VAULTTUBE_VAULTDIR']
         file_path = os.path.join(vault_dir,channel_id, f"{video_id}.mp4")
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         # Ensure no overwrite, skip if exists
         if not os.path.exists(file_path):
@@ -906,7 +926,8 @@ def get_video_unwatched_count():
         con.close()
         return str(count)
     except Exception as e:
-        current_app.logger.error("API Image Failed: %s"%e)
+        current_app.logger.error("API Unwatched Count Failed: %s"%e)
+        return api_error(str(e), 500)
 
 def get_playlist_info(playlistid, logger):
     try:
