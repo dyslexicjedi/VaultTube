@@ -3,14 +3,16 @@ import mariadb,json,io,math,os,queue as _queue
 import subprocess
 from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse
 from backend import process_channel,save_uploaded_video_metadata
-from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors,delete_download_error
-from flask import request,jsonify
+from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors,delete_download_error, update_video_codec_info
+from flask import request,jsonify,abort
 import shutil
 import datetime
 import requests
 
 from QueueObject import QueueObject
 from queue_utils import enqueue
+from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir
+from werkzeug.exceptions import HTTPException
 
 api_bp = Blueprint('api',__name__)
 
@@ -110,7 +112,7 @@ def getvids(status,opt,direction,page):
         
         where_clause = "where " + " AND ".join(where_clauses) if where_clauses else ""
         
-        sql = f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid {where_clause} order by {safe_opt} {safe_direction} limit 40 offset %s"
+        sql = f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid {where_clause} order by {safe_opt} {safe_direction} limit 40 offset %s"
         
         params = []
         if channel_ids:
@@ -175,7 +177,7 @@ def getVideo(id):
             id = id.split(".")[0]
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where id = %s;",(id,))
+        cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where id = %s;",(id,))
         # serialize results into JSON
         row_headers=[x[0] for x in cur.description]
         rv = cur.fetchall()
@@ -183,9 +185,24 @@ def getVideo(id):
         for result in rv:
             json_data.append(dict(zip(row_headers,result)))
         json_data[0]['filepath'] = '/videos/'+json_data[0]['filepath']
-        # cur.execute("Select distinct playlist from playlists p where videoid = '%s'"%id)
-        # results = cur.fetchall()
-        # json_data[0]['playlists'] = [x[0] for x in results]
+        # Lazy backfill codec info if any field is missing
+        v = json_data[0]
+        if v.get('vcodec') is None or v.get('acodec') is None or v.get('container') is None:
+            try:
+                # filepath in response is /videos/<rel>; DB stores <rel>
+                rel = (v['filepath'][len('/videos/'):] if v['filepath'].startswith('/videos/') else v['filepath']).lstrip('/')
+                source_path = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], rel)
+                if os.path.isfile(source_path):
+                    info = get_codec_info(source_path, current_app.logger)
+                    if not info['container']:
+                        info['container'] = get_container_from_ext(source_path)
+                    if info['vcodec'] or info['acodec']:
+                        update_video_codec_info(id, info['vcodec'], info['acodec'], info['container'], current_app.logger)
+                        v['vcodec'] = info['vcodec']
+                        v['acodec'] = info['acodec']
+                        v['container'] = info['container']
+            except Exception as e:
+                current_app.logger.error("Lazy codec backfill failed for %s: %s", id, e)
         cur.close()
         con.close()
         # return the results!
@@ -247,7 +264,7 @@ def list_resume():
         current_app.logger.debug("Called List Resume")
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where not timestamp = 0 order by PublishedAt desc limit 40;")
+        cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where not timestamp = 0 order by PublishedAt desc limit 40;")
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API List Resume Failed: %s"%e)
@@ -356,7 +373,7 @@ def api_creator(creator,page):
         cur = con.cursor()
         # Raw row offset, pre-multiplied by the caller like every other endpoint
         offset = int(page) if page.isdigit() else 0
-        cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.channelId = %s order by v.PublishedAt desc limit 40 offset %s;", (creator, offset))
+        cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.channelId = %s order by v.PublishedAt desc limit 40 offset %s;", (creator, offset))
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Creator Failed: %s"%e)
@@ -671,9 +688,9 @@ def api_random():
         cur = con.cursor()
         include_reddit = request.args.get('include_reddit', '0')
         if include_reddit == '1':
-            cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid order by RAND() LIMIT 40;")
+            cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid order by RAND() LIMIT 40;")
         else:
-            cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.source in ('youtube','patreon') order by RAND() LIMIT 40;")
+            cur.execute(f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.source in ('youtube','patreon') order by RAND() LIMIT 40;")
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Random Fail: %s"%e)
@@ -698,7 +715,7 @@ def api_up_next(vid):
             con.close()
             return "[]"
         channel_id, published_at = cur.fetchone()
-        cols = "v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title"
+        cols = "v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container"
         base = f"select {cols} from videos v left outer join channels c on v.channelId = c.channelid where v.watched = 0 and v.id != %s and "
         queries = [
             (base + "v.channelId = %s and v.PublishedAt > %s order by v.PublishedAt asc limit %s;", (vid, channel_id, published_at, limit)),
@@ -811,39 +828,67 @@ def api_stats():
         current_app.logger.error("API Stats Error: %s"%e)
         return api_error(str(e), 500)
     
+@api_bp.route('/transcode/<string:video_id>/playlist.m3u8')
+def transcode_playlist(video_id):
+    """Return an HLS playlist for video_id. Launches FFmpeg on demand."""
+    try:
+        current_app.logger.debug('Called HLS playlist for: %s', video_id)
+        cache_dir = generate_hls(video_id, current_app.logger)
+        if not cache_dir:
+            abort(404)
+        touch_cache_access(video_id)
+        playlist_path = os.path.join(cache_dir, 'playlist.m3u8')
+        if not os.path.exists(playlist_path):
+            abort(404)
+        return send_file(
+            playlist_path,
+            mimetype='application/vnd.apple.mpegurl',
+            conditional=False,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        current_app.logger.error("HLS playlist failed for %s: %s", video_id, e)
+        return api_error(str(e), 500)
+
+
+@api_bp.route('/transcode/<string:video_id>/seg_<string:segment>.ts')
+def transcode_segment(video_id, segment):
+    """Serve a single HLS segment from the transcode cache."""
+    try:
+        current_app.logger.debug('Called HLS segment %s for: %s', segment, video_id)
+        if not segment.isdigit():
+            abort(404)
+        cache_dir = get_transcode_cache_dir(video_id)
+        seg_path = os.path.join(cache_dir, 'seg_%05d.ts' % int(segment))
+        real_cache = os.path.realpath(cache_dir)
+        real_seg = os.path.realpath(seg_path)
+        if not real_seg.startswith(real_cache + os.sep):
+            abort(404)
+        if not os.path.isfile(real_seg):
+            note_segment_request(video_id)  # still counts as interest
+            touch_cache_access(video_id)
+            abort(404)
+        note_segment_request(video_id)
+        touch_cache_access(video_id)
+        resp = send_file(
+            real_seg,
+            mimetype='video/MP2T',
+            conditional=True,
+        )
+        resp.headers['Accept-Ranges'] = 'bytes'
+        return resp
+    except HTTPException:
+        raise
+    except Exception as e:
+        current_app.logger.error("HLS segment failed for %s/%s: %s", video_id, segment, e)
+        return api_error(str(e), 500)
+
+
+# Legacy transcoding endpoint removed; use /api/transcode/<id>/playlist.m3u8
 @api_bp.route('/transcode/<path:videopath>')
-def transcode(videopath):
-    # locate the source file
-    source_path = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], videopath)
-    if not os.path.isfile(source_path):
-        abort(404)
-    cmd = [
-        "ffmpeg",
-        "-i", source_path,
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-movflags", "+frag_keyframe+empty_moov",
-        "-f", "mp4",
-        "pipe:1"
-    ]
-
-    # launch FFmpeg as a subprocess
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    # generator that yields chunks of transcoded data
-    def generate():
-        try:
-            while True:
-                chunk = process.stdout.read(8192)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            process.stdout.close()
-            process.wait()
-
-    # return streaming response
-    return Response(generate(), mimetype="video/mp4")
+def transcode_legacy(videopath):
+    return api_error("Use /api/transcode/<video_id>/playlist.m3u8", 410)
 
 @api_bp.route("/upload/video", methods=["POST"])
 def api_upload_video():

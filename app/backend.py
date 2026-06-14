@@ -1,6 +1,7 @@
 import glob,time,os,re,requests,datetime,json,cv2,logging
 from flask import current_app
 from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted,get_video_index
+from transcoder import get_codec_info, get_container_from_ext
 
 # yt-dlp working files: *.part, *.part-FragN, *.ytdl, and pre-merge *.fNNN.* streams
 _PARTIAL_RE = re.compile(r'\.part(-Frag\d+)?$|\.ytdl$|\.f\d+\.')
@@ -46,6 +47,8 @@ def scan_vault(logger):
                 if lengths[id] == "0":
                     _update_video_length(id, fpath, logger)
                     lengths[id] = "updated"
+                # Backfill codec/container metadata lazily during scan
+                _maybe_update_codec_info(id, fpath, logger)
             elif looks_like_youtube(fpath):
                 logger.info("Processing New Video: %s"%fpath)
                 process_new_video(id,fpath,logger)
@@ -57,6 +60,27 @@ def scan_vault(logger):
         else:
             process_channel(filename,logger)
     logger.info("Vault scan complete: %d files in %.1fs" % (files, time.time() - started))
+
+
+def _maybe_update_codec_info(id, fpath, logger):
+    from database import get_connection
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("SELECT vcodec, acodec, container FROM videos WHERE id = %s", (id,))
+        row = cur.fetchone()
+        if row and (row[0] is None or row[1] is None or row[2] is None):
+            info = get_codec_info(fpath, logger)
+            if info['vcodec'] or info['acodec']:
+                cur.execute(
+                    "UPDATE videos SET vcodec=%s, acodec=%s, container=%s WHERE id=%s",
+                    (info['vcodec'], info['acodec'], info.get('container') or get_container_from_ext(fpath), id)
+                )
+                con.commit()
+        cur.close()
+        con.close()
+    except Exception as e:
+        logger.error("Error updating codec info for %s: %s" % (id, e))
 
 def _update_video_length(id, fpath, logger):
     try:
@@ -79,12 +103,24 @@ def get_video(fpath,logger):
             #In database
             if(not check_db_video_length(id,logger)):
                 _update_video_length(id, fpath, logger)
+            _maybe_update_codec_info(id, fpath, logger)
         else:
             #Missing from database
             logger.info("Processing New Video: %s"%fpath)
             process_new_video(id,fpath,logger)
     except Exception as e:
         logger.error("Error in get_video Failed: %s"%e)
+
+def _extract_codec_info(fpath, logger):
+    """Probe codec/container for a newly-discovered file."""
+    try:
+        info = get_codec_info(fpath, logger)
+        if not info['container']:
+            info['container'] = get_container_from_ext(fpath)
+        return info
+    except Exception as e:
+        logger.error("Error extracting codec info for %s: %s" % (fpath, e))
+        return {'vcodec': None, 'acodec': None, 'container': get_container_from_ext(fpath)}
 
 def process_new_video(id,fpath,logger):
     ret = {}
@@ -113,7 +149,10 @@ def process_new_video(id,fpath,logger):
             # calculate duration of the video
             seconds = round(frames / fps)
             data.release()
-            ret['length'] = datetime.timedelta(seconds=seconds) 
+            ret['length'] = datetime.timedelta(seconds=seconds)
+            # Codec/container metadata
+            codec_info = _extract_codec_info(fpath, logger)
+            ret.update(codec_info)
             if("high" in retj["items"][0]["snippet"]["thumbnails"]):
                 ret['ImageURL'] = retj["items"][0]["snippet"]["thumbnails"]["high"]["url"]
             elif("standard" in retj["items"][0]["snippet"]["thumbnails"]):
@@ -251,6 +290,8 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         ret['length'] = length_td
         ret['title'] = title
         ret['description'] = ""
+        codec_info = _extract_codec_info(file_path, current_app.logger)
+        ret.update(codec_info)
 
         save_video(video_id,ret,thumbnail_img,current_app.logger,source)
     except Exception as e:

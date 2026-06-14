@@ -6,6 +6,7 @@ from backend import backend_thread,deleted_check_thread
 from database import checkdb,get_resumable_queue_items
 from scanner import start_scanner
 from downloader import start_dl_queue
+from transcoder import start_reaper_thread, start_cleanup_thread, shutdown_transcoder
 from QueueObject import QueueObject
 from dotenv import load_dotenv
 
@@ -55,6 +56,10 @@ sys.excepthook = log_uncaught_exceptions
 #timeout. Exit explicitly (worker threads are daemons; the queue is DB-backed).
 def _graceful_exit(signum, frame):
     logger.info("Received signal %s, shutting down", signum)
+    try:
+        shutdown_transcoder(logger)
+    except Exception as e:
+        logger.error("Transcoder shutdown error: %s", e)
     sys.exit(0)
 
 signal.signal(signal.SIGTERM, _graceful_exit)
@@ -139,6 +144,9 @@ def start_background_threads():
     #Re-enabled: lookups are batched 50/call now and only changes are logged
     dc = threading.Thread(target=deleted_check_thread,args=(logger,app),daemon=True)
     dc.start()
+    # HLS transcode reaper/cleanup threads
+    start_reaper_thread(logger)
+    start_cleanup_thread(logger)
 
 def startup():
     #Check Database

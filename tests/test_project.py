@@ -1,4 +1,4 @@
-import pytest,os,json,mariadb
+import pytest,os,json,mariadb,time,shutil,subprocess
 import threading
 from providers.base import set_status, update_status, del_status, get_status_copy
 
@@ -1199,3 +1199,103 @@ def test_patreon_inline_video_detection():
     assert _post_has_video({'post_type': 'text_only', 'content_json_string': cjs_video}) is True
     assert _post_has_video({'post_type': 'text_only', 'content_json_string': cjs_text}) is False
     assert _post_has_video({'post_type': 'text_only'}) is False
+
+
+@pytest.mark.skipif(shutil.which('ffmpeg') is None, reason='ffmpeg not available')
+def test_video_codec_fields_and_hls(client):
+    """End-to-end HLS transcode for a non-Apple video file."""
+    import logging
+    from transcoder import get_transcode_cache_dir
+
+    vault = os.environ['VAULTTUBE_VAULTDIR']
+    channel_dir = os.path.join(vault, 'HlsTestChannel')
+    os.makedirs(channel_dir, exist_ok=True)
+    source_path = os.path.join(channel_dir, 'HlsVid1.webm')
+
+    # Generate a tiny VP9+Opus webm (definitely not Apple-direct)
+    subprocess.run([
+        'ffmpeg', '-y', '-f', 'lavfi', '-i', 'testsrc=duration=5:size=320x240:rate=10',
+        '-f', 'lavfi', '-i', 'sine=frequency=1000:duration=5',
+        '-c:v', 'libvpx-vp9', '-b:v', '100k',
+        '-c:a', 'libopus', '-b:a', '32k',
+        source_path,
+    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    try:
+        con = _db_connect()
+        cur = con.cursor()
+        cur.execute(
+            "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched, timestamp, source) "
+            "VALUES('HlsVid1', 'HlsTestChannel', 'HlsTestChannel', '{}', 'HlsTestChannel/HlsVid1.webm', "
+            "'2024-01-01 10:00:00', 'HLS Test', 0, 0, 'youtube');"
+        )
+        con.commit()
+        con.close()
+
+        response = client.get("/api/video/HlsVid1")
+        data = json.loads(response.get_data(as_text=True))
+        v = data[0]
+        assert v['id'] == 'HlsVid1'
+        assert v['vcodec'] is not None
+        assert v['acodec'] is not None
+        assert v['container'] == 'webm'
+
+        # HLS playlist request should launch transcode and return m3u8
+        response = client.get("/api/transcode/HlsVid1/playlist.m3u8")
+        assert response.status_code in (200, 404)  # 404 if first segment not ready yet
+        if response.status_code == 200:
+            assert response.content_type == 'application/vnd.apple.mpegurl'
+            body = response.get_data(as_text=True)
+            assert body.startswith('#EXTM3U')
+            assert 'seg_' in body
+        else:
+            # Poll briefly for the playlist to appear
+            for _ in range(20):
+                time.sleep(0.5)
+                response = client.get("/api/transcode/HlsVid1/playlist.m3u8")
+                if response.status_code == 200:
+                    break
+            assert response.status_code == 200
+            assert response.content_type == 'application/vnd.apple.mpegurl'
+            body = response.get_data(as_text=True)
+            assert body.startswith('#EXTM3U')
+            assert 'seg_' in body
+
+        # First segment should be TS
+        response = client.get("/api/transcode/HlsVid1/seg_00000.ts")
+        assert response.status_code == 200
+        assert response.content_type == 'video/MP2T'
+
+        # Non-numeric segment must be rejected by the segment route (404)
+        response = client.get("/api/transcode/HlsVid1/seg_abc.ts")
+        assert response.status_code == 404
+
+        # Paths with slashes fall through to the legacy (gone) route
+        response = client.get("/api/transcode/HlsVid1/seg_../../../etc/passwd.ts")
+        assert response.status_code == 410
+
+        # Legacy path-based endpoint is gone
+        response = client.get("/api/transcode/foo/bar.mp4")
+        assert response.status_code == 410
+    finally:
+        _delete_test_file(source_path)
+        cache_dir = get_transcode_cache_dir('HlsVid1')
+        shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
+
+
+def test_apple_direct_routing_detection():
+    """is_apple_direct recognizes H264+AAC+mp4 and rejects everything else."""
+    from transcoder import is_apple_direct
+
+    assert is_apple_direct('h264', 'aac', 'mp4') is True
+    assert is_apple_direct('avc1', 'mp4a', 'mov') is True
+    assert is_apple_direct('h264', 'aac', 'webm') is False
+    assert is_apple_direct('vp9', 'opus', 'webm') is False
+    assert is_apple_direct(None, 'aac', 'mp4') is False
+
+
+def _delete_test_file(path):
+    try:
+        os.remove(path)
+    except Exception:
+        pass

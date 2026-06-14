@@ -156,7 +156,17 @@
         }
 
         vPlayer = videojs('player', { techOrder: ['html5'], autoplay: false });
-        vPlayer.src([{ type: 'video/webm', src: filepath }]);
+        var isAppleDirect = /^(avc1|h264)$/i.test(v.vcodec || '') &&
+                            /^(aac|mp4a)$/i.test(v.acodec || '') &&
+                            /^(mp4|mov|m4v)$/i.test(v.container || '');
+        if (isAppleDirect) {
+            vPlayer.src([{ type: 'video/mp4', src: filepath }]);
+        } else {
+            vPlayer.src([{
+                type: 'application/x-mpegURL',
+                src: '/api/transcode/' + encodeURIComponent(v.id) + '/playlist.m3u8'
+            }]);
+        }
         vPlayer.fluid(true);
         if (v.timestamp && parseInt(v.timestamp, 10) !== 0) {
             vPlayer.currentTime(parseInt(v.timestamp, 10));

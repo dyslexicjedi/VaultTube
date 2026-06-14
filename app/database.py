@@ -81,6 +81,19 @@ def checkdb(logger):
             cur.execute("ALTER TABLE videos ADD FULLTEXT KEY `ft_search` (`title`, `description`);")
         # Backfill description from json blob for existing YouTube records
         cur.execute("UPDATE videos SET description = JSON_UNQUOTE(JSON_EXTRACT(json, '$.items[0].snippet.description')) WHERE description IS NULL AND source = 'youtube' AND JSON_VALID(json) AND JSON_EXTRACT(json, '$.items[0].snippet.description') IS NOT NULL;")
+        # Codec/container metadata for direct-play vs transcode routing
+        cur.execute("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = %s AND table_name = 'videos' AND column_name = 'vcodec'", (os.environ['VAULTTUBE_DBNAME'],))
+        if cur.fetchone()[0] == 0:
+            logger.info("Adding vcodec column to videos table...")
+            cur.execute("ALTER TABLE videos ADD COLUMN `vcodec` varchar(50) DEFAULT NULL;")
+        cur.execute("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = %s AND table_name = 'videos' AND column_name = 'acodec'", (os.environ['VAULTTUBE_DBNAME'],))
+        if cur.fetchone()[0] == 0:
+            logger.info("Adding acodec column to videos table...")
+            cur.execute("ALTER TABLE videos ADD COLUMN `acodec` varchar(50) DEFAULT NULL;")
+        cur.execute("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = %s AND table_name = 'videos' AND column_name = 'container'", (os.environ['VAULTTUBE_DBNAME'],))
+        if cur.fetchone()[0] == 0:
+            logger.info("Adding container column to videos table...")
+            cur.execute("ALTER TABLE videos ADD COLUMN `container` varchar(50) DEFAULT NULL;")
         # Add indexes for advanced filtering
         cur.execute("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = %s AND table_name = 'videos' AND index_name = 'idx_channelId'", (os.environ['VAULTTUBE_DBNAME'],))
         if cur.fetchone()[0] == 0:
@@ -192,8 +205,8 @@ def save_video(id,ret,img,logger,source='youtube'):
         con = get_connection(logger)
         cur = con.cursor()
         #Save Video Data
-        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length,source,title,description) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title'],ret.get('description','')))
+        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length,source,title,description,vcodec,acodec,container) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
+        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title'],ret.get('description',''),ret.get('vcodec'),ret.get('acodec'),ret.get('container')))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))
@@ -298,6 +311,21 @@ def check_db_video_length(id,logger):
         # Fail closed ("length is known") so errors don't trigger cv2 work
         logger.error("Error during check_db_video_length: %s"%e)
         return True
+
+def update_video_codec_info(id, vcodec, acodec, container, logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute(
+            "UPDATE videos SET vcodec=%s, acodec=%s, container=%s WHERE id=%s",
+            (vcodec, acodec, container, id)
+        )
+        con.commit()
+        cur.close()
+        con.close()
+    except Exception as e:
+        logger.error("Error during update_video_codec_info: %s" % e)
+
 
 def update_length(id,length,logger):
     try:

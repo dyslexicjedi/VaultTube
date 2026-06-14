@@ -12,10 +12,11 @@ VaultTube is a **video archive and player application** built with Python/Flask 
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| **API Layer** | `app/api.py` | REST endpoints for videos, channels, playlists, downloads, search, stats |
+| **API Layer** | `app/api.py` | REST endpoints for videos, channels, playlists, downloads, search, stats, HLS transcode |
 | **Backend** | `app/backend.py` | File scanning, video metadata fetching, channel processing, deletion checks |
 | **Scanner** | `app/scanner.py` | Periodic subscription scanning (channels/playlists) |
-| **Downloader** | `app/downloader.py` | Queue-based download processing |
+| **Downloader** | `app/downloader.py` | Download queue processor |
+| **Transcoder** | `app/transcoder.py` | HLS transcode cache, FFmpeg lifecycle, reaper/cleanup threads |
 | **Database** | `app/database.py` | DB connection, table creation, CRUD operations for videos/channels/playlists |
 | **Providers** | `app/providers/` | Download logic for YouTube (`youtube.py`), Patreon (`patreon.py`), and Reddit/RedGifs (`reddit.py`) |
 
@@ -57,6 +58,7 @@ VaultTube/
 │   ├── backend.py           # File scanning & metadata
 │   ├── scanner.py           # Subscription scanning
 │   ├── downloader.py        # Download queue processor
+│   ├── transcoder.py        # HLS transcode cache, FFmpeg lifecycle, reaper/cleanup threads
 │   ├── database.py          # DB operations
 │   ├── QueueObject.py       # Download queue item
 │   ├── providers/
@@ -109,6 +111,12 @@ Optional:
 - `VAULTTUBE_DISABLEBACK` - Set to anything but "False" to skip starting background threads
 - `VAULTTUBE_DL_DELAY` - Seconds to wait between queued downloads (default 10; single adds skip the delay)
 - `VAULTTUBE_DBPOOL` - DB connection pool size (default 8; overflow falls back to direct connections)
+- `VAULTTUBE_TRANSCODE_CACHE_DIR` - HLS segment cache directory (default `<VAULTTUBE_VAULTDIR>/.transcode_cache`)
+- `VAULTTUBE_TRANSCODE_TTL` - Idle cache lifetime in seconds before pruning (default 86400)
+- `VAULTTUBE_TRANSCODE_MAX_CACHE_GB` - Hard cache cap in GB; oldest idle caches evicted first (default 50)
+- `VAULTTUBE_TRANSCODE_PRESET` - libx264 preset for HLS transcodes (default `veryfast`)
+- `VAULTTUBE_TRANSCODE_CRF` - libx264 quality for HLS transcodes (default 23)
+- `VAULTTUBE_MAX_CONCURRENT_TRANSCODES` - Maximum simultaneous HLS encodes (default 1)
 
 ## File Naming Convention
 ```
@@ -121,6 +129,8 @@ Optional:
 2. **Scanner thread** - Polls subscriptions (hourly)
 3. **Downloader thread** - Processes download queue
 4. **Deleted check thread** - Checks YouTube for source-deleted videos in batches of 50 IDs/call; found videos are tombstoned into `IgnoreVid`
+5. **Transcoder reaper thread** - Kills idle HLS encodes that haven't served a segment recently
+6. **Transcoder cleanup thread** - Prunes stale HLS cache entries by TTL and size cap
 
 ## Download Flow
 1. URL enqueued via `queue_utils.enqueue()` → writes a `queue` table row + puts a `QueueObject` on the in-memory `queue.Queue` (`app.config['queue']`). URLs already pending/downloading are skipped (periodic scans don't duplicate a draining backlog)
@@ -160,4 +170,6 @@ Optional:
 - `/api/stats` - Statistics dashboard data
 - `/api/status/stream` - SSE: live queue/download progress
 - `/api/health` - Liveness probe (one SELECT 1; used by the Docker HEALTHCHECK)
+- `/api/transcode/<video_id>/playlist.m3u8` - HLS playlist for non-Apple videos
+- `/api/transcode/<video_id>/seg_<n>.ts` - HLS segment
 - `/api/subscribe/unsubscribe/<type>/<value>` - Manage subscriptions

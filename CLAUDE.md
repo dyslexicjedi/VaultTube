@@ -112,4 +112,10 @@ paths), `VAULTTUBE_DENOPATH` (deno binary for yt-dlp JS runtime;
 CLIENT_SECRET/USERNAME/PASSWORD/USER_AGENT` (all five needed for the Reddit
 provider), `VAULTTUBE_PORT`, `VAULTTUBE_DEBUG`, `VAULTTUBE_DISABLEBACK`,
 `VAULTTUBE_DL_DELAY` (seconds between queued downloads, default 10; single
-adds unaffected), `VAULTTUBE_DBPOOL` (DB connection pool size, default 8).
+adds unaffected), `VAULTTUBE_DBPOOL` (DB connection pool size, default 8),
+`VAULTTUBE_TRANSCODE_CACHE_DIR` (HLS cache directory, default
+`<VAULTTUBE_VAULTDIR>/.transcode_cache`), `VAULTTUBE_TRANSCODE_TTL` (idle
+cache TTL in seconds, default 86400), `VAULTTUBE_TRANSCODE_MAX_CACHE_GB`
+(max cache size in GB, default 50), `VAULTTUBE_TRANSCODE_PRESET` (libx264
+preset, default `veryfast`), `VAULTTUBE_TRANSCODE_CRF` (libx264 quality,
+default 23), `VAULTTUBE_MAX_CONCURRENT_TRANSCODES` (default 1).
