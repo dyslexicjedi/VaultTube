@@ -133,7 +133,7 @@ def download_video(url, logger, cookies=None):
         _download_attempt(url, base_opts, cookies_contents, logger, label='')
     except DownloadError as e:
         err_msg = str(e)
-        if proxy_url and 'blocked in your country' in err_msg.lower():
+        if proxy_url and 'country' in err_msg.lower() and 'blocked' in err_msg.lower():
             logger.info("YouTube country block detected; retrying through proxy %s" % proxy_url)
             proxy_opts = dict(base_opts)
             proxy_opts['proxy'] = proxy_url
