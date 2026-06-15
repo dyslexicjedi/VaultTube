@@ -157,14 +157,15 @@ Optional:
   the production container before pushing.
 
 ## API Routes (key)
-- `/api/getvids/<status>/<opt>/<direction>/<page>` - Get videos (`?deleted=1` for gone-from-source view)
+- `/api/getvids/<status>/<opt>/<direction>/<page>` - Get videos (`?deleted=1` for gone-from-source view; `?channelId=<id>` or `?channel_ids[]=<id>` to filter by channel)
 - `/api/video/<id>` - Get single video
 - `/api/watched/<id>` - Mark watched
 - `/api/up_next/<id>` - Series-ordered unwatched list for the player
 - `/api/download/single` - Download single URL
 - `/api/downloads/retry` (POST) - Re-enqueue a failed download
 - `/api/channels/<page>` - List channels (per-channel unwatched counts, `?order=activity`)
-- `/api/channel/<id>` - Channel info + derived source URL
+- `/api/channel/<id>` - Channel info + derived source URL, plus `description`, `thumbnail_url`, and `video_count`
+- `/api/channel/<id>/<page>` - Paged videos for a single channel (`?status=unwatched|watched`, `?sort=...`, `?direction=asc|desc`)
 - `/api/creator/<creator>/<page>` - Creator videos
 - `/api/search/<query>/<page>` - Search
 - `/api/stats` - Statistics dashboard data

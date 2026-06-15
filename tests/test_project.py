@@ -727,6 +727,96 @@ def test_channel_source_url_unknown(client):
     assert data['channelname'] is None
 
 
+def test_channel_info_enriched(client):
+    """/api/channel now returns description, thumbnail_url, and video_count."""
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO channels(channelid, channelname, json, subscribed) "
+        "VALUES('ChInfo1', 'Ch Info Name', '{\"items\":[{\"snippet\":{\"description\":\"Test description\",\"thumbnails\":{\"medium\":{\"url\":\"https://example.com/thumb.jpg\"}}}}]}', 1);"
+    )
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched) "
+        "VALUES('ChInfoVid1', 'Ch Info Name', 'ChInfo1', '{}', '/videos/1.mp4', '2024-01-01 10:00:00', 'Ch Info Video', 0);"
+    )
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched) "
+        "VALUES('ChInfoVid2', 'Ch Info Name', 'ChInfo1', '{}', '/videos/2.mp4', '2024-01-02 10:00:00', 'Ch Info Video 2', 1);"
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/channel/ChInfo1")
+    data = json.loads(response.get_data(as_text=True))
+    assert data['channelname'] == 'Ch Info Name'
+    assert data['subscribed'] == 1
+    assert data['description'] == 'Test description'
+    assert data['thumbnail_url'] == 'https://example.com/thumb.jpg'
+    assert data['video_count'] == 2
+
+
+def test_channel_videos_paged(client):
+    """/api/channel/<id>/<page> returns that channel's videos in getvids shape."""
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("REPLACE INTO channels(channelid, channelname, json, subscribed) VALUES('ChVids1','Ch Vids','{}',0);")
+    for n, (title, watched) in enumerate([('A', 0), ('B', 1), ('C', 0)], start=1):
+        cur.execute(
+            "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched) "
+            "VALUES(%s, 'Ch Vids', 'ChVids1', '{}', %s, %s, %s, %s);",
+            ('ChVidsVid%d' % n, '/videos/%d.mp4' % n, '2024-01-0%d 10:00:00' % n, title, watched)
+        )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/channel/ChVids1/0")
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, list)
+    assert len(data) == 3
+    ids = [v['id'] for v in data]
+    assert 'ChVidsVid1' in ids
+    assert 'ChVidsVid2' in ids
+    assert 'ChVidsVid3' in ids
+    assert all('youtuber' in v and 'title' in v for v in data)
+
+
+def test_channel_videos_status_filter(client):
+    """/api/channel/<id>/<page>?status=unwatched filters watched state."""
+    response = client.get("/api/channel/ChVids1/0?status=unwatched")
+    data = json.loads(response.get_data(as_text=True))
+    ids = [v['id'] for v in data]
+    assert 'ChVidsVid1' in ids
+    assert 'ChVidsVid3' in ids
+    assert 'ChVidsVid2' not in ids
+
+    response = client.get("/api/channel/ChVids1/0?status=watched")
+    data = json.loads(response.get_data(as_text=True))
+    ids = [v['id'] for v in data]
+    assert ids == ['ChVidsVid2']
+
+
+def test_channel_videos_sort_direction(client):
+    """/api/channel/<id>/<page>?sort=...&direction=... orders results."""
+    response = client.get("/api/channel/ChVids1/0?sort=title&direction=asc")
+    data = json.loads(response.get_data(as_text=True))
+    titles = [v['title'] for v in data]
+    assert titles == ['A', 'B', 'C']
+
+    response = client.get("/api/channel/ChVids1/0?sort=title&direction=desc")
+    data = json.loads(response.get_data(as_text=True))
+    titles = [v['title'] for v in data]
+    assert titles == ['C', 'B', 'A']
+
+
+def test_getvids_channel_id_query_filter(client):
+    """getvids accepts a single channelId query parameter."""
+    response = client.get("/api/getvids/all/PublishedAt/desc/0?channelId=ChVids1")
+    data = json.loads(response.get_data(as_text=True))
+    ids = [v['id'] for v in data]
+    assert all(v['channelId'] == 'ChVids1' for v in data)
+    assert 'ChVidsVid1' in ids
+
+
 def test_insert_not_found_goes_to_ignorevid(client):
     import logging
     from database import insert_not_found

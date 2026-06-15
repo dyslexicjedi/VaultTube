@@ -87,12 +87,15 @@ def getvids(status,opt,direction,page):
             where_clauses.append(status_cond)
         
         channel_ids = request.args.getlist('channel_ids[]')
+        single_channel = request.args.get('channelId', '').strip()
+        if single_channel:
+            channel_ids.append(single_channel)
         if channel_ids:
             channel_ids_safe = [cid for cid in channel_ids if cid]
             if channel_ids_safe:
                 channel_placeholder = ','.join(['%s'] * len(channel_ids_safe))
                 where_clauses.append(f"v.channelId IN ({channel_placeholder})")
-        
+
         from_date = request.args.get('from_date', '').strip()
         to_date = request.args.get('to_date', '').strip()
         if from_date:
@@ -128,6 +131,48 @@ def getvids(status,opt,direction,page):
         return parse_response(cur,con)
     except Exception as e:
         current_app.logger.error("API Latest Failed: %s"%e)
+        return api_error(str(e), 500)
+
+@api_bp.route('/channel/<string:channelid>/<string:page>')
+def api_channel_videos(channelid, page):
+    """Paged videos for a single channel, using the same row shape as
+    /api/getvids so clients can reuse VTVideo decoding.
+
+    Query parameters (all optional):
+      - status:   all | unwatched | watched   (default: all)
+      - sort:     any column allowed by getvids (default: PublishedAt)
+      - direction: asc | desc                (default: desc)
+    """
+    try:
+        current_app.logger.debug("Called Channel Videos %s %s", channelid, page)
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        page_num = int(page) if page.isdigit() else 0
+
+        status = request.args.get('status', 'all').lower()
+        if status == "unwatched":
+            status_cond = "v.watched = 0"
+        elif status == "watched":
+            status_cond = "v.watched = 1"
+        else:
+            status_cond = ""
+
+        safe_opt = request.args.get('sort', 'PublishedAt')
+        safe_opt = safe_opt if safe_opt in ALLOWED_SORT_COLUMNS else 'PublishedAt'
+        safe_direction = request.args.get('direction', 'desc')
+        safe_direction = safe_direction if safe_direction in ALLOWED_DIRECTIONS else 'desc'
+
+        where_clauses = ["v.channelId = %s"]
+        if status_cond:
+            where_clauses.append(status_cond)
+
+        where_clause = "where " + " AND ".join(where_clauses)
+        sql = f"select v.id,c.channelname as youtuber,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid {where_clause} order by {safe_opt} {safe_direction} limit 40 offset %s"
+
+        cur.execute(sql, (channelid, page_num))
+        return parse_response(cur, con)
+    except Exception as e:
+        current_app.logger.error("API Channel Videos Failed: %s" % e)
         return api_error(str(e), 500)
 
 @api_bp.route('/images/<string:id>')
@@ -331,6 +376,59 @@ def channels(page):
         return api_error(str(e), 500)
 
 
+def _channel_description(jdata, channelid):
+    """Best-effort channel description from stored channel JSON."""
+    if not jdata:
+        return None
+    try:
+        data = json.loads(jdata)
+    except Exception:
+        return None
+    # YouTube channel JSON from the Data API
+    try:
+        desc = data['items'][0]['snippet']['description']
+        if desc:
+            return desc
+    except Exception:
+        pass
+    # Patreon campaign JSON
+    for key in ('creation_name', 'summary', 'name'):
+        try:
+            val = data['data']['attributes'][key]
+            if val:
+                return val
+        except Exception:
+            pass
+    return None
+
+
+def _channel_thumbnail_url(jdata, channelid):
+    """Best-effort channel thumbnail URL from stored channel JSON."""
+    if not jdata:
+        return None
+    try:
+        data = json.loads(jdata)
+    except Exception:
+        return None
+    # YouTube channel thumbnails
+    try:
+        thumbs = data['items'][0]['snippet']['thumbnails']
+        for quality in ('high', 'medium', 'default'):
+            if quality in thumbs and thumbs[quality].get('url'):
+                return thumbs[quality]['url']
+    except Exception:
+        pass
+    # Patreon campaign avatar / image
+    try:
+        attrs = data['data']['attributes']
+        for key in ('avatar_photo_url', 'image_url', 'image_small_url'):
+            if attrs.get(key):
+                return attrs[key]
+    except Exception:
+        pass
+    return None
+
+
 @api_bp.route('/channel/<string:channelid>')
 def api_channel(channelid):
     """Single channel row plus a derived link to the creator's page at the
@@ -358,9 +456,21 @@ def api_channel(channelid):
             vrow = cur.fetchone()
             if vrow and vrow[0] == 'reddit':
                 source_url = 'https://www.reddit.com/user/' + channelid
+
+        cur.execute("select count(*) from videos where channelId = %s;", (channelid,))
+        vidcount = cur.fetchone()[0]
+
         cur.close()
         con.close()
-        return json.dumps({'channelid': channelid, 'channelname': name, 'subscribed': subscribed, 'source_url': source_url}, default=str)
+        return json.dumps({
+            'channelid': channelid,
+            'channelname': name,
+            'subscribed': subscribed,
+            'source_url': source_url,
+            'description': _channel_description(jdata, channelid),
+            'thumbnail_url': _channel_thumbnail_url(jdata, channelid),
+            'video_count': int(vidcount),
+        }, default=str)
     except Exception as e:
         current_app.logger.error("API Channel Info Failed: %s" % e)
         return api_error(str(e), 500)
