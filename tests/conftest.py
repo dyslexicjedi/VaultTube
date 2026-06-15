@@ -29,6 +29,7 @@ def pytest_configure(config):
         )
         _test_container.start()
     except Exception as e:
+        _test_container = None
         import pytest as _pytest
         _pytest.exit(f"Could not start MariaDB test container — is Docker running? ({e})", returncode=3)
 
@@ -107,17 +108,20 @@ _TABLES = ['videos', 'channels', 'images', 'playlists', 'pl2vid', 'IgnoreVid', '
 
 @pytest.fixture(autouse=True)
 def db_cleanup():
-    con = _mariadb.connect(
-        host=os.environ['VAULTTUBE_DBHOST'],
-        user=os.environ['VAULTTUBE_DBUSER'],
-        password=os.environ['VAULTTUBE_DBPASS'],
-        database=os.environ['VAULTTUBE_DBNAME'],
-        autocommit=True,
-        port=int(os.environ['VAULTTUBE_DBPORT']),
-    )
-    cur = con.cursor()
-    for table in _TABLES:
-        cur.execute(f'DELETE FROM `{table}`')
-    cur.close()
-    con.close()
+    try:
+        con = _mariadb.connect(
+            host=os.environ['VAULTTUBE_DBHOST'],
+            user=os.environ['VAULTTUBE_DBUSER'],
+            password=os.environ['VAULTTUBE_DBPASS'],
+            database=os.environ['VAULTTUBE_DBNAME'],
+            autocommit=True,
+            port=int(os.environ['VAULTTUBE_DBPORT']),
+        )
+        cur = con.cursor()
+        for table in _TABLES:
+            cur.execute(f'DELETE FROM `{table}`')
+        cur.close()
+        con.close()
+    except Exception as e:
+        pytest.exit(f'db_cleanup: could not truncate test tables — {e}', returncode=3)
     yield
