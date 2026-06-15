@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'dev'
+      - 'main'
     paths-ignore:
       - '**.md'
   workflow_dispatch:
@@ -42,6 +43,6 @@ jobs:
             with:
               context: .
               push: true
-              tags: dyslexicjedi/vaulttube:dev
+              tags: dyslexicjedi/vaulttube:${{ github.ref_name == 'main' && 'latest' || 'dev' }}
               cache-from: type=gha
               cache-to: type=gha,mode=max
