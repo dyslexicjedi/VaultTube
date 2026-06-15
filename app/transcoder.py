@@ -1,4 +1,4 @@
-import json, os, re, subprocess, threading, time, shutil, glob, hashlib
+import json, math, os, re, subprocess, threading, time, shutil, glob, hashlib
 from pathlib import Path
 
 _FFPROBE_LOCK = threading.Lock()
@@ -64,6 +64,48 @@ def get_container_from_ext(filepath):
     return ext if ext else None
 
 
+_DURATION_LOCK = threading.Lock()
+_duration_cache = {}
+
+
+def get_duration(filepath, logger=None):
+    """Return the source duration in seconds (float) via ffprobe, or None.
+
+    Cached per (path, mtime) like get_codec_info. Used to synthesize a
+    complete VOD playlist before the transcode has finished.
+    """
+    filepath = os.path.abspath(filepath)
+    key = _ffprobe_key(filepath)
+    with _DURATION_LOCK:
+        cached = _duration_cache.get(filepath)
+        if cached and cached[0] == key:
+            return cached[1]
+
+    duration = None
+    try:
+        output = subprocess.check_output(
+            [
+                'ffprobe', '-v', 'quiet',
+                '-print_format', 'json',
+                '-show_format',
+                filepath,
+            ],
+            stderr=subprocess.STDOUT,
+            timeout=60,
+        )
+        data = json.loads(output.decode('utf-8', errors='replace'))
+        raw = data.get('format', {}).get('duration')
+        if raw is not None:
+            duration = float(raw)
+    except Exception as e:
+        if logger:
+            logger.error("ffprobe duration failed for %s: %s", filepath, e)
+
+    with _DURATION_LOCK:
+        _duration_cache[filepath] = (key, duration)
+    return duration
+
+
 def is_apple_direct(vcodec, acodec, container):
     """True if this streams H.264 video + AAC audio in an MP4-ish container."""
     if not vcodec or not acodec or not container:
@@ -81,6 +123,11 @@ def is_apple_direct(vcodec, acodec, container):
 _active = {}            # key -> {'process': Popen, 'last_request': float, 'dir': str}
 _active_lock = threading.Lock()
 _settings_order = ['preset', 'crf', 'vcodec', 'acodec', 'video_filter']
+
+# Target HLS segment length. Keyframes are forced at multiples of this so the
+# produced segment count is deterministic (ceil(duration / SEGMENT_SECONDS))
+# and a synthesized VOD playlist matches the segments FFmpeg actually writes.
+SEGMENT_SECONDS = 6
 
 
 def _settings_hash(settings):
@@ -106,6 +153,16 @@ def get_transcode_settings():
         'acodec': 'aac',
         'video_filter': 'format=yuv420p',
     }
+
+
+def transcode_key(video_id, settings=None):
+    """The (video_id, settings_hash) key used to track a live encode."""
+    return (video_id, _settings_hash(settings or get_transcode_settings()))
+
+
+def source_path_for(video_id, logger):
+    """Public wrapper: resolve the absolute source file path for a video_id."""
+    return _source_path_for(video_id, logger)
 
 
 def _source_path_for(video_id, logger):
@@ -210,9 +267,13 @@ def generate_hls(video_id, logger, source_path=None):
                 '-crf', str(settings['crf']),
                 '-vf', settings['video_filter'],
                 '-c:a', settings['acodec'], '-b:a', '128k',
+                # Force a keyframe every SEGMENT_SECONDS so segment cuts are
+                # deterministic and align with the synthesized VOD playlist.
+                '-force_key_frames', 'expr:gte(t,n_forced*%d)' % SEGMENT_SECONDS,
                 '-f', 'hls',
-                '-hls_time', '6',
+                '-hls_time', str(SEGMENT_SECONDS),
                 '-hls_list_size', '0',
+                '-hls_flags', 'temp_file',
                 '-hls_segment_filename', os.path.join(cache_dir, 'seg_%05d.ts'),
                 playlist_path,
             ]
@@ -269,6 +330,71 @@ def generate_hls(video_id, logger, source_path=None):
                 return None
 
     return cache_dir
+
+
+def segment_count_for_duration(duration):
+    """Number of HLS segments for a source of the given duration (seconds)."""
+    if not duration or duration <= 0:
+        return 0
+    return int(math.ceil(duration / float(SEGMENT_SECONDS)))
+
+
+def build_vod_playlist(duration):
+    """Build a complete VOD m3u8 string for a source of the given duration.
+
+    Emits the full segment list with #EXT-X-PLAYLIST-TYPE:VOD and
+    #EXT-X-ENDLIST up front so HLS clients treat the stream as VOD and play
+    from seg_00000 instead of latching the live edge. Returns None if the
+    duration is unknown so callers can fall back to FFmpeg's own playlist.
+    """
+    n = segment_count_for_duration(duration)
+    if n <= 0:
+        return None
+    lines = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:%d' % SEGMENT_SECONDS,
+        '#EXT-X-MEDIA-SEQUENCE:0',
+        '#EXT-X-PLAYLIST-TYPE:VOD',
+    ]
+    remaining = float(duration)
+    for i in range(n):
+        seg_dur = float(SEGMENT_SECONDS) if remaining >= SEGMENT_SECONDS else remaining
+        lines.append('#EXTINF:%.6f,' % seg_dur)
+        lines.append('seg_%05d.ts' % i)
+        remaining -= SEGMENT_SECONDS
+    lines.append('#EXT-X-ENDLIST')
+    return '\n'.join(lines) + '\n'
+
+
+def wait_for_segment(cache_dir, index, key, timeout=30.0, interval=0.2):
+    """Block until segment `index` is on disk, or give up.
+
+    Segments are written via the hls `temp_file` flag and renamed atomically,
+    so a present, non-empty seg file is complete. Returns the segment path on
+    success, or None if it never appears (timeout, or the encode exited
+    without producing it). Bumps the in-memory last_request while waiting so
+    the reaper doesn't kill the encode out from under a blocked client.
+    """
+    seg_path = os.path.join(cache_dir, 'seg_%05d.ts' % index)
+    deadline = time.time() + timeout
+    while True:
+        if os.path.exists(seg_path) and os.path.getsize(seg_path) > 0:
+            return seg_path
+        # If the encode has exited and the file still isn't here, it never will.
+        running = _is_running(key)
+        with _active_lock:
+            item = _active.get(key)
+            if item:
+                item['last_request'] = time.time()
+        if not running:
+            # One last check to avoid a race where the file landed as we checked.
+            if os.path.exists(seg_path) and os.path.getsize(seg_path) > 0:
+                return seg_path
+            return None
+        if time.time() >= deadline:
+            return None
+        time.sleep(interval)
 
 
 def touch_cache_access(video_id, settings=None):

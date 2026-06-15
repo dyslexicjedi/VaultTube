@@ -1373,6 +1373,80 @@ def test_video_codec_fields_and_hls(client):
         shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
 
 
+def test_build_vod_playlist_is_stable_vod():
+    """Synthesized playlist is a complete VOD list with ENDLIST (issue #24)."""
+    from transcoder import build_vod_playlist, segment_count_for_duration, SEGMENT_SECONDS
+
+    # 20s @ 6s segments -> 4 segments (6, 6, 6, 2)
+    assert segment_count_for_duration(20.0) == 4
+    body = build_vod_playlist(20.0)
+    lines = body.splitlines()
+
+    assert lines[0] == '#EXTM3U'
+    assert '#EXT-X-PLAYLIST-TYPE:VOD' in lines
+    assert '#EXT-X-TARGETDURATION:%d' % SEGMENT_SECONDS in lines
+    assert lines[-1] == '#EXT-X-ENDLIST'
+
+    seg_lines = [l for l in lines if l.startswith('seg_')]
+    assert seg_lines == ['seg_00000.ts', 'seg_00001.ts', 'seg_00002.ts', 'seg_00003.ts']
+
+    # Last segment carries the remainder duration, not a full SEGMENT_SECONDS.
+    inf = [l for l in lines if l.startswith('#EXTINF:')]
+    assert inf[0] == '#EXTINF:6.000000,'
+    assert inf[-1] == '#EXTINF:2.000000,'
+
+
+def test_build_vod_playlist_unknown_duration():
+    """Unknown/zero duration returns None so the caller can fall back."""
+    from transcoder import build_vod_playlist, segment_count_for_duration
+
+    assert build_vod_playlist(None) is None
+    assert build_vod_playlist(0) is None
+    assert segment_count_for_duration(None) == 0
+
+
+def test_wait_for_segment_blocks_then_returns(tmp_path):
+    """wait_for_segment blocks until the file lands, instead of 404-ing."""
+    import threading
+    from transcoder import wait_for_segment, _active, _active_lock
+
+    cache_dir = str(tmp_path)
+    key = ('WaitSegVid', 'deadbeef')
+    seg_path = os.path.join(cache_dir, 'seg_00002.ts')
+
+    # Register a fake running encode so wait_for_segment keeps polling.
+    class _FakeProc:
+        def poll(self):
+            return None
+    with _active_lock:
+        _active[key] = {'process': _FakeProc(), 'last_request': time.time(), 'dir': cache_dir}
+
+    def _write_later():
+        time.sleep(0.5)
+        with open(seg_path, 'wb') as f:
+            f.write(b'\x47' * 188)  # one TS packet
+
+    try:
+        t = threading.Thread(target=_write_later)
+        t.start()
+        result = wait_for_segment(cache_dir, 2, key, timeout=5.0, interval=0.1)
+        t.join()
+        assert result == seg_path
+    finally:
+        with _active_lock:
+            _active.pop(key, None)
+
+
+def test_wait_for_segment_gives_up_when_encode_dead(tmp_path):
+    """If the encode has exited and the file is absent, return None (-> 404)."""
+    from transcoder import wait_for_segment
+
+    # No entry in _active means _is_running() is False -> immediate give-up.
+    result = wait_for_segment(str(tmp_path), 0, ('NoSuchVid', 'cafe'),
+                              timeout=5.0, interval=0.1)
+    assert result is None
+
+
 def test_apple_direct_routing_detection():
     """is_apple_direct recognizes H264+AAC+mp4 and rejects everything else."""
     from transcoder import is_apple_direct

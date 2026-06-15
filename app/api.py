@@ -11,7 +11,7 @@ import requests
 
 from QueueObject import QueueObject
 from queue_utils import enqueue
-from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir
+from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for
 from werkzeug.exceptions import HTTPException
 
 api_bp = Blueprint('api',__name__)
@@ -940,13 +940,33 @@ def api_stats():
     
 @api_bp.route('/transcode/<string:video_id>/playlist.m3u8')
 def transcode_playlist(video_id):
-    """Return an HLS playlist for video_id. Launches FFmpeg on demand."""
+    """Return a stable VOD HLS playlist for video_id. Launches FFmpeg on demand.
+
+    The playlist is synthesized from the source duration so it carries the
+    full segment list, #EXT-X-PLAYLIST-TYPE:VOD and #EXT-X-ENDLIST from the
+    very first request — even while the transcode is still in progress. This
+    keeps HLS clients (AVPlayer) in VOD mode playing from seg_00000 instead of
+    latching the live edge of an endless playlist (issue #24). Segments that
+    aren't on disk yet block in the segment endpoint rather than 404-ing.
+    """
     try:
         current_app.logger.debug('Called HLS playlist for: %s', video_id)
-        cache_dir = generate_hls(video_id, current_app.logger)
+        source_path = source_path_for(video_id, current_app.logger)
+        if not source_path or not os.path.isfile(source_path):
+            abort(404)
+
+        # Kick off (or confirm) the encode so segments start being produced.
+        cache_dir = generate_hls(video_id, current_app.logger, source_path=source_path)
         if not cache_dir:
             abort(404)
         touch_cache_access(video_id)
+
+        body = build_vod_playlist(get_duration(source_path, current_app.logger))
+        if body is not None:
+            return current_app.response_class(
+                body, mimetype='application/vnd.apple.mpegurl')
+
+        # Duration unknown — fall back to FFmpeg's own (live) playlist.
         playlist_path = os.path.join(cache_dir, 'playlist.m3u8')
         if not os.path.exists(playlist_path):
             abort(404)
@@ -964,21 +984,51 @@ def transcode_playlist(video_id):
 
 @api_bp.route('/transcode/<string:video_id>/seg_<string:segment>.ts')
 def transcode_segment(video_id, segment):
-    """Serve a single HLS segment from the transcode cache."""
+    """Serve a single HLS segment, blocking until it's produced if needed.
+
+    The synthesized VOD playlist lists every segment up front, so clients will
+    request segments the transcode hasn't reached yet. Rather than 404-ing
+    instantly (which fails the AVPlayer item — issue #24), we long-poll until
+    FFmpeg writes the segment, restarting the encode if it isn't running.
+    A genuine out-of-range index or a timeout still 404s.
+    """
     try:
         current_app.logger.debug('Called HLS segment %s for: %s', segment, video_id)
         if not segment.isdigit():
             abort(404)
+        index = int(segment)
         cache_dir = get_transcode_cache_dir(video_id)
-        seg_path = os.path.join(cache_dir, 'seg_%05d.ts' % int(segment))
+        seg_path = os.path.join(cache_dir, 'seg_%05d.ts' % index)
         real_cache = os.path.realpath(cache_dir)
         real_seg = os.path.realpath(seg_path)
         if not real_seg.startswith(real_cache + os.sep):
             abort(404)
-        if not os.path.isfile(real_seg):
-            note_segment_request(video_id)  # still counts as interest
-            touch_cache_access(video_id)
-            abort(404)
+
+        note_segment_request(video_id)
+        touch_cache_access(video_id)
+
+        # Fast path: already on disk.
+        if not (os.path.isfile(real_seg) and os.path.getsize(real_seg) > 0):
+            source_path = source_path_for(video_id, current_app.logger)
+            if not source_path or not os.path.isfile(source_path):
+                abort(404)
+
+            # Reject indices beyond the real end of the video.
+            total = segment_count_for_duration(get_duration(source_path, current_app.logger))
+            if total and index >= total:
+                abort(404)
+
+            # Ensure an encode is running (it may have been reaped mid-session).
+            generate_hls(video_id, current_app.logger, source_path=source_path)
+
+            timeout = _segment_wait_timeout()
+            ready = wait_for_segment(
+                cache_dir, index, transcode_key(video_id), timeout=timeout)
+            if not ready:
+                current_app.logger.warning(
+                    "HLS segment %s timed out/unavailable for %s", index, video_id)
+                abort(404)
+
         note_segment_request(video_id)
         touch_cache_access(video_id)
         resp = send_file(
@@ -993,6 +1043,13 @@ def transcode_segment(video_id, segment):
     except Exception as e:
         current_app.logger.error("HLS segment failed for %s/%s: %s", video_id, segment, e)
         return api_error(str(e), 500)
+
+
+def _segment_wait_timeout():
+    try:
+        return max(1.0, float(os.environ.get('VAULTTUBE_TRANSCODE_SEGMENT_TIMEOUT', '30')))
+    except ValueError:
+        return 30.0
 
 
 # Legacy transcoding endpoint removed; use /api/transcode/<id>/playlist.m3u8
