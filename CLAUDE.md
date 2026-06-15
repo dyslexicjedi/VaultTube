@@ -107,7 +107,9 @@ are not in it; copy them in or replicate their logic in the test script.
 Required: `VAULTTUBE_VAULTDIR`, `VAULTTUBE_DBHOST/DBUSER/DBPASS/DBNAME/DBPORT`,
 `VAULTTUBE_YTKEY`.
 Optional: `VAULTTUBE_YTCOOKIE`, `VAULTTUBE_PATREONCOOKIE` (Netscape cookies.txt
-paths), `VAULTTUBE_DENOPATH` (deno binary for yt-dlp JS runtime;
+paths), `VAULTTUBE_PROXY` (HTTP/HTTPS/SOCKS proxy URL for yt-dlp to use when
+YouTube returns a "blocked in your country" error, e.g. `http://10.0.10.5:8888`),
+`VAULTTUBE_DENOPATH` (deno binary for yt-dlp JS runtime;
 `/root/.deno/bin/deno` in the image), `VAULTTUBE_REDDIT_CLIENT_ID/
 CLIENT_SECRET/USERNAME/PASSWORD/USER_AGENT` (all five needed for the Reddit
 provider), `VAULTTUBE_PORT`, `VAULTTUBE_DEBUG`, `VAULTTUBE_DISABLEBACK`,

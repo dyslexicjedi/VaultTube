@@ -99,6 +99,7 @@ Required at startup (validated in `main.py`):
 
 Optional:
 - `VAULTTUBE_YTCOOKIE` - YouTube cookies file (Netscape cookies.txt path)
+- `VAULTTUBE_PROXY` - Optional HTTP/HTTPS/SOCKS proxy URL for yt-dlp to use when YouTube returns a "blocked in your country" error (e.g. `http://10.0.10.5:8888`)
 - `VAULTTUBE_PATREONCOOKIE` - Patreon cookies file (Netscape cookies.txt path)
 - `VAULTTUBE_DENOPATH` - Deno binary path for yt-dlp's JS runtime (`/root/.deno/bin/deno` in the Docker image)
 - `VAULTTUBE_REDDIT_CLIENT_ID` - Reddit API client ID

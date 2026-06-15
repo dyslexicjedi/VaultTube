@@ -3,6 +3,7 @@ import os
 from io import StringIO
 from urllib.parse import urlparse, parse_qs
 import yt_dlp
+from yt_dlp.utils import DownloadError
 from flask import current_app
 
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info, insert_not_found
@@ -60,6 +61,33 @@ def parse_youtube_url(url):
             return ('playlist', url)
     return (None, None)
 
+def _download_attempt(url, ydl_opts, cookies_contents, logger, label=''):
+    """Run a single yt-dlp download attempt. Returns True on success.
+    Cleans up progress status and any temporary cookie StringIO it creates."""
+    opts = dict(ydl_opts)
+    if cookies_contents is not None:
+        opts['cookiefile'] = StringIO(cookies_contents)
+    videoID = None
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            data = ydl.extract_info(url, download=False)
+            channel_id = data['channel_id']
+            videoID = data['id']
+            videoTitle = data['title']
+            set_status(videoID, {'progress': '0%', 'title': videoTitle, 'provider': 'youtube'})
+            if label:
+                logger.info("YouTube %s attempt: downloading %s" % (label, url))
+            ydl.download(url)
+        get_video(os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4", current_app.logger)
+        return True
+    finally:
+        if videoID is not None:
+            del_status(videoID)
+        cookiefile = opts.get('cookiefile')
+        if cookiefile is not None and hasattr(cookiefile, 'close'):
+            cookiefile.close()
+
+
 def download_video(url, logger, cookies=None):
     vid = url.split('/watch?v=')[1] if '/watch?v=' in url else url.split('/shorts/')[1].split('/')[0] if '/shorts/' in url else None
     if not vid:
@@ -76,15 +104,19 @@ def download_video(url, logger, cookies=None):
         logger.error("Unable to download: %s, content was not found." % vid)
         return False
     logger.debug("Starting Download: %s" % url)
-    cookies_local = False
+
     if cookies is None:
-        f = open(os.environ['VAULTTUBE_YTCOOKIE'])
-        contents = f.read()
-        f.close()
-        cookies = StringIO(contents)
-        cookies_local = True
-    ydl_opts = {
-        'cookiefile': cookies,
+        with open(os.environ['VAULTTUBE_YTCOOKIE']) as f:
+            cookies_contents = f.read()
+    elif isinstance(cookies, str):
+        cookies_contents = cookies
+    else:
+        # file-like object passed by caller; read contents but don't consume it
+        cookies_contents = cookies.read()
+        if hasattr(cookies, 'seek'):
+            cookies.seek(0)
+
+    base_opts = {
         'outtmpl': os.environ['VAULTTUBE_VAULTDIR'] + "/%(channel_id)s/%(id)s.mp4",
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         "progress_hooks": [dl_progress_hook],
@@ -95,24 +127,19 @@ def download_video(url, logger, cookies=None):
         'retry_sleep_functions': {'http': lambda n: 5 * n},
         'http_chunk_size': 10485760,
     }
-    videoID = None
+
+    proxy_url = os.environ.get('VAULTTUBE_PROXY')
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            data = ydl.extract_info(url, download=False)
-            channel_id = data['channel_id']
-            videoID = data['id']
-            videoTitle = data['title']
-            set_status(videoID, {'progress': '0%', 'title': videoTitle, 'provider': 'youtube'})
-            ydl.download(url)
-        get_video(os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4", current_app.logger)
-    finally:
-        if videoID is not None:
-            del_status(videoID)
-        if cookies_local:
-            cookies.close()
-    videoTitle = ""
-    videoID = ""
-    channel_id = ""
+        _download_attempt(url, base_opts, cookies_contents, logger, label='')
+    except DownloadError as e:
+        err_msg = str(e)
+        if proxy_url and 'blocked in your country' in err_msg.lower():
+            logger.info("YouTube country block detected; retrying through proxy %s" % proxy_url)
+            proxy_opts = dict(base_opts)
+            proxy_opts['proxy'] = proxy_url
+            _download_attempt(url, proxy_opts, cookies_contents, logger, label='proxy')
+        else:
+            raise
     return True
 
 def download_playlist(qo, logger):
