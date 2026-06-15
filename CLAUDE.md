@@ -120,4 +120,6 @@ adds unaffected), `VAULTTUBE_DBPOOL` (DB connection pool size, default 8),
 cache TTL in seconds, default 86400), `VAULTTUBE_TRANSCODE_MAX_CACHE_GB`
 (max cache size in GB, default 50), `VAULTTUBE_TRANSCODE_PRESET` (libx264
 preset, default `veryfast`), `VAULTTUBE_TRANSCODE_CRF` (libx264 quality,
-default 23), `VAULTTUBE_MAX_CONCURRENT_TRANSCODES` (default 1).
+default 23), `VAULTTUBE_MAX_CONCURRENT_TRANSCODES` (default 1),
+`VAULTTUBE_TRANSCODE_SEGMENT_TIMEOUT` (seconds a segment request long-polls
+for a not-yet-produced segment before 404-ing, default 30).
