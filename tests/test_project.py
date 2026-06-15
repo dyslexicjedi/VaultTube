@@ -14,6 +14,21 @@ def _db_connect():
     )
 
 
+def _insert_chvids():
+    """Insert the ChVids1 channel + 3 videos used by several channel-video tests."""
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("REPLACE INTO channels(channelid, channelname, json, subscribed) VALUES('ChVids1','Ch Vids','{}',0);")
+    for n, (title, watched) in enumerate([('A', 0), ('B', 1), ('C', 0)], start=1):
+        cur.execute(
+            "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched) "
+            "VALUES(%s, 'Ch Vids', 'ChVids1', '{}', %s, %s, %s, %s);",
+            ('ChVidsVid%d' % n, '/videos/%d.mp4' % n, '2024-01-0%d 10:00:00' % n, title, watched)
+        )
+    con.commit()
+    con.close()
+
+
 def test_home(client):
     response = client.get("/")
     assert response.status_code == 200
@@ -757,17 +772,7 @@ def test_channel_info_enriched(client):
 
 def test_channel_videos_paged(client):
     """/api/channel/<id>/<page> returns that channel's videos in getvids shape."""
-    con = _db_connect()
-    cur = con.cursor()
-    cur.execute("REPLACE INTO channels(channelid, channelname, json, subscribed) VALUES('ChVids1','Ch Vids','{}',0);")
-    for n, (title, watched) in enumerate([('A', 0), ('B', 1), ('C', 0)], start=1):
-        cur.execute(
-            "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched) "
-            "VALUES(%s, 'Ch Vids', 'ChVids1', '{}', %s, %s, %s, %s);",
-            ('ChVidsVid%d' % n, '/videos/%d.mp4' % n, '2024-01-0%d 10:00:00' % n, title, watched)
-        )
-    con.commit()
-    con.close()
+    _insert_chvids()
 
     response = client.get("/api/channel/ChVids1/0")
     data = json.loads(response.get_data(as_text=True))
@@ -782,6 +787,7 @@ def test_channel_videos_paged(client):
 
 def test_channel_videos_status_filter(client):
     """/api/channel/<id>/<page>?status=unwatched filters watched state."""
+    _insert_chvids()
     response = client.get("/api/channel/ChVids1/0?status=unwatched")
     data = json.loads(response.get_data(as_text=True))
     ids = [v['id'] for v in data]
@@ -797,6 +803,7 @@ def test_channel_videos_status_filter(client):
 
 def test_channel_videos_sort_direction(client):
     """/api/channel/<id>/<page>?sort=...&direction=... orders results."""
+    _insert_chvids()
     response = client.get("/api/channel/ChVids1/0?sort=title&direction=asc")
     data = json.loads(response.get_data(as_text=True))
     titles = [v['title'] for v in data]
@@ -810,6 +817,7 @@ def test_channel_videos_sort_direction(client):
 
 def test_getvids_channel_id_query_filter(client):
     """getvids accepts a single channelId query parameter."""
+    _insert_chvids()
     response = client.get("/api/getvids/all/PublishedAt/desc/0?channelId=ChVids1")
     data = json.loads(response.get_data(as_text=True))
     ids = [v['id'] for v in data]

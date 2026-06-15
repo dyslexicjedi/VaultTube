@@ -6,3 +6,4 @@ curl_cffi
 opencv-python-headless
 python-dotenv
 praw
+testcontainers
