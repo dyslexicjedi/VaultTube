@@ -586,12 +586,12 @@ def watch_status(vid):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("Select watched from videos where id = %s;",(vid,))
-        data = cur.fetchone()[0]
-        con.commit()
+        row = cur.fetchone()
         cur.close()
         con.close()
-        # return the results!
-        return str(data)
+        if row is None:
+            return api_error("Video not found", 404)
+        return str(row[0])
     except Exception as e:
         current_app.logger.error("Watch Status Failed: %s"%e)
         return api_error(str(e), 500)
@@ -868,7 +868,12 @@ def api_delete(vid):
         con = get_connection(current_app.logger)
         cur = con.cursor()
         cur.execute("select filepath from videos where id = %s",(vid,))
-        filepath = cur.fetchone()[0]
+        row = cur.fetchone()
+        if row is None:
+            cur.close()
+            con.close()
+            return api_error("Video not found", 404)
+        filepath = row[0]
         # DB stores the path relative to the vault root (with a leading slash)
         filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], filepath.lstrip('/'))
         try:
@@ -880,6 +885,7 @@ def api_delete(vid):
         cur.execute("Insert ignore into IgnoreVid(id) values(%s)",(vid,))
         con.commit()
         cur.close()
+        con.close()
         current_app.logger.info("Deleted Video %s"%vid)
         return api_success()
     except Exception as e:

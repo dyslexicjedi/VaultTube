@@ -258,7 +258,10 @@ def get_active_subscriptions(logger):
         con.close()
         return rv
     except Exception as e:
-        logger.error("Error during subscription poll")
+        # Returning None here crashes the scanner's `for id in data:` loop and
+        # kills the subscription thread for the life of the process.
+        logger.error("Error during subscription poll: %s" % e)
+        return []
 
 _pool = None
 _pool_lock = threading.Lock()
@@ -361,7 +364,8 @@ def get_active_playlist_subs(logger):
         con.close()
         return rv
     except Exception as e:
-        logger.error("Error during playlist subscription poll")
+        logger.error("Error during playlist subscription poll: %s" % e)
+        return []
 
 def check_pl2vid_info(pl,vid,logger):
     logger.debug("Checking pl2vid for playlists %s and video %s"%(pl,vid))
@@ -462,7 +466,7 @@ def get_oldest_video_check(logger):
         con.close()
         return rv
     except Exception as e:
-        logger.error("Error during oldest video check")
+        logger.error("Error during oldest video check: %s" % e)
         return []
 
 def update_video_deleted(vid,isDeleted,logger):

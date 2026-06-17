@@ -278,8 +278,8 @@ def generate_hls(video_id, logger, source_path=None):
                 playlist_path,
             ]
             logger.info("Starting HLS transcode for %s", video_id)
+            err_fh = open(err_log, 'wb')
             try:
-                err_fh = open(err_log, 'wb')
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.DEVNULL,
@@ -292,10 +292,12 @@ def generate_hls(video_id, logger, source_path=None):
                     proc.stderr = None
                 except Exception:
                     pass
-                err_fh.close()
             except Exception as e:
                 logger.error("Failed to launch FFmpeg for %s: %s", video_id, e)
                 return None
+            finally:
+                # The child inherited the fd; the parent never reads it.
+                err_fh.close()
             _active[key] = {
                 'process': proc,
                 'last_request': time.time(),

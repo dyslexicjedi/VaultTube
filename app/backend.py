@@ -88,7 +88,7 @@ def _update_video_length(id, fpath, logger):
         data = cv2.VideoCapture(fpath)
         frames = data.get(cv2.CAP_PROP_FRAME_COUNT)
         fps = data.get(cv2.CAP_PROP_FPS)
-        seconds = round(frames / fps)
+        seconds = round(frames / fps) if fps and fps > 0 else 0
         data.release()
         update_length(id,datetime.timedelta(seconds=seconds),logger)
     except Exception as e:
@@ -146,8 +146,8 @@ def process_new_video(id,fpath,logger):
             data = cv2.VideoCapture(fpath)
             frames = data.get(cv2.CAP_PROP_FRAME_COUNT)
             fps = data.get(cv2.CAP_PROP_FPS)
-            # calculate duration of the video
-            seconds = round(frames / fps)
+            # calculate duration of the video (guard fps==0 on corrupt/partial files)
+            seconds = round(frames / fps) if fps and fps > 0 else 0
             data.release()
             ret['length'] = datetime.timedelta(seconds=seconds)
             # Codec/container metadata

@@ -13,6 +13,14 @@ def provider_domains():
 
 
 def _get_reddit_client():
+    _required = (
+        'VAULTTUBE_REDDIT_CLIENT_ID', 'VAULTTUBE_REDDIT_CLIENT_SECRET',
+        'VAULTTUBE_REDDIT_USER_AGENT', 'VAULTTUBE_REDDIT_USERNAME',
+        'VAULTTUBE_REDDIT_PASSWORD',
+    )
+    missing = [v for v in _required if v not in os.environ]
+    if missing:
+        raise RuntimeError("Reddit credentials not configured: %s" % ', '.join(missing))
     return praw.Reddit(
         client_id=os.environ['VAULTTUBE_REDDIT_CLIENT_ID'],
         client_secret=os.environ['VAULTTUBE_REDDIT_CLIENT_SECRET'],

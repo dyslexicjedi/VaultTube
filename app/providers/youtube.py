@@ -106,7 +106,10 @@ def download_video(url, logger, cookies=None):
     logger.debug("Starting Download: %s" % url)
 
     if cookies is None:
-        with open(os.environ['VAULTTUBE_YTCOOKIE']) as f:
+        cookie_path = os.environ.get('VAULTTUBE_YTCOOKIE')
+        if not cookie_path:
+            raise RuntimeError("VAULTTUBE_YTCOOKIE not configured; cannot download from YouTube")
+        with open(cookie_path) as f:
             cookies_contents = f.read()
     elif isinstance(cookies, str):
         cookies_contents = cookies
@@ -120,13 +123,15 @@ def download_video(url, logger, cookies=None):
         'outtmpl': os.environ['VAULTTUBE_VAULTDIR'] + "/%(channel_id)s/%(id)s.mp4",
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         "progress_hooks": [dl_progress_hook],
-        'js_runtimes': {'deno': {'path': os.environ['VAULTTUBE_DENOPATH']}},
         'socket_timeout': 30,
         'retries': 10,
         'fragment_retries': 10,
         'retry_sleep_functions': {'http': lambda n: 5 * n},
         'http_chunk_size': 10485760,
     }
+    deno_path = os.environ.get('VAULTTUBE_DENOPATH')
+    if deno_path:
+        base_opts['js_runtimes'] = {'deno': {'path': deno_path}}
 
     proxy_url = os.environ.get('VAULTTUBE_PROXY')
     try:

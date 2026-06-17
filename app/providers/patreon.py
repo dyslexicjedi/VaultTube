@@ -106,6 +106,8 @@ def scan_campaign(campaign_id, logger):
         logger.error("Scanning Patreon campaign %s failed: %s" % (campaign_id, e))
 
 def download(q,logger):
+    if 'VAULTTUBE_PATREONCOOKIE' not in os.environ:
+        raise RuntimeError("VAULTTUBE_PATREONCOOKIE not configured; cannot download from Patreon")
     try:
         url = _normalize_url(q.url)
         logger.debug("Starting Patreon Download: %s" % url)
@@ -114,7 +116,6 @@ def download(q,logger):
             'outtmpl': os.environ['VAULTTUBE_VAULTDIR']+"/%(channel_id)s/%(id)s.mp4",
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             "progress_hooks": [dl_progress_hook],
-            'js_runtimes': {'deno': {'path': os.environ['VAULTTUBE_DENOPATH']}},
             # Impersonate a browser TLS fingerprint globally (not just for the
             # generic extractor) or Patreon's Cloudflare returns 403 on API calls
             'impersonate': ImpersonateTarget.from_str('chrome'),
@@ -124,6 +125,9 @@ def download(q,logger):
             'retry_sleep_functions': {'http': lambda n: 5 * n},  # back-off: 5s, 10s, 15s...
             'http_chunk_size': 10485760, # 10 MB chunks instead of the default large size
         }
+        deno_path = os.environ.get('VAULTTUBE_DENOPATH')
+        if deno_path:
+            ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 data = ydl.extract_info(url, download=False)
@@ -212,6 +216,8 @@ def _download_inline_video(url, logger):
 
 def patreon_screenshot(videoid,channelid,logger):
     output_img = os.path.join(tempfile.gettempdir(), "%s.jpg" % videoid)
+    con = None
+    cur = None
     try:
         input_video = os.environ['VAULTTUBE_VAULTDIR']+"/"+channelid+"/"+str(videoid)+".mp4"
         rc = subprocess.call(['ffmpeg', '-y', '-i', input_video, '-ss', '00:00:01.000', '-vframes', '1', output_img],
@@ -219,23 +225,31 @@ def patreon_screenshot(videoid,channelid,logger):
         if rc != 0 or not os.path.exists(output_img):
             logger.error("patreon_screenshot: ffmpeg failed for %s (exit %s)" % (videoid, rc))
             return False
-        img = open(output_img,'rb').read()
+        with open(output_img, 'rb') as f:
+            img = f.read()
         con = get_connection(logger)
         cur = con.cursor()
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(videoid,img))
         con.commit()
-        con.close()
         logger.debug("Screenshot saved")
         return True
     except Exception as e:
         logger.error("patreon_screenshot failed for %s: %s" % (videoid, e))
         return False
     finally:
+        if cur is not None:
+            try: cur.close()
+            except Exception: pass
+        if con is not None:
+            try: con.close()
+            except Exception: pass
         if os.path.exists(output_img):
             os.remove(output_img)
 
 def patreon_db_info(videoid,channelid,PublishedAt,title,logger):
+    con = None
+    cur = None
     try:
         t = {
             'id': videoid,
@@ -258,12 +272,18 @@ def patreon_db_info(videoid,channelid,PublishedAt,title,logger):
             sql = "Insert into videos(youtuber,channelId,filepath,PublishedAt,json,source,title,id) values(%s,%s,%s,%s,%s,%s,%s,%s)"
         cur.execute(sql,("",channelid,"/"+channelid+"/"+str(videoid)+".mp4",PublishedAt.strftime('%Y-%m-%d %H:%M:%S.%f'),json.dumps(t),source,title,videoid))
         con.commit()
-        con.close()
         logger.debug("Metadata saved")
         return True
     except Exception as e:
         logger.error("patreon_db_info failed for %s: %s" % (videoid, e))
         return False
+    finally:
+        if cur is not None:
+            try: cur.close()
+            except Exception: pass
+        if con is not None:
+            try: con.close()
+            except Exception: pass
 
 def dl_progress_hook(d):
     try:
