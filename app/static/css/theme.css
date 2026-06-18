@@ -1388,3 +1388,43 @@ a.vt-kpi:hover {
     margin-left: 0;
   }
 }
+
+/* ---------- Accessibility: keyboard focus rings ---------- */
+/* Restore an outline for keyboard navigation on elements that suppress the
+   default outline. Mouse focus still uses the existing :focus border-color
+   feedback, so the ring only shows for keyboard users via :focus-visible. */
+.vt-search input:focus-visible,
+.vt-input:focus-visible,
+.vt-select:focus-visible {
+  outline: 2px solid var(--vt-accent);
+  outline-offset: 1px;
+}
+.vt-btn:focus-visible,
+.vt-btn-ghost:focus-visible,
+.vt-sub-btn:focus-visible,
+.vt-seg button:focus-visible,
+.vt-modal-close:focus-visible,
+.vt-nav-item:focus-visible,
+.vt-all:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--vt-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ---------- Accessibility: honor reduced-motion preference ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+  .vt-btn:hover,
+  .vt-card:hover,
+  .vt-tile:hover {
+    transform: none !important;
+  }
+}
