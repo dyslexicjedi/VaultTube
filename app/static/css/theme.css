@@ -1412,6 +1412,80 @@ a:focus-visible {
   border-radius: 6px;
 }
 
+/* ---------- Chapters (player sidebar + seek-bar markers) ---------- */
+.vt-chapters {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--vt-line);
+}
+.vt-chapters-header {
+  margin-bottom: 8px;
+}
+.vt-chapters-header h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+.vt-chapters-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.vt-chapter-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 8px;
+  margin: 0 -8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.vt-chapter-item:hover,
+.vt-chapter-item:focus-visible {
+  background: var(--vt-surface);
+  outline: none;
+}
+.vt-chapter-item.active {
+  background: var(--vt-accent-soft);
+}
+.vt-chapter-item.active .vt-chapter-time,
+.vt-chapter-item.active .vt-chapter-title {
+  color: var(--vt-accent);
+}
+.vt-chapter-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  color: var(--vt-text-dim);
+  white-space: nowrap;
+}
+.vt-chapter-title {
+  font-size: 13.5px;
+  color: var(--vt-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Seek-bar chapter markers: thin accent ticks over the video.js progress
+   bar. pointer-events:none so they never hijack native seeking. */
+.video-js .vjs-progress-holder {
+  position: relative;
+}
+.vt-chapter-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--vt-accent);
+  opacity: 0.85;
+  pointer-events: none;
+  z-index: 2;
+}
+
 /* ---------- Accessibility: honor reduced-motion preference ---------- */
 @media (prefers-reduced-motion: reduce) {
   *,

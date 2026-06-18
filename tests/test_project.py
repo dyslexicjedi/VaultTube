@@ -1471,3 +1471,89 @@ def _delete_test_file(path):
         os.remove(path)
     except Exception:
         pass
+
+
+# ---------------- Chapter parsing (issue #27) ----------------
+
+def _ch(desc):
+    from chapters import parse_chapters
+    return parse_chapters(desc)
+
+
+def test_parse_chapters_valid():
+    desc = ("In this video we build a thing.\n\n"
+            "0:00 Intro\n"
+            "2:15 Setup\n"
+            "10:42 Demo\n"
+            "45:00 Outro\n")
+    ch = _ch(desc)
+    assert [c['start'] for c in ch] == [0, 135, 642, 2700]
+    assert ch[0]['title'] == 'Intro'
+    assert ch[2]['title'] == 'Demo'
+
+
+def test_parse_chapters_hours_and_separators():
+    desc = ("0:00:00 - Intro\n"
+            "01:30:00 | Main Event\n")
+    ch = _ch(desc)
+    assert [c['start'] for c in ch] == [0, 5400]
+    assert ch[1]['title'] == 'Main Event'
+
+
+def test_parse_chapters_first_not_zero_rejected():
+    desc = "0:05 Intro\n2:15 Setup\n10:42 Demo\n"
+    assert _ch(desc) == []
+
+
+def test_parse_chapters_single_timestamp_rejected():
+    assert _ch("0:00 Only one\n") == []
+
+
+def test_parse_chapters_non_monotonic_rejected():
+    desc = "0:00 Intro\n10:00 Middle\n5:00 Backwards\n"
+    assert _ch(desc) == []
+
+
+def test_parse_chapters_empty_and_none():
+    assert _ch(None) == []
+    assert _ch("") == []
+    assert _ch("No timestamps here at all.\nJust text.") == []
+
+
+def test_parse_chapters_ignores_inline_timestamps():
+    # A timestamp in the middle of a sentence is not a chapter line.
+    desc = "We meet at 2:30 for lunch.\n0:00 Start\n5:00 End\n"
+    ch = _ch(desc)
+    assert [c['start'] for c in ch] == [0, 300]
+
+
+def test_chapters_endpoint(client):
+    con = _db_connect()
+    cur = con.cursor()
+    desc = "0:00 Intro\n2:15 Setup\n10:42 Demo\n"
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
+        "VALUES('ChapEP1', 'ChapCreator', 'ChapCh1', '{}', '/videos/chap1.mp4', "
+        "'2024-01-01 10:00:00', 'Chapter Test', %s);",
+        (desc,)
+    )
+    # Chapter-less video → empty list
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
+        "VALUES('ChapEP2', 'ChapCreator', 'ChapCh1', '{}', '/videos/chap2.mp4', "
+        "'2024-01-02 10:00:00', 'No Chapters', 'Just a plain description with no timestamps.');"
+    )
+    con.commit()
+    con.close()
+
+    data = json.loads(client.get("/api/chapters/ChapEP1").get_data(as_text=True))
+    assert [c['start'] for c in data['chapters']] == [0, 135, 642]
+    assert data['chapters'][1]['title'] == 'Setup'
+
+    data = json.loads(client.get("/api/chapters/ChapEP2").get_data(as_text=True))
+    assert data['chapters'] == []
+
+    # Missing video → graceful empty list, not an error
+    data = json.loads(client.get("/api/chapters/DoesNotExist").get_data(as_text=True))
+    assert data['chapters'] == []
+

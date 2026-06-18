@@ -11,6 +11,7 @@ import requests
 
 from QueueObject import QueueObject
 from queue_utils import enqueue
+from chapters import parse_chapters
 from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for
 from werkzeug.exceptions import HTTPException
 
@@ -851,6 +852,30 @@ def api_up_next(vid):
     except Exception as e:
         current_app.logger.error("API Up Next Failed: %s" % e)
         return "[]"
+
+@api_bp.route("/chapters/<string:vid>")
+def api_chapters(vid):
+    """Parsed chapter markers for a video, derived from its stored description.
+
+    Returns ``{"chapters": [{"start": <seconds>, "title": <str>}, ...]}``.
+    Always returns a list (empty when the description has no parseable
+    chapters, or the video doesn't exist) so the player's single code path
+    is a graceful no-op for non-YouTube / chapter-less sources. See
+    ``chapters.parse_chapters`` for the parsing rules.
+    """
+    try:
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("select description from videos where id = %s;", (vid,))
+        row = cur.fetchone()
+        cur.close()
+        con.close()
+        description = row[0] if row else None
+        return jsonify({"chapters": parse_chapters(description)})
+    except Exception as e:
+        current_app.logger.error("API Chapters Failed: %s" % e)
+        return jsonify({"chapters": []})
+
 
 @api_bp.route("/find_next_previous/<string:vid>")
 def api_fnp(vid):

@@ -52,6 +52,10 @@
     </div>
 
     <aside>
+        <div class="vt-chapters" id="chapters" hidden>
+            <div class="vt-chapters-header"><h2>Chapters</h2></div>
+            <ol class="vt-chapters-list" id="chapters-list"></ol>
+        </div>
         <div class="vt-upnext-header">
             <h2>Up next</h2>
             <label class="vt-autoplay"><input type="checkbox" id="autoplay-toggle"> Autoplay</label>
@@ -186,6 +190,8 @@
             }
         });
 
+        // --- Chapters (derived from the stored description, no re-download) ---
+        loadChapters();
         document.addEventListener('keydown', function (event) {
             var tag = (event.target.tagName || '').toLowerCase();
             if (tag === 'input' || tag === 'textarea' || event.target.isContentEditable) return;
@@ -208,6 +214,92 @@
         var expanded = $id('desc').classList.toggle('expanded');
         this.textContent = expanded ? 'Show less' : 'Show more';
     });
+
+    // --- Chapters: seek-bar markers + clickable sidebar list ---
+    var chapters = [];
+    var markerEls = [];
+    var listEls = [];
+    var activeIdx = -1;
+
+    function fmtChapterTime(sec) {
+        sec = Math.max(0, Math.floor(sec));
+        var h = Math.floor(sec / 3600);
+        var m = Math.floor((sec % 3600) / 60);
+        var s = sec % 60;
+        var mm = h > 0 ? String(m).padStart(2, '0') : String(m);
+        var ss = String(s).padStart(2, '0');
+        return (h > 0 ? h + ':' : '') + mm + ':' + ss;
+    }
+
+    function renderMarkers() {
+        if (!vPlayer) return;
+        var holder = document.querySelector('#player .vjs-progress-holder');
+        if (!holder) return;
+        // Clear any previous markers (e.g. re-render on durationchange)
+        markerEls.forEach(function (el) { el.remove(); });
+        markerEls = [];
+        var dur = vPlayer.duration();
+        if (!dur || !isFinite(dur)) return;
+        chapters.forEach(function (ch) {
+            var el = document.createElement('div');
+            el.className = 'vt-chapter-marker';
+            // Clamp the final marker inside the bar (last chapter start can
+            // sit very close to the end); others fall within range.
+            var pct = Math.min(100, Math.max(0, (ch.start / dur) * 100));
+            el.style.left = pct + '%';
+            el.title = ch.title;
+            holder.appendChild(el);
+            markerEls.push(el);
+        });
+    }
+
+    function renderChapterList() {
+        var listEl = $id('chapters-list');
+        listEl.innerHTML = '';
+        listEls = [];
+        chapters.forEach(function (ch, i) {
+            var li = document.createElement('li');
+            li.className = 'vt-chapter-item';
+            li.setAttribute('role', 'button');
+            li.setAttribute('tabindex', '0');
+            li.innerHTML = '<span class="vt-chapter-time">' + VT.esc(fmtChapterTime(ch.start)) + '</span>'
+                + '<span class="vt-chapter-title">' + VT.esc(ch.title) + '</span>';
+            var seek = function () {
+                if (vPlayer) { vPlayer.currentTime(ch.start); vPlayer.userActive(true); }
+            };
+            li.addEventListener('click', seek);
+            li.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); seek(); }
+            });
+            listEl.appendChild(li);
+            listEls.push(li);
+        });
+        $id('chapters').hidden = false;
+    }
+
+    function updateActiveChapter() {
+        if (!vPlayer || !chapters.length) return;
+        var t = vPlayer.currentTime();
+        var idx = 0;
+        for (var i = 0; i < chapters.length; i++) {
+            if (t >= chapters[i].start) idx = i; else break;
+        }
+        if (idx !== activeIdx) {
+            activeIdx = idx;
+            listEls.forEach(function (el, i) { el.classList.toggle('active', i === idx); });
+        }
+    }
+
+    function loadChapters() {
+        getJSON('/api/chapters/' + encodeURIComponent(id)).then(function (data) {
+            chapters = (data && data.chapters) || [];
+            if (!chapters.length) return; // no chapter UI for chapter-less / non-YouTube
+            renderChapterList();
+            renderMarkers();
+            vPlayer.on('durationchange', renderMarkers);
+            vPlayer.on('timeupdate', updateActiveChapter);
+        });
+    }
 
     // --- Previous / Next in series (fuzzy title match within creator) ---
     getJSON('/api/find_next_previous/' + encodeURIComponent(id)).then(function (data) {
