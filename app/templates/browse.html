@@ -217,6 +217,13 @@
         });
     }
 
+    // Deep link: /browse.html?from_date=YYYY-MM-DD (e.g. "Browse all" from New this week)
+    var fromParam = new URLSearchParams(window.location.search).get('from_date');
+    if (fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam)) {
+        state.from_date = fromParam;
+        document.getElementById('from-date').value = fromParam;
+    }
+
     update(1);
 </script>
 {% endblock %}
