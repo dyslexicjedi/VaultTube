@@ -627,3 +627,138 @@ def cleanup_old_errors(logger, days=7):
         con.close()
     except Exception as e:
         logger.error("Error during cleanup_old_errors: %s", e)
+
+
+# --- Export helpers ---
+
+def export_video_rows(logger, include_json=False):
+    """Generator yielding one catalog dict per video for the export endpoint."""
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        json_sel = ", v.json" if include_json else ""
+        cur.execute(
+            "SELECT v.id, v.title, v.channelId, c.channelname, v.source, "
+            "v.AddedAt, v.PublishedAt, v.watched, v.`timestamp`, v.`length`, "
+            "v.filepath, v.vcodec, v.acodec, v.container, v.filesize, "
+            "v.isDeleted, v.description" + json_sel + " "
+            "FROM videos v LEFT JOIN channels c ON v.channelId = c.channelid "
+            "ORDER BY v.AddedAt"
+        )
+        cols = ['id', 'title', 'channelId', 'channelName', 'source',
+                'AddedAt', 'PublishedAt', 'watched', 'timestamp', 'length',
+                'filepath', 'vcodec', 'acodec', 'container', 'filesize',
+                'isDeleted', 'description']
+        if include_json:
+            cols.append('json')
+        for row in cur:
+            d = dict(zip(cols, row))
+            for k in ('AddedAt', 'PublishedAt'):
+                if d[k] is not None:
+                    d[k] = d[k].isoformat()
+            if d['length'] is not None:
+                d['length'] = str(d['length'])
+            if include_json and d.get('json'):
+                try:
+                    d['json'] = json.loads(d['json'])
+                except Exception:
+                    pass
+            yield d
+        cur.close()
+        con.close()
+    except Exception as e:
+        logger.error("export_video_rows failed: %s", e)
+
+
+def export_subscribed_channels(logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("SELECT channelid, channelname, json FROM channels WHERE subscribed = 1")
+        rows = []
+        for row in cur:
+            d = {'channelId': row[0], 'channelName': row[1]}
+            if row[2]:
+                try:
+                    d['metadata'] = json.loads(row[2])
+                except Exception:
+                    pass
+            rows.append(d)
+        cur.close()
+        con.close()
+        return rows
+    except Exception as e:
+        logger.error("export_subscribed_channels failed: %s", e)
+        return []
+
+
+def export_subscribed_playlists(logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("SELECT playlistId, playlistName, channelId, json FROM playlists WHERE subscribed = 1")
+        rows = []
+        for row in cur:
+            d = {'playlistId': row[0], 'playlistName': row[1], 'channelId': row[2]}
+            if row[3]:
+                try:
+                    d['metadata'] = json.loads(row[3])
+                except Exception:
+                    pass
+            rows.append(d)
+        cur.close()
+        con.close()
+        return rows
+    except Exception as e:
+        logger.error("export_subscribed_playlists failed: %s", e)
+        return []
+
+
+def export_pl2vid(logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("SELECT playlistId, videoId FROM pl2vid ORDER BY playlistId")
+        rows = [{'playlistId': r[0], 'videoId': r[1]} for r in cur]
+        cur.close()
+        con.close()
+        return rows
+    except Exception as e:
+        logger.error("export_pl2vid failed: %s", e)
+        return []
+
+
+def export_tombstones(logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("SELECT id FROM IgnoreVid")
+        ids = [r[0] for r in cur]
+        cur.close()
+        con.close()
+        return ids
+    except Exception as e:
+        logger.error("export_tombstones failed: %s", e)
+        return []
+
+
+def export_row_counts(logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        counts = {}
+        for name, sql in [
+            ('videos', "SELECT COUNT(*) FROM videos"),
+            ('subscribed_channels', "SELECT COUNT(*) FROM channels WHERE subscribed = 1"),
+            ('subscribed_playlists', "SELECT COUNT(*) FROM playlists WHERE subscribed = 1"),
+            ('mappings', "SELECT COUNT(*) FROM pl2vid"),
+            ('tombstones', "SELECT COUNT(*) FROM IgnoreVid"),
+        ]:
+            cur.execute(sql)
+            counts[name] = cur.fetchone()[0]
+        cur.close()
+        con.close()
+        return counts
+    except Exception as e:
+        logger.error("export_row_counts failed: %s", e)
+        return {}

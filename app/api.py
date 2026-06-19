@@ -1,9 +1,9 @@
-from flask import Blueprint,current_app,send_file,Response,abort
-import mariadb,json,io,math,os,queue as _queue
+from flask import Blueprint,current_app,send_file,Response,abort,stream_with_context
+import mariadb,json,io,csv,math,os,queue as _queue
 import subprocess
 from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse
 from backend import process_channel,save_uploaded_video_metadata
-from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors,delete_download_error, update_video_codec_info
+from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors,delete_download_error, update_video_codec_info, export_video_rows, export_subscribed_channels, export_subscribed_playlists, export_pl2vid, export_tombstones, export_row_counts
 from flask import request,jsonify,abort
 import shutil
 import datetime
@@ -1249,6 +1249,99 @@ def get_video_unwatched_count():
     except Exception as e:
         current_app.logger.error("API Unwatched Count Failed: %s"%e)
         return api_error(str(e), 500)
+
+def _build_export_config():
+    env = os.environ
+    return {
+        'vault_dir': env.get('VAULTTUBE_VAULTDIR'),
+        'port': env.get('VAULTTUBE_PORT', '5000'),
+        'dl_delay': env.get('VAULTTUBE_DL_DELAY', '10'),
+        'dbpool': env.get('VAULTTUBE_DBPOOL', '8'),
+        'transcode_cache_dir': env.get('VAULTTUBE_TRANSCODE_CACHE_DIR'),
+        'transcode_ttl': env.get('VAULTTUBE_TRANSCODE_TTL', '86400'),
+        'transcode_max_cache_gb': env.get('VAULTTUBE_TRANSCODE_MAX_CACHE_GB', '50'),
+        'transcode_preset': env.get('VAULTTUBE_TRANSCODE_PRESET', 'veryfast'),
+        'transcode_crf': env.get('VAULTTUBE_TRANSCODE_CRF', '23'),
+        'max_concurrent_transcodes': env.get('VAULTTUBE_MAX_CONCURRENT_TRANSCODES', '1'),
+        'transcode_segment_timeout': env.get('VAULTTUBE_TRANSCODE_SEGMENT_TIMEOUT', '30'),
+        'proxy': env.get('VAULTTUBE_PROXY'),
+        'deno_path': env.get('VAULTTUBE_DENOPATH'),
+        'providers': {
+            'youtube': {
+                'api_key_configured': bool(env.get('VAULTTUBE_YTKEY')),
+                'cookie_path': env.get('VAULTTUBE_YTCOOKIE'),
+            },
+            'patreon': {
+                'cookie_path': env.get('VAULTTUBE_PATREONCOOKIE'),
+            },
+            'reddit': {
+                'configured': all(env.get(k) for k in [
+                    'VAULTTUBE_REDDIT_CLIENT_ID',
+                    'VAULTTUBE_REDDIT_CLIENT_SECRET',
+                    'VAULTTUBE_REDDIT_USERNAME',
+                    'VAULTTUBE_REDDIT_PASSWORD',
+                    'VAULTTUBE_REDDIT_USER_AGENT',
+                ]),
+            },
+        },
+    }
+
+
+@api_bp.route('/export')
+def api_export():
+    include_json = request.args.get('include_json', '0') == '1'
+    fmt = request.args.get('format', 'json').lower()
+    logger = current_app.logger
+    ts = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+
+    if fmt == 'csv':
+        def generate_csv():
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            cols = ['id', 'title', 'channelId', 'channelName', 'source',
+                    'AddedAt', 'PublishedAt', 'watched', 'timestamp', 'length',
+                    'filepath', 'vcodec', 'acodec', 'container', 'filesize',
+                    'isDeleted', 'description']
+            writer.writerow(cols)
+            yield buf.getvalue()
+            for row in export_video_rows(logger, include_json=False):
+                buf.seek(0)
+                buf.truncate()
+                writer.writerow([row.get(c) for c in cols])
+                yield buf.getvalue()
+        return Response(
+            stream_with_context(generate_csv()),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename="vaulttube_export_%s.csv"' % ts},
+        )
+
+    def generate_json():
+        counts = export_row_counts(logger)
+        meta = {
+            'exported_at': datetime.datetime.utcnow().isoformat() + 'Z',
+            'include_json': include_json,
+            'counts': counts,
+        }
+        yield '{"meta":' + json.dumps(meta, default=str) + ',"catalog":['
+        first = True
+        for row in export_video_rows(logger, include_json):
+            if not first:
+                yield ','
+            yield json.dumps(row, default=str)
+            first = False
+        channels = export_subscribed_channels(logger)
+        playlists = export_subscribed_playlists(logger)
+        yield '],"subscriptions":' + json.dumps({'channels': channels, 'playlists': playlists}, default=str)
+        yield ',"mappings":' + json.dumps(export_pl2vid(logger), default=str)
+        yield ',"tombstones":' + json.dumps(export_tombstones(logger), default=str)
+        yield ',"config":' + json.dumps(_build_export_config(), default=str) + '}'
+
+    return Response(
+        stream_with_context(generate_json()),
+        mimetype='application/json',
+        headers={'Content-Disposition': 'attachment; filename="vaulttube_export_%s.json"' % ts},
+    )
+
 
 def get_playlist_info(playlistid, logger):
     try:

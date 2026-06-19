@@ -355,4 +355,28 @@
     });
 })();
 </script>
+
+<div class="vt-section" style="margin-top:34px">
+    <div class="vt-rail-header" style="margin-bottom:12px">
+        <h2>Export / Backup</h2>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="vt-btn" id="exp-json-btn" onclick="doExport('json')">Download JSON</button>
+        <button type="button" class="vt-btn vt-btn-ghost" id="exp-csv-btn" onclick="doExport('csv')">Download CSV</button>
+        <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--vt-dim);cursor:pointer;margin-left:4px">
+            <input type="checkbox" id="exp-include-json" style="accent-color:var(--vt-accent)">
+            Include raw metadata blob (JSON only, larger file)
+        </label>
+    </div>
+    <p style="margin-top:10px;font-size:12px;color:var(--vt-dim)">
+        Exports catalog, subscriptions, playlist mappings, and tombstones — no video files, no credentials.
+        CSV exports the catalog only (one row per video).
+    </p>
+</div>
+<script>
+function doExport(fmt) {
+    var inc = (fmt === 'json' && document.getElementById('exp-include-json').checked) ? '1' : '0';
+    window.location.href = '/api/export?format=' + fmt + '&include_json=' + inc;
+}
+</script>
 {% endblock %}
