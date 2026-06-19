@@ -565,6 +565,35 @@ def _max_cache_bytes():
     return int(gb * 1024 * 1024 * 1024)
 
 
+def cache_stats():
+    """Snapshot of the transcode cache for /api/storage. Read-only walk that
+    mirrors _enforce_cache_size_cap; never evicts."""
+    ttl = int(os.environ.get('VAULTTUBE_TRANSCODE_TTL', '86400'))
+    cap_bytes = _max_cache_bytes()
+    base = _cache_base_dir()
+    if not os.path.isdir(base):
+        return {'bytes': 0, 'entries': 0, 'oldest': None, 'oldest_path': None,
+                'cap_bytes': cap_bytes, 'ttl_seconds': ttl, 'cache_dir': base,
+                'active_transcodes': _count_running()}
+    total = 0
+    entries = 0
+    oldest_atime = None
+    oldest_path = None
+    for entry in glob.glob(os.path.join(base, '*', '*')):
+        if not os.path.isdir(entry):
+            continue
+        entries += 1
+        total += _cache_dir_size(entry)
+        atime = _dir_atime(entry)
+        if oldest_atime is None or atime < oldest_atime:
+            oldest_atime = atime
+            oldest_path = entry
+    return {'bytes': total, 'entries': entries, 'oldest': oldest_atime,
+            'oldest_path': oldest_path, 'cap_bytes': cap_bytes,
+            'ttl_seconds': ttl, 'cache_dir': base,
+            'active_transcodes': _count_running()}
+
+
 def start_cleanup_thread(logger, interval=300.0, ttl_seconds=None):
     def loop():
         while True:

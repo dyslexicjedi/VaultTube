@@ -1,6 +1,6 @@
 import glob,time,os,re,requests,datetime,json,cv2,logging
 from flask import current_app
-from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted,get_video_index
+from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted,get_video_index,update_video_filesize
 from transcoder import get_codec_info, get_container_from_ext
 
 # yt-dlp working files: *.part, *.part-FragN, *.ytdl, and pre-merge *.fNNN.* streams
@@ -49,6 +49,8 @@ def scan_vault(logger):
                     lengths[id] = "updated"
                 # Backfill codec/container metadata lazily during scan
                 _maybe_update_codec_info(id, fpath, logger)
+                # Backfill filesize lazily during scan
+                _maybe_update_filesize(id, fpath, logger)
             elif looks_like_youtube(fpath):
                 logger.info("Processing New Video: %s"%fpath)
                 process_new_video(id,fpath,logger)
@@ -82,6 +84,23 @@ def _maybe_update_codec_info(id, fpath, logger):
     except Exception as e:
         logger.error("Error updating codec info for %s: %s" % (id, e))
 
+def _maybe_update_filesize(id, fpath, logger):
+    """Backfill videos.filesize lazily during scans. NULL = not yet measured."""
+    from database import get_connection
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("SELECT filesize FROM videos WHERE id = %s", (id,))
+        row = cur.fetchone()
+        cur.close()
+        con.close()
+        if row and row[0] is None and os.path.isfile(fpath):
+            size = os.path.getsize(fpath)
+            if size > 0:
+                update_video_filesize(id, size, logger)
+    except Exception as e:
+        logger.error("Error updating filesize for %s: %s" % (id, e))
+
 def _update_video_length(id, fpath, logger):
     try:
         logger.info("Updating Length for id: %s"%fpath)
@@ -104,6 +123,7 @@ def get_video(fpath,logger):
             if(not check_db_video_length(id,logger)):
                 _update_video_length(id, fpath, logger)
             _maybe_update_codec_info(id, fpath, logger)
+            _maybe_update_filesize(id, fpath, logger)
         else:
             #Missing from database
             logger.info("Processing New Video: %s"%fpath)
@@ -153,6 +173,11 @@ def process_new_video(id,fpath,logger):
             # Codec/container metadata
             codec_info = _extract_codec_info(fpath, logger)
             ret.update(codec_info)
+            # File size for storage accounting
+            try:
+                ret['filesize'] = os.path.getsize(fpath)
+            except OSError:
+                ret['filesize'] = None
             if("high" in retj["items"][0]["snippet"]["thumbnails"]):
                 ret['ImageURL'] = retj["items"][0]["snippet"]["thumbnails"]["high"]["url"]
             elif("standard" in retj["items"][0]["snippet"]["thumbnails"]):
@@ -292,6 +317,11 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         ret['description'] = ""
         codec_info = _extract_codec_info(file_path, current_app.logger)
         ret.update(codec_info)
+        # File size for storage accounting
+        try:
+            ret['filesize'] = os.path.getsize(file_path)
+        except OSError:
+            ret['filesize'] = None
 
         save_video(video_id,ret,thumbnail_img,current_app.logger,source)
     except Exception as e:

@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="vt-rail-header" style="margin-bottom:18px">
+    <h2>Storage</h2>
+</div>
+
+<div class="vt-kpi-grid">
+    <a class="vt-kpi" href="/browse.html?show=all">
+        <span class="vt-kpi-label">Videos</span>
+        <span class="vt-kpi-value" id="kpi-videos">—</span>
+        <span class="vt-kpi-sub" id="kpi-videos-sub"></span>
+    </a>
+    <a class="vt-kpi" href="/browse.html">
+        <span class="vt-kpi-label">Unwatched</span>
+        <span class="vt-kpi-value" id="kpi-unwatched">—</span>
+        <div class="vt-meter"><div id="kpi-watched-meter" style="width:0%"></div></div>
+        <span class="vt-kpi-sub" id="kpi-watched-sub"></span>
+    </a>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Runtime stored</span>
+        <span class="vt-kpi-value" id="kpi-runtime">—</span>
+        <span class="vt-kpi-sub">total play time</span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Avg length</span>
+        <span class="vt-kpi-value" id="kpi-avg">—</span>
+        <span class="vt-kpi-sub">per video</span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Channels</span>
+        <span class="vt-kpi-value" id="kpi-channels">—</span>
+        <span class="vt-kpi-sub" id="kpi-channels-sub"></span>
+    </div>
+    <a class="vt-kpi" href="/browse.html?show=deleted">
+        <span class="vt-kpi-label">Gone from source</span>
+        <span class="vt-kpi-value" id="kpi-deleted">—</span>
+        <span class="vt-kpi-sub" id="kpi-deleted-sub"></span>
+    </a>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Total vault</span>
+        <span class="vt-kpi-value" id="kpi-total">—</span>
+        <span class="vt-kpi-sub" id="kpi-total-sub"></span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Largest channel</span>
+        <span class="vt-kpi-value" id="kpi-top-ch">—</span>
+        <span class="vt-kpi-sub" id="kpi-top-ch-sub"></span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Avg size</span>
+        <span class="vt-kpi-value" id="kpi-avg-size">—</span>
+        <span class="vt-kpi-sub">per video</span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Transcode cache</span>
+        <span class="vt-kpi-value" id="kpi-cache">—</span>
+        <div class="vt-meter"><div id="kpi-cache-meter" style="width:0%"></div></div>
+        <span class="vt-kpi-sub" id="kpi-cache-sub"></span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Cache entries</span>
+        <span class="vt-kpi-value" id="kpi-cache-entries">—</span>
+        <span class="vt-kpi-sub" id="kpi-cache-entries-sub"></span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Active transcodes</span>
+        <span class="vt-kpi-value" id="kpi-active">—</span>
+        <span class="vt-kpi-sub" id="kpi-active-sub"></span>
+    </div>
+</div>
+
+<div class="vt-dash">
+    <div class="vt-chart span-8">
+        <span class="vt-chart-title">Top channels by storage</span>
+        <div class="vt-chart-wrap"><canvas id="channelChart"></canvas></div>
+    </div>
+    <div class="vt-chart span-4">
+        <span class="vt-chart-title">By source</span>
+        <div class="vt-chart-wrap"><canvas id="sourceChart"></canvas></div>
+    </div>
+    <div class="vt-chart span-8">
+        <span class="vt-chart-title">Added to vault by bytes — last 6 months</span>
+        <div class="vt-chart-wrap"><canvas id="growthChart"></canvas></div>
+    </div>
+    <div class="vt-chart span-4">
+        <span class="vt-chart-title">Duration mix</span>
+        <div class="vt-chart-wrap"><canvas id="durationChart"></canvas></div>
+    </div>
+    <div class="vt-chart span-12">
+        <span class="vt-chart-title">Transcode cache</span>
+        <div class="vt-chart-wrap" id="cache-wrap">
+            <div id="cache-empty" class="vt-empty">No cache entries.</div>
+            <div class="vt-cache-grid" id="cache-grid" hidden>
+                <div class="vt-cache-row"><span class="vt-cache-k">Cache directory</span><span class="vt-cache-v" id="cache-dir">—</span></div>
+                <div class="vt-cache-row"><span class="vt-cache-k">Configured cap</span><span class="vt-cache-v" id="cache-cap">—</span></div>
+                <div class="vt-cache-row"><span class="vt-cache-k">TTL</span><span class="vt-cache-v" id="cache-ttl">—</span></div>
+                <div class="vt-cache-row"><span class="vt-cache-k">Oldest entry</span><span class="vt-cache-v" id="cache-oldest">—</span></div>
+                <div class="vt-cache-row"><span class="vt-cache-k">Used</span><span class="vt-cache-v" id="cache-used">—</span></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    var ACCENT = '#e6a23c';
+    var DIM = '#9aa0a6';
+    var GRID = 'rgba(255,255,255,0.05)';
+    var GRAY = 'rgba(154,160,166,0.35)';
+    var PALETTE = ['#e6a23c', '#6aa1e0', '#e06a6a', '#7fbf7f', '#b08ad6'];
+
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.font.size = 11;
+    Chart.defaults.color = DIM;
+    Chart.defaults.plugins.tooltip.backgroundColor = '#1b1f26';
+    Chart.defaults.plugins.tooltip.titleColor = '#e8eaed';
+    Chart.defaults.plugins.tooltip.bodyColor = '#9aa0a6';
+    Chart.defaults.plugins.tooltip.borderColor = 'rgba(255,255,255,0.12)';
+    Chart.defaults.plugins.tooltip.borderWidth = 1;
+    Chart.defaults.plugins.tooltip.padding = 10;
+    Chart.defaults.plugins.tooltip.cornerRadius = 8;
+    Chart.defaults.plugins.tooltip.displayColors = false;
+
+    function fmtBytes(n) {
+        if (!n || n <= 0) return '0 B';
+        var units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        var i = Math.floor(Math.log(n) / Math.log(1024));
+        if (i >= units.length) i = units.length - 1;
+        var val = n / Math.pow(1024, i);
+        return (i === 0 ? val.toFixed(0) : val.toFixed(i >= 3 ? 1 : 2)) + ' ' + units[i];
+    }
+    function fmtRuntime(sec) {
+        if (!sec) return '—';
+        var d = Math.floor(sec / 86400);
+        var h = Math.floor((sec % 86400) / 3600);
+        if (d > 0) return d + 'd ' + h + 'h';
+        var m = Math.floor((sec % 3600) / 60);
+        return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+    }
+    function fmtLength(sec) {
+        if (!sec) return '—';
+        var m = Math.floor(sec / 60);
+        var s = sec % 60;
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function monthLabel(iso) {
+        var d = new Date(iso + 'T00:00:00');
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+    function fmtDate(ts) {
+        if (!ts) return '—';
+        var d = new Date(ts * 1000);
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    function fmtTTL(sec) {
+        if (sec >= 86400) return (sec / 86400) + ' days';
+        if (sec >= 3600) return (sec / 3600) + ' hours';
+        return sec + ' seconds';
+    }
+
+    Promise.all([
+        fetch('/api/stats').then(function (r) { return r.json(); }),
+        fetch('/api/storage').then(function (r) { return r.json(); })
+    ]).then(function (results) {
+        var stats = results[0];
+        var data = results[1];
+        var t = stats.totals;
+        var st = data.totals;
+
+        // --- Stats KPIs ---
+        document.getElementById('kpi-videos').textContent = t.videos.toLocaleString();
+        var thisWeek = stats.added_per_week[stats.added_per_week.length - 1][1];
+        document.getElementById('kpi-videos-sub').innerHTML = thisWeek > 0
+            ? '<span class="up">+' + thisWeek + '</span> this week' : 'none added this week';
+
+        document.getElementById('kpi-unwatched').textContent = t.unwatched.toLocaleString();
+        var watchedPct = t.videos ? Math.round((t.watched / t.videos) * 100) : 0;
+        document.getElementById('kpi-watched-meter').style.width = watchedPct + '%';
+        document.getElementById('kpi-watched-sub').textContent = watchedPct + '% watched';
+
+        document.getElementById('kpi-runtime').textContent = fmtRuntime(t.total_seconds);
+        document.getElementById('kpi-avg').textContent = fmtLength(t.avg_seconds);
+        document.getElementById('kpi-channels').textContent = t.channels.toLocaleString();
+        document.getElementById('kpi-channels-sub').textContent = t.playlists + ' playlist' + (t.playlists === 1 ? '' : 's');
+
+        document.getElementById('kpi-deleted').textContent = stats.deleted.deleted.toLocaleString();
+        var delPct = stats.deleted.youtube_total ? ((stats.deleted.deleted / stats.deleted.youtube_total) * 100).toFixed(1) : 0;
+        document.getElementById('kpi-deleted-sub').textContent = delPct + '% of YouTube videos';
+
+        // --- Storage KPIs ---
+        document.getElementById('kpi-total').textContent = fmtBytes(st.bytes);
+        document.getElementById('kpi-total-sub').textContent = st.videos.toLocaleString() + ' video' + (st.videos === 1 ? '' : 's');
+
+        if (data.top_channels.length) {
+            var top = data.top_channels[0];
+            document.getElementById('kpi-top-ch').textContent = top[0] || '—';
+            document.getElementById('kpi-top-ch-sub').textContent = fmtBytes(top[1]) + (top[2] > 1 ? ' · ' + top[2] + ' videos' : '');
+        } else {
+            document.getElementById('kpi-top-ch-sub').textContent = 'no data yet';
+        }
+
+        var avgSize = st.videos ? st.bytes / st.videos : 0;
+        document.getElementById('kpi-avg-size').textContent = avgSize > 0 ? fmtBytes(avgSize) : '—';
+
+        var cache = data.cache;
+        document.getElementById('kpi-cache').textContent = fmtBytes(cache.bytes);
+        var cachePct = cache.cap_bytes ? Math.min(100, (cache.bytes / cache.cap_bytes) * 100) : 0;
+        document.getElementById('kpi-cache-meter').style.width = cachePct.toFixed(1) + '%';
+        document.getElementById('kpi-cache-sub').textContent = fmtBytes(cache.cap_bytes) + ' cap · ' + cachePct.toFixed(1) + '%';
+
+        document.getElementById('kpi-cache-entries').textContent = cache.entries.toLocaleString();
+        document.getElementById('kpi-cache-entries-sub').textContent = cache.entries === 1 ? 'cached video' : 'cached videos';
+
+        document.getElementById('kpi-active').textContent = cache.active_transcodes.toLocaleString();
+        document.getElementById('kpi-active-sub').textContent = cache.active_transcodes === 1 ? 'live encode' : 'live encodes';
+
+        // --- Cache detail card ---
+        if (cache.entries === 0 && cache.bytes === 0) {
+            document.getElementById('cache-grid').hidden = true;
+            document.getElementById('cache-empty').hidden = false;
+        } else {
+            document.getElementById('cache-empty').hidden = true;
+            document.getElementById('cache-grid').hidden = false;
+            document.getElementById('cache-dir').textContent = cache.cache_dir || '—';
+            document.getElementById('cache-cap').textContent = fmtBytes(cache.cap_bytes) + ' (' + cache.cap_gb + ' GB)';
+            document.getElementById('cache-ttl').textContent = fmtTTL(cache.ttl_seconds);
+            document.getElementById('cache-oldest').textContent = fmtDate(cache.oldest);
+            document.getElementById('cache-used').textContent = fmtBytes(cache.bytes) + ' · ' + cache.entries + (cache.entries === 1 ? ' entry' : ' entries');
+        }
+
+        // --- Top channels by bytes: horizontal bar ---
+        new Chart(document.getElementById('channelChart'), {
+            type: 'bar',
+            data: {
+                labels: data.top_channels.map(function (c) { return c[0]; }),
+                datasets: [{
+                    label: 'Storage',
+                    data: data.top_channels.map(function (c) { return c[1]; }),
+                    backgroundColor: ACCENT,
+                    borderRadius: 3,
+                    barThickness: 12
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function (ctx) { return fmtBytes(ctx.raw); }
+                        }
+                    }
+                },
+                scales: {
+                    x: { stacked: true, grid: { color: GRID }, border: { display: false }, ticks: { maxTicksLimit: 6, precision: 0, callback: function (v) { return fmtBytes(v); } } },
+                    y: { stacked: true, grid: { display: false }, border: { display: false } }
+                }
+            }
+        });
+
+        // --- Sources: doughnut by bytes ---
+        new Chart(document.getElementById('sourceChart'), {
+            type: 'doughnut',
+            data: {
+                labels: data.by_source.map(function (s) { return s[0]; }),
+                datasets: [{
+                    data: data.by_source.map(function (s) { return s[1]; }),
+                    backgroundColor: PALETTE,
+                    borderWidth: 2,
+                    borderColor: '#14171c',
+                    hoverOffset: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '72%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { usePointStyle: true, pointStyleWidth: 8, boxHeight: 5, padding: 14 } },
+                    tooltip: {
+                        callbacks: {
+                            label: function (ctx) {
+                                var total = ctx.dataset.data.reduce(function (a, b) { return a + b; }, 0);
+                                var pct = total ? ((ctx.raw / total) * 100).toFixed(1) : 0;
+                                return ctx.label + ': ' + fmtBytes(ctx.raw) + ' (' + pct + '%)';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // --- Growth by bytes: area chart, weekly ---
+        var growthCtx = document.getElementById('growthChart').getContext('2d');
+        var grad = growthCtx.createLinearGradient(0, 0, 0, 220);
+        grad.addColorStop(0, 'rgba(230,162,60,0.28)');
+        grad.addColorStop(1, 'rgba(230,162,60,0)');
+        new Chart(growthCtx, {
+            type: 'line',
+            data: {
+                labels: data.added_per_week_bytes.map(function (w) { return monthLabel(w[0]); }),
+                datasets: [{
+                    data: data.added_per_week_bytes.map(function (w) { return w[1]; }),
+                    borderColor: ACCENT,
+                    borderWidth: 2,
+                    backgroundColor: grad,
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    pointHoverBackgroundColor: ACCENT
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { intersect: false, mode: 'index', callbacks: { label: function (ctx) { return fmtBytes(ctx.raw); } } }
+                },
+                scales: {
+                    x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } },
+                    y: { grid: { color: GRID }, border: { display: false }, beginAtZero: true, ticks: { maxTicksLimit: 5, precision: 0, callback: function (v) { return fmtBytes(v); } } }
+                }
+            }
+        });
+
+        // --- Duration mix ---
+        new Chart(document.getElementById('durationChart'), {
+            type: 'bar',
+            data: {
+                labels: stats.duration_buckets.map(function (b) { return b[0]; }),
+                datasets: [{
+                    data: stats.duration_buckets.map(function (b) { return b[1]; }),
+                    backgroundColor: 'rgba(230,162,60,0.55)',
+                    hoverBackgroundColor: ACCENT,
+                    borderRadius: 4,
+                    barThickness: 22
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, font: { size: 10 } } },
+                    y: { grid: { color: GRID }, border: { display: false }, beginAtZero: true, ticks: { maxTicksLimit: 5, precision: 0 } }
+                }
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

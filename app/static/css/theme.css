@@ -1214,6 +1214,9 @@ a.vt-kpi:hover {
 .vt-dash .span-4 {
   grid-column: span 4;
 }
+.vt-dash .span-12 {
+  grid-column: span 12;
+}
 .vt-chart {
   background: var(--vt-surface);
   border: 1px solid var(--vt-line);
@@ -1235,6 +1238,35 @@ a.vt-kpi:hover {
   position: relative;
   flex: 1;
   min-height: 215px;
+}
+.vt-cache-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 24px;
+  align-content: start;
+  width: 100%;
+}
+.vt-cache-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  background: var(--vt-surface-2);
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius);
+}
+.vt-cache-k {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vt-text-dim);
+}
+.vt-cache-v {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vt-text);
+  word-break: break-all;
 }
 @media (max-width: 1100px) {
   .vt-kpi-grid {

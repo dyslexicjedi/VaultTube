@@ -926,7 +926,7 @@ def test_retry_download_missing_url(client):
     ("/channels.html", b"channels-grid"),
     ("/creator.html", b"creator-grid"),
     ("/search.html", b"search-grid"),
-    ("/stats.html", b"channelChart"),
+    ("/storage.html", b"channelChart"),
     ("/playlists.html", b"playlists-grid"),
     ("/playlist.html", b"playlist-grid"),
     ("/random.html", b"random-grid"),
@@ -1556,4 +1556,255 @@ def test_chapters_endpoint(client):
     # Missing video → graceful empty list, not an error
     data = json.loads(client.get("/api/chapters/DoesNotExist").get_data(as_text=True))
     assert data['chapters'] == []
+
+
+# ---------------------------------------------------------------------------
+# Storage: filesize column, lazy backfill, /api/storage endpoint
+# ---------------------------------------------------------------------------
+
+def test_filesize_column_exists():
+    """The filesize column is created by checkdb() (idempotent migration)."""
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = 'videos' AND column_name = 'filesize'",
+        (os.environ['VAULTTUBE_DBNAME'],)
+    )
+    assert cur.fetchone()[0] == 1
+    cur.close()
+    con.close()
+
+
+def test_update_video_filesize():
+    """update_video_filesize writes the byte count and reads back correctly."""
+    import logging
+    from database import update_video_filesize
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title) "
+        "VALUES('SizeVid1', 'TestCreator', 'TestCh1', '{}', '/videos/size1.mp4', "
+        "'2024-01-01 10:00:00', 'Size Test');"
+    )
+    con.commit()
+    con.close()
+
+    update_video_filesize('SizeVid1', 1048576, logging.getLogger('test'))
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT filesize FROM videos WHERE id = 'SizeVid1'")
+    row = cur.fetchone()
+    cur.close()
+    con.close()
+    assert row is not None
+    assert int(row[0]) == 1048576
+
+
+def test_maybe_update_filesize_backfills_from_null(tmp_path):
+    """_maybe_update_filesize populates NULL filesize from the real file size,
+    and is idempotent (a second call does not re-probe or overwrite)."""
+    import logging
+    from backend import _maybe_update_filesize
+
+    # Real file on disk with a known size
+    fpath = str(tmp_path / "BackfillVid1.mkv")
+    with open(fpath, 'wb') as f:
+        f.write(b'x' * 2048)
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title) "
+        "VALUES('BackfillVid1', 'TestCreator', 'TestCh1', '{}', %s, "
+        "'2024-01-01 10:00:00', 'Backfill Test');",
+        (fpath,)
+    )
+    con.commit()
+    con.close()
+
+    log = logging.getLogger('test')
+    _maybe_update_filesize('BackfillVid1', fpath, log)
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT filesize FROM videos WHERE id = 'BackfillVid1'")
+    row = cur.fetchone()
+    cur.close()
+    con.close()
+    assert row is not None
+    assert int(row[0]) == 2048
+
+    # Second call must be a no-op (filesize already non-NULL → no probe)
+    _maybe_update_filesize('BackfillVid1', fpath, log)
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT filesize FROM videos WHERE id = 'BackfillVid1'")
+    row = cur.fetchone()
+    cur.close()
+    con.close()
+    assert int(row[0]) == 2048  # unchanged
+
+
+def test_api_storage(client):
+    """/api/storage returns byte totals, per-source, top channels, weekly
+    growth, and a transcode-cache snapshot."""
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO channels(channelid, channelname, json, subscribed) "
+        "VALUES('StorCh1', 'Stor Channel', '{}', 0);"
+    )
+    # Two YouTube videos with known sizes + one Patreon video with NULL filesize
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, source, filesize) "
+        "VALUES('StorV1', 'Stor Channel', 'StorCh1', '{}', '/videos/s1.mkv', "
+        "'2024-01-01 10:00:00', 'V1', 'youtube', 1000000);"
+    )
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, source, filesize) "
+        "VALUES('StorV2', 'Stor Channel', 'StorCh1', '{}', '/videos/s2.mkv', "
+        "'2024-01-02 10:00:00', 'V2', 'youtube', 2500000);"
+    )
+    cur.execute(
+        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, source, filesize) "
+        "VALUES('StorV3', 'Patreon Creator', 'PatCh1', '{}', '/videos/s3.mp4', "
+        "'2024-01-03 10:00:00', 'V3', 'patreon', NULL);"
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/storage")
+    assert response.status_code == 200
+    data = json.loads(response.get_data(as_text=True))
+    assert isinstance(data, dict)
+
+    # Totals: 3 videos, 3.5M bytes (NULL filesize excluded from sum)
+    assert data['totals']['videos'] == 3
+    assert data['totals']['bytes'] == 3500000
+
+    # Per-source: youtube leads (3.5M), patreon present with 0 bytes (NULL sums to 0)
+    sources = {row[0]: row for row in data['by_source']}
+    assert 'youtube' in sources
+    assert sources['youtube'][1] == 3500000
+    assert sources['youtube'][2] == 2
+    assert 'patreon' in sources
+    assert sources['patreon'][1] == 0
+    assert sources['patreon'][2] == 1
+
+    # Top channel: StorCh1 with 3.5M; 4th element is channelId for creator links
+    assert data['top_channels'][0][0] == 'Stor Channel'
+    assert data['top_channels'][0][1] == 3500000
+    assert data['top_channels'][0][2] == 2
+    assert data['top_channels'][0][3] == 'StorCh1'
+    assert len(data['top_channels']) <= 10
+
+    # Weekly growth: 26 zero-filled buckets
+    assert len(data['added_per_week_bytes']) == 26
+
+    # Cache snapshot structure
+    cache = data['cache']
+    for key in ('bytes', 'entries', 'oldest', 'oldest_path', 'cap_bytes',
+                'ttl_seconds', 'cache_dir', 'active_transcodes', 'cap_gb'):
+        assert key in cache
+    assert isinstance(cache['bytes'], int)
+    assert isinstance(cache['entries'], int)
+    assert isinstance(cache['cap_bytes'], int)
+    assert cache['cap_bytes'] > 0
+
+
+def test_cache_stats_reads_dir(tmp_path, monkeypatch):
+    """cache_stats() walks the cache dir and reports bytes/entries/oldest."""
+    import logging
+    from transcoder import cache_stats
+
+    # Point the cache root at a temp dir and lay out two cache entries
+    base = str(tmp_path)
+    monkeypatch.setenv('VAULTTUBE_TRANSCODE_CACHE_DIR', base)
+    monkeypatch.setenv('VAULTTUBE_TRANSCODE_MAX_CACHE_GB', '50')
+
+    vid_a = os.path.join(base, 'vidA', 'abcd0123456789ef')
+    vid_b = os.path.join(base, 'vidB', '0123456789abcdef')
+    os.makedirs(vid_a)
+    os.makedirs(vid_b)
+    with open(os.path.join(vid_a, 'playlist.m3u8'), 'w') as f:
+        f.write('#EXTM3U\n')
+    with open(os.path.join(vid_a, 'seg_00000.ts'), 'wb') as f:
+        f.write(b'x' * 1024)
+    with open(os.path.join(vid_b, 'seg_00000.ts'), 'wb') as f:
+        f.write(b'y' * 2048)
+
+    stats = cache_stats()
+    assert stats['entries'] == 2
+    assert stats['bytes'] == 1024 + len('#EXTM3U\n') + 2048
+    assert stats['cap_bytes'] == 50 * 1024 * 1024 * 1024
+    assert stats['oldest'] is not None
+    assert stats['oldest_path'] is not None
+
+
+def test_storage_page_loads(client):
+    """/storage.html renders the merged dashboard (stats + storage)."""
+    response = client.get("/storage.html")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    # Storage KPIs
+    assert 'id="kpi-total"' in body
+    assert 'id="kpi-cache"' in body
+    # Stats KPIs merged in
+    assert 'id="kpi-runtime"' in body
+    assert 'id="kpi-unwatched"' in body
+    # Charts from both
+    assert 'id="channelChart"' in body
+    assert 'id="durationChart"' in body
+    assert 'id="cache-grid"' in body
+
+
+def test_stats_html_redirects_to_storage(client):
+    """/stats.html 301-redirects to /storage.html (merged page)."""
+    response = client.get("/stats.html")
+    assert response.status_code == 301
+    assert response.headers['Location'].endswith('/storage.html')
+
+
+def test_save_video_persists_filesize(tmp_path):
+    """save_video's INSERT carries the filesize column end-to-end (guards
+    against column/placeholder count drift introduced by the storage work)."""
+    import logging
+    import datetime as _dt
+    from database import save_video
+
+    # Minimal ret dict matching the shape process_new_video builds
+    ret = {
+        'Youtuber': 'SaveVidCreator',
+        'Json': {'id': 'SaveVid1', 'title': 'Save Test'},
+        'Filepath': str(tmp_path / 'save1.mkv'),
+        'PublishedAt': _dt.datetime(2024, 1, 1, 10, 0, 0),
+        'channelId': 'SaveCh1',
+        'length': _dt.timedelta(seconds=120),
+        'title': 'Save Test',
+        'description': '',
+        'vcodec': 'h264',
+        'acodec': 'aac',
+        'container': 'mkv',
+        'filesize': 4096,
+    }
+
+    log = logging.getLogger('test')
+    save_video('SaveVid1', ret, None, log, source='youtube')
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT filesize, vcodec, title FROM videos WHERE id = 'SaveVid1'")
+    row = cur.fetchone()
+    cur.close()
+    con.close()
+    assert row is not None
+    assert int(row[0]) == 4096
+    assert row[1] == 'h264'
+    assert row[2] == 'Save Test'
+
+
 

@@ -12,7 +12,7 @@ import requests
 from QueueObject import QueueObject
 from queue_utils import enqueue
 from chapters import parse_chapters
-from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for
+from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for, cache_stats
 from werkzeug.exceptions import HTTPException
 
 api_bp = Blueprint('api',__name__)
@@ -967,6 +967,51 @@ def api_stats():
         return json.dumps(data, default=str)
     except Exception as e:
         current_app.logger.error("API Stats Error: %s"%e)
+        return api_error(str(e), 500)
+
+@api_bp.route("/storage")
+def api_storage():
+    """Disk-usage dashboard data: vault bytes by source/channel/week + transcode cache status."""
+    try:
+        data = {}
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+
+        # Total vault bytes + video count
+        cur.execute("select coalesce(sum(filesize),0), count(*) from videos")
+        total_bytes, total_count = cur.fetchone()
+        data['totals'] = {'bytes': int(total_bytes or 0), 'videos': int(total_count)}
+
+        # Per-source breakdown (bytes + count), biggest source first
+        cur.execute("select coalesce(source,'unknown'), coalesce(sum(filesize),0), count(*) from videos group by source order by sum(filesize) desc")
+        data['by_source'] = [[r[0], int(r[1] or 0), int(r[2])] for r in cur.fetchall()]
+
+        # Top channels by bytes (limit 10); join channels for display name.
+        # 4th element is the channelId (for creator-page links), distinct from
+        # the display name which may be the channelname or fall back to the ID.
+        cur.execute("select coalesce(c.channelname, v.channelId), coalesce(sum(v.filesize),0), count(*), v.channelId from videos v left outer join channels c on v.channelId = c.channelid group by v.channelId order by sum(v.filesize) desc limit 10")
+        data['top_channels'] = [[r[0], int(r[1] or 0), int(r[2]), r[3]] for r in cur.fetchall()]
+
+        # Vault growth by bytes per week, last 26 weeks, zero-filled (mirrors api_stats added_per_week)
+        cur.execute("select date(date_sub(AddedAt, interval weekday(AddedAt) day)) as wk, coalesce(sum(filesize),0) from videos where AddedAt >= date_sub(curdate(), interval 26 week) group by wk order by wk")
+        weekly = {str(r[0]): int(r[1] or 0) for r in cur.fetchall()}
+        monday = datetime.date.today() - datetime.timedelta(days=datetime.date.today().weekday())
+        data['added_per_week_bytes'] = [
+            [str(monday - datetime.timedelta(weeks=i)), weekly.get(str(monday - datetime.timedelta(weeks=i)), 0)]
+            for i in range(25, -1, -1)
+        ]
+
+        cur.close()
+        con.close()
+
+        # Transcode cache (filesystem, not DB)
+        cache = cache_stats()
+        cache['cap_gb'] = round(cache['cap_bytes'] / (1024 ** 3), 1)
+        data['cache'] = cache
+
+        return json.dumps(data, default=str)
+    except Exception as e:
+        current_app.logger.error("API Storage Error: %s"%e)
         return api_error(str(e), 500)
     
 @api_bp.route('/transcode/<string:video_id>/playlist.m3u8')

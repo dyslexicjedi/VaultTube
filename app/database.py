@@ -94,6 +94,12 @@ def checkdb(logger):
         if cur.fetchone()[0] == 0:
             logger.info("Adding container column to videos table...")
             cur.execute("ALTER TABLE videos ADD COLUMN `container` varchar(50) DEFAULT NULL;")
+        # File size in bytes; backfilled lazily during vault scans, set on
+        # insert for new downloads/uploads. NULL = not yet measured.
+        cur.execute("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = %s AND table_name = 'videos' AND column_name = 'filesize'", (os.environ['VAULTTUBE_DBNAME'],))
+        if cur.fetchone()[0] == 0:
+            logger.info("Adding filesize column to videos table...")
+            cur.execute("ALTER TABLE videos ADD COLUMN `filesize` bigint DEFAULT NULL;")
         # Add indexes for advanced filtering
         cur.execute("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = %s AND table_name = 'videos' AND index_name = 'idx_channelId'", (os.environ['VAULTTUBE_DBNAME'],))
         if cur.fetchone()[0] == 0:
@@ -205,8 +211,8 @@ def save_video(id,ret,img,logger,source='youtube'):
         con = get_connection(logger)
         cur = con.cursor()
         #Save Video Data
-        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length,source,title,description,vcodec,acodec,container) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title'],ret.get('description',''),ret.get('vcodec'),ret.get('acodec'),ret.get('container')))
+        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length,source,title,description,vcodec,acodec,container,filesize) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
+        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title'],ret.get('description',''),ret.get('vcodec'),ret.get('acodec'),ret.get('container'),ret.get('filesize')))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))
@@ -328,6 +334,18 @@ def update_video_codec_info(id, vcodec, acodec, container, logger):
         con.close()
     except Exception as e:
         logger.error("Error during update_video_codec_info: %s" % e)
+
+
+def update_video_filesize(id, filesize, logger):
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute("UPDATE videos SET filesize=%s WHERE id=%s", (filesize, id))
+        con.commit()
+        cur.close()
+        con.close()
+    except Exception as e:
+        logger.error("Error during update_video_filesize: %s" % e)
 
 
 def update_length(id,length,logger):

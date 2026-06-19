@@ -125,7 +125,11 @@ def random():
 
 @app.route("/stats.html")
 def stats():
-    return render_template("/stats.html")
+    return redirect('/storage.html', code=301)
+
+@app.route("/storage.html")
+def storage():
+    return render_template("/storage.html")
 
 @app.route("/upload.html")
 def upload():
