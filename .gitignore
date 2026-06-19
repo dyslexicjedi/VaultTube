@@ -11,3 +11,4 @@ yt_cookies.txt
 .env
 manual
 mockups
+*.dev.yml

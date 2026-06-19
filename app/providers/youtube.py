@@ -7,7 +7,7 @@ from yt_dlp.utils import DownloadError
 from flask import current_app
 
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info, insert_not_found
-from backend import get_video
+from backend import save_video_from_ytdlp
 from providers.base import set_status, update_status, del_status
 from QueueObject import QueueObject
 from queue_utils import enqueue
@@ -78,7 +78,8 @@ def _download_attempt(url, ydl_opts, cookies_contents, logger, label=''):
             if label:
                 logger.info("YouTube %s attempt: downloading %s" % (label, url))
             ydl.download(url)
-        get_video(os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4", current_app.logger)
+        fpath = os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4"
+        save_video_from_ytdlp(videoID, data, fpath, current_app.logger)
         return True
     finally:
         if videoID is not None:

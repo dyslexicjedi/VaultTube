@@ -270,6 +270,70 @@ def run_deleted_check(logger, rows=None, batch_size=50):
             checked += 1
     logger.info("Deleted check: %d checked, %d newly gone, %d restored" % (checked, newly_gone, restored))
 
+_YTDLP_STRIP_KEYS = frozenset({
+    'formats', 'thumbnails', 'requested_formats', 'requested_downloads',
+    'subtitles', 'automatic_captions', 'heatmap',
+})
+
+def save_video_from_ytdlp(video_id, info, fpath, logger):
+    """Populate the DB for a just-downloaded YouTube video using yt-dlp's info
+    dict, bypassing the YouTube Data API call that process_new_video makes."""
+    try:
+        if check_db_video(video_id, logger):
+            logger.debug("Video %s already in DB, skipping yt-dlp save" % video_id)
+            return
+
+        channel_id = info.get('channel_id', '')
+        if channel_id and not check_db_channel(channel_id, logger):
+            channel_name = info.get('channel') or info.get('uploader', '')
+            save_channel(channel_id, channel_name,
+                         {'channel_id': channel_id, 'channel': channel_name}, logger)
+
+        published_at = None
+        if info.get('timestamp'):
+            published_at = datetime.datetime.utcfromtimestamp(info['timestamp'])
+        elif info.get('upload_date'):
+            published_at = datetime.datetime.strptime(info['upload_date'], '%Y%m%d')
+
+        length = datetime.timedelta(seconds=int(info.get('duration') or 0))
+
+        codec_info = _extract_codec_info(fpath, logger)
+
+        try:
+            filesize = os.path.getsize(fpath)
+        except OSError:
+            filesize = None
+
+        img = None
+        thumb_url = info.get('thumbnail')
+        if thumb_url:
+            try:
+                r = requests.get(thumb_url, timeout=30)
+                img = r.content
+                r.close()
+            except Exception as e:
+                logger.error("Thumbnail fetch failed for %s: %s" % (video_id, e))
+
+        stored_json = {k: v for k, v in info.items() if k not in _YTDLP_STRIP_KEYS}
+
+        ret = {
+            'Youtuber': info.get('channel') or info.get('uploader', ''),
+            'Json': stored_json,
+            'Filepath': fpath,
+            'PublishedAt': published_at,
+            'channelId': channel_id,
+            'length': length,
+            'title': info.get('title', ''),
+            'description': info.get('description', ''),
+        }
+        ret.update(codec_info)
+        ret['filesize'] = filesize
+
+        save_video(video_id, ret, img, logger)
+    except Exception as e:
+        logger.error("save_video_from_ytdlp failed for %s: %s" % (video_id, e))
+
+
 def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source,webpage_url=None):
     """Save a non-YouTube video (Reddit download or manual upload) to the DB.
     The json column gets a plain metadata dict; webpage_url, when known,
