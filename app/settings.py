@@ -1,5 +1,8 @@
+import logging
 import os
 from database import get_connection
+
+_log = logging.getLogger('settings')
 
 # Keys managed in the settings table. .env values for these keys are ignored
 # once a DB row exists — DB always wins after hydration.
@@ -34,7 +37,7 @@ RESTART_REQUIRED_KEYS = {'VAULTTUBE_DBPOOL', 'VAULTTUBE_DISABLEBACK'}
 def get_setting(key, default=None):
     """Read a setting: DB first, then os.environ, then default."""
     try:
-        con = get_connection()
+        con = get_connection(_log)
         cur = con.cursor()
         cur.execute("SELECT setting_value FROM settings WHERE setting_key = %s", (key,))
         row = cur.fetchone()
@@ -50,7 +53,7 @@ def get_setting(key, default=None):
 def set_setting(key, value, logger=None):
     """Persist a setting to DB and update os.environ immediately."""
     try:
-        con = get_connection()
+        con = get_connection(_log)
         cur = con.cursor()
         cur.execute(
             "INSERT INTO settings (setting_key, setting_value) VALUES (%s, %s) "
@@ -76,7 +79,7 @@ def hydrate_settings(logger):
     so existing installs preserve their config without manual re-entry.
     """
     try:
-        con = get_connection()
+        con = get_connection(_log)
         cur = con.cursor()
 
         # Seed: write env values for DB-managed keys that have no DB row yet.
