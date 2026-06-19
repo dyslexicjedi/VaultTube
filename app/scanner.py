@@ -45,11 +45,14 @@ def uploads_playlist_id(channel_id):
 def iter_playlist_pages(playlist_id, logger):
     """Yield video-ID lists one playlistItems page (50 items, newest first)
     at a time. Stops on API errors after logging them."""
+    ytkey = os.environ.get('VAULTTUBE_YTKEY')
+    if not ytkey:
+        raise RuntimeError("VAULTTUBE_YTKEY not configured")
     page_token = None
     while True:
         url = ("https://www.googleapis.com/youtube/v3/playlistItems"
                "?part=contentDetails&playlistId=%s&maxResults=50&key=%s"
-               % (playlist_id, os.environ['VAULTTUBE_YTKEY']))
+               % (playlist_id, ytkey))
         if page_token:
             url += "&pageToken=%s" % page_token
         r = requests.get(url, timeout=30)

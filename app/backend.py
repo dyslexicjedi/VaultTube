@@ -144,8 +144,11 @@ def _extract_codec_info(fpath, logger):
 
 def process_new_video(id,fpath,logger):
     ret = {}
+    ytkey = os.environ.get('VAULTTUBE_YTKEY')
+    if not ytkey:
+        raise RuntimeError("VAULTTUBE_YTKEY not configured")
     try:
-        r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'], timeout=30)
+        r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+ytkey, timeout=30)
         retj = r.json()
         r.close()
         if "error" in retj:
@@ -212,7 +215,10 @@ def process_channel(fname,logger):
             pass
         else:
             logger.info("Processing Channel: "+id)
-            r = requests.get('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'], timeout=30).json()
+            ytkey = os.environ.get('VAULTTUBE_YTKEY')
+            if not ytkey:
+                raise RuntimeError("VAULTTUBE_YTKEY not configured")
+            r = requests.get('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+id+'&key='+ytkey, timeout=30).json()
             if(r['pageInfo']['totalResults'] > 0):
                 save_channel(r['items'][0]['id'],r['items'][0]['snippet']['title'],r,logger)
             else:
@@ -241,9 +247,12 @@ def run_deleted_check(logger, rows=None, batch_size=50):
     for i in range(0, len(rows), batch_size):
         chunk = rows[i:i+batch_size]
         try:
+            ytkey = os.environ.get('VAULTTUBE_YTKEY')
+            if not ytkey:
+                raise RuntimeError("VAULTTUBE_YTKEY not configured")
             r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=id&maxResults=50&id='
                              + ','.join(vid for vid, _ in chunk)
-                             + '&key=' + os.environ['VAULTTUBE_YTKEY'], timeout=30)
+                             + '&key=' + ytkey, timeout=30)
             retj = r.json()
             r.close()
         except Exception as e:

@@ -1251,8 +1251,11 @@ def get_video_unwatched_count():
         return api_error(str(e), 500)
 
 def get_playlist_info(playlistid, logger):
+    ytkey = os.environ.get('VAULTTUBE_YTKEY')
+    if not ytkey:
+        raise RuntimeError("VAULTTUBE_YTKEY not configured")
     try:
-        curl = "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&id=%s&key=%s" % (playlistid, os.environ['VAULTTUBE_YTKEY'])
+        curl = "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&id=%s&key=%s" % (playlistid, ytkey)
         r = requests.get(curl, timeout=30)
         retj = r.json()
         r.close()

@@ -36,22 +36,26 @@ RESTART_REQUIRED_KEYS = {'VAULTTUBE_DBPOOL', 'VAULTTUBE_DISABLEBACK'}
 
 def get_setting(key, default=None):
     """Read a setting: DB first, then os.environ, then default."""
+    con = None
     try:
         con = get_connection(_log)
         cur = con.cursor()
         cur.execute("SELECT setting_value FROM settings WHERE setting_key = %s", (key,))
         row = cur.fetchone()
         cur.close()
-        con.close()
         if row is not None:
             return row[0]
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("get_setting DB error for %s: %s", key, e)
+    finally:
+        if con is not None:
+            con.close()
     return os.environ.get(key, default)
 
 
 def set_setting(key, value, logger=None):
     """Persist a setting to DB and update os.environ immediately."""
+    con = None
     try:
         con = get_connection(_log)
         cur = con.cursor()
@@ -61,11 +65,13 @@ def set_setting(key, value, logger=None):
             (key, value),
         )
         cur.close()
-        con.close()
     except Exception as e:
         if logger:
             logger.error("set_setting failed for %s: %s", key, e)
         raise
+    finally:
+        if con is not None:
+            con.close()
     if value is None:
         os.environ.pop(key, None)
     else:
@@ -78,6 +84,7 @@ def hydrate_settings(logger):
     On first boot, seed the DB from any DB-managed keys already in os.environ
     so existing installs preserve their config without manual re-entry.
     """
+    con = None
     try:
         con = get_connection(_log)
         cur = con.cursor()
@@ -100,7 +107,9 @@ def hydrate_settings(logger):
                 os.environ[key] = value
 
         cur.close()
-        con.close()
         logger.info("Settings hydrated from DB (%d rows)", len(rows))
     except Exception as e:
         logger.error("Failed to hydrate settings from DB: %s", e)
+    finally:
+        if con is not None:
+            con.close()
