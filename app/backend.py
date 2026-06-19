@@ -213,6 +213,10 @@ def process_channel(fname,logger):
         else:
             logger.info("Processing Channel: "+id)
             r = requests.get('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'], timeout=30).json()
+            if r.get('error', {}).get('code') == 403:
+                logger.error("Quota limit reached in process_channel, sleeping for 1 hour.")
+                time.sleep(3600)
+                return
             if(r['pageInfo']['totalResults'] > 0):
                 save_channel(r['items'][0]['id'],r['items'][0]['snippet']['title'],r,logger)
             else:
