@@ -4,51 +4,22 @@ VaultTube is a self-hosted video archive and player (Python/Flask/MariaDB) that
 downloads YouTube/Patreon/Reddit content via yt-dlp. See `AGENTS.md` for the
 full code map (files, DB tables, API routes).
 
-## Critical workflow: test in production container BEFORE pushing
-
-Pushing to `dev` triggers a GitHub Actions build (`.github/workflows/docker.yml`)
-of `dyslexicjedi/vaulttube:dev`, which is **slow**. The live deployment is the
-docker container `vaulttube` on `rob@10.0.10.5` (passwordless SSH works).
-Validate changes against the real container first:
-
-```bash
-# Inspect the running container (app code lives at /app/app/ inside it)
-ssh rob@10.0.10.5 'docker exec vaulttube cat /app/app/providers/patreon.py'
-
-# Run a test script inside the container (real env vars, cookies, DB, deno)
-scp myscript.py rob@10.0.10.5:/tmp/
-ssh rob@10.0.10.5 'docker cp /tmp/myscript.py vaulttube:/tmp/ && docker exec vaulttube python3 /tmp/myscript.py'
-```
-
-The container has all production env vars set, so scripts can use
-`os.environ['VAULTTUBE_*']` directly. Clean up `/tmp` scripts when done.
-Note: the container runs the last *pushed* image — local uncommitted changes
-are not in it; copy them in or replicate their logic in the test script.
-
 ## Local development
 
 ```bash
-.venv/bin/python -m pytest tests/ -q   # run tests (82 tests, a few seconds)
+.venv/bin/python -m pytest tests/ -q   # run tests (a few seconds)
 ```
 
-- Tests need a reachable MariaDB; connection info comes from `.env` at the repo
-  root (loaded by `load_dotenv()` in `app/main.py`). **This is the PRODUCTION
-  database** — tests insert/delete real rows, and `tests/conftest.py` cleans up
-  known test IDs before and after each test. Any new test that writes rows
-  (including anything that enqueues a download — queue rows are persisted)
-  MUST register its IDs/URLs in conftest's cleanup lists or clean up itself,
-  or the live app will pick the rows up as real work.
+- Tests spin up an isolated MariaDB Docker container via `testcontainers`
+  (`conftest.py`). No `.env` file or external database is used or needed.
 - A pre-commit hook runs the full test suite on every commit; commits fail if
   tests fail.
 - Branch `dev` is the working/default branch; `latest` image tag is stable.
 
-## Debugging production issues
+## Debugging
 
-- App logs: `ssh rob@10.0.10.5 'docker logs vaulttube --tail 100'`
 - Failed downloads are recorded in the `download_errors` DB table (url,
   error_type, error_message, created_at) — check there for history.
-- Query the DB from inside the container with the `VAULTTUBE_DB*` env vars and
-  the `mariadb` Python module (no mysql CLI in the image).
 - The download queue is dispatched from an in-memory `queue.Queue`
   (`app.config['queue']`) but every item is mirrored to the `queue` DB table
   (status: pending/downloading/done/failed, attempts, last_error). Unfinished
@@ -108,7 +79,7 @@ Required: `VAULTTUBE_VAULTDIR`, `VAULTTUBE_DBHOST/DBUSER/DBPASS/DBNAME/DBPORT`,
 `VAULTTUBE_YTKEY`.
 Optional: `VAULTTUBE_YTCOOKIE`, `VAULTTUBE_PATREONCOOKIE` (Netscape cookies.txt
 paths), `VAULTTUBE_PROXY` (HTTP/HTTPS/SOCKS proxy URL for yt-dlp to use when
-YouTube returns a "blocked in your country" error, e.g. `http://10.0.10.5:8888`),
+YouTube returns a "blocked in your country" error),
 `VAULTTUBE_DENOPATH` (deno binary for yt-dlp JS runtime;
 `/root/.deno/bin/deno` in the image), `VAULTTUBE_REDDIT_CLIENT_ID/
 CLIENT_SECRET/USERNAME/PASSWORD/USER_AGENT` (all five needed for the Reddit

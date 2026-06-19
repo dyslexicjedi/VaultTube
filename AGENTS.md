@@ -86,8 +86,7 @@ VaultTube/
 │   ├── conftest.py          # pytest fixtures
 │   ├── __init__.py          # Package init
 │   └── test_project.py      # Project tests
-├── requirements.txt         # Python dependencies
-└── .env                     # Environment variables
+└── requirements.txt         # Python dependencies
 ```
 
 ## Key Environment Variables
@@ -99,7 +98,7 @@ Required at startup (validated in `main.py`):
 
 Optional:
 - `VAULTTUBE_YTCOOKIE` - YouTube cookies file (Netscape cookies.txt path)
-- `VAULTTUBE_PROXY` - Optional HTTP/HTTPS/SOCKS proxy URL for yt-dlp to use when YouTube returns a "blocked in your country" error (e.g. `http://10.0.10.5:8888`)
+- `VAULTTUBE_PROXY` - Optional HTTP/HTTPS/SOCKS proxy URL for yt-dlp to use when YouTube returns a "blocked in your country" error
 - `VAULTTUBE_PATREONCOOKIE` - Patreon cookies file (Netscape cookies.txt path)
 - `VAULTTUBE_DENOPATH` - Deno binary path for yt-dlp's JS runtime (`/root/.deno/bin/deno` in the Docker image)
 - `VAULTTUBE_REDDIT_CLIENT_ID` - Reddit API client ID
@@ -148,14 +147,11 @@ Optional:
 - Patreon campaigns get their `channels` row auto-created on first download or vault scan (`ensure_channel`); subscribe via the normal `/api/subscribe/channel/<campaign_id>` endpoint
 
 ## Testing & CI
-- `.venv/bin/python -m pytest tests/ -q` — tests need a reachable MariaDB
-  (connection from `.env`, loaded by `load_dotenv()` in `main.py`); they
-  insert/delete real rows and `conftest.py` cleans up known test IDs.
+- `.venv/bin/python -m pytest tests/ -q` — tests spin up an isolated MariaDB
+  Docker container via `testcontainers`; no external database or `.env` needed.
 - A pre-commit hook runs the full suite on every commit.
 - Pushing to `dev` runs tests in GitHub Actions (with a MariaDB service
   container) and builds/pushes `dyslexicjedi/vaulttube:dev`.
-- See `CLAUDE.md` for the deployment layout and how to test changes inside
-  the production container before pushing.
 
 ## API Routes (key)
 - `/api/getvids/<status>/<opt>/<direction>/<page>` - Get videos (`?deleted=1` for gone-from-source view; `?channelId=<id>` or `?channel_ids[]=<id>` to filter by channel)

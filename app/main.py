@@ -10,7 +10,7 @@ from transcoder import start_reaper_thread, start_cleanup_thread, shutdown_trans
 from QueueObject import QueueObject
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv()
 
 #Logging
 logging.getLogger('werkzeug').setLevel(logging.WARN)
