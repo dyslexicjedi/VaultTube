@@ -230,6 +230,8 @@ def getVideo(id):
         json_data=[]
         for result in rv:
             json_data.append(dict(zip(row_headers,result)))
+        if not json_data:
+            return api_error("Video not found", 404)
         json_data[0]['filepath'] = '/videos/'+json_data[0]['filepath']
         # Lazy backfill codec info if any field is missing
         v = json_data[0]

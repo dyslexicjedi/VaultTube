@@ -1769,6 +1769,13 @@ def test_stats_html_redirects_to_storage(client):
     assert response.headers['Location'].endswith('/storage.html')
 
 
+def test_get_video_missing_id_returns_404(client):
+    response = client.get("/api/video/does-not-exist-zzz")
+    assert response.status_code == 404
+    data = response.get_json()
+    assert data["success"] is False
+
+
 def test_save_video_persists_filesize(tmp_path):
     """save_video's INSERT carries the filesize column end-to-end (guards
     against column/placeholder count drift introduced by the storage work)."""
