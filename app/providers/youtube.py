@@ -96,13 +96,6 @@ def download_video(url, logger, cookies=None):
             url = "https://www.youtube.com/watch?v=%s" % vid
         else:
             raise ValueError("Could not extract video ID from URL: %s" % url)
-    r = requests.get("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=%s&key=%s" % (vid, os.environ['VAULTTUBE_YTKEY']), timeout=30)
-    retj = r.json()
-    r.close()
-    if retj['pageInfo']['totalResults'] <= 0:
-        insert_not_found(vid, logger)
-        logger.error("Unable to download: %s, content was not found." % vid)
-        return False
     logger.debug("Starting Download: %s" % url)
 
     if cookies is None:
@@ -143,6 +136,11 @@ def download_video(url, logger, cookies=None):
             proxy_opts = dict(base_opts)
             proxy_opts['proxy'] = proxy_url
             _download_attempt(url, proxy_opts, cookies_contents, logger, label='proxy')
+        elif any(p in err_msg.lower() for p in ('video unavailable', 'this video does not exist',
+                                                  'has been removed', 'private video', 'not available')):
+            insert_not_found(vid, logger)
+            logger.error("Video not available, added to ignore list: %s" % vid)
+            return False
         else:
             raise
     return True
