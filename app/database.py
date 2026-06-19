@@ -158,6 +158,16 @@ def checkdb(logger):
                 PRIMARY KEY (`id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
             logger.info("Download Errors table created")
+        #Settings
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = %s AND table_name = 'settings' LIMIT 1;", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Settings table not created, creating...")
+            cur.execute("""CREATE TABLE `settings` (
+                `setting_key` varchar(100) NOT NULL,
+                `setting_value` text DEFAULT NULL,
+                PRIMARY KEY (`setting_key`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+            logger.info("Settings table created")
         cur.close()
         con.close()
         cleanup_old_errors(logger, 7)

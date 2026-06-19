@@ -7,6 +7,10 @@ import mariadb as _mariadb
 
 _test_container = None
 
+# Testcontainer DB env vars — saved after the container starts so the client
+# fixture can re-apply them after app.main's load_dotenv(override=True) runs.
+_testcontainer_env: dict = {}
+
 
 def pytest_configure(config):
     global _test_container
@@ -51,14 +55,17 @@ def pytest_configure(config):
             time.sleep(1)
     print('[conftest] MariaDB ready.', file=sys.stderr, flush=True)
 
-    os.environ['VAULTTUBE_DBHOST'] = '127.0.0.1'
-    os.environ['VAULTTUBE_DBPORT'] = str(port)
-    os.environ['VAULTTUBE_DBUSER'] = 'vaulttest'
-    os.environ['VAULTTUBE_DBPASS'] = 'vaulttest'
-    os.environ['VAULTTUBE_DBNAME'] = 'vaulttube'
-    os.environ['VAULTTUBE_VAULTDIR'] = '/tmp/vt_test_vault'
-    os.environ['VAULTTUBE_YTKEY'] = 'test-key-not-real'
-    os.environ['VAULTTUBE_DISABLEBACK'] = '1'
+    _testcontainer_env.update({
+        'VAULTTUBE_DBHOST': '127.0.0.1',
+        'VAULTTUBE_DBPORT': str(port),
+        'VAULTTUBE_DBUSER': 'vaulttest',
+        'VAULTTUBE_DBPASS': 'vaulttest',
+        'VAULTTUBE_DBNAME': 'vaulttube',
+        'VAULTTUBE_VAULTDIR': '/tmp/vt_test_vault',
+        'VAULTTUBE_YTKEY': 'test-key-not-real',
+        'VAULTTUBE_DISABLEBACK': '1',
+    })
+    os.environ.update(_testcontainer_env)
     os.makedirs('/tmp/vt_test_vault', exist_ok=True)
 
     # Ensure app/ is on sys.path so `import database` resolves to the same
@@ -99,11 +106,15 @@ def _db_schema():
 @pytest.fixture
 def client():
     from app.main import app
+    # load_dotenv(override=True) in main.py runs on first import and clobbers
+    # the testcontainer DB env vars with .env (production) values. Re-apply
+    # the testcontainer values so db_cleanup stays pointed at the right DB.
+    os.environ.update(_testcontainer_env)
     with app.test_client() as c:
         yield c
 
 
-_TABLES = ['videos', 'channels', 'images', 'playlists', 'pl2vid', 'IgnoreVid', 'queue', 'download_errors']
+_TABLES = ['videos', 'channels', 'images', 'playlists', 'pl2vid', 'IgnoreVid', 'queue', 'download_errors', 'settings']
 
 
 @pytest.fixture(autouse=True)

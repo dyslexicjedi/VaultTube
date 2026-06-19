@@ -1814,4 +1814,88 @@ def test_save_video_persists_filesize(tmp_path):
     assert row[2] == 'Save Test'
 
 
+# ---------------------------------------------------------------------------
+# Phase 1 — settings table + hydration
+# ---------------------------------------------------------------------------
+
+def test_settings_table_exists():
+    """checkdb() creates the settings table."""
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_schema = %s AND table_name = 'settings'",
+        (os.environ['VAULTTUBE_DBNAME'],),
+    )
+    count = cur.fetchone()[0]
+    cur.close()
+    con.close()
+    assert count == 1
+
+
+def test_set_and_get_setting():
+    """set_setting persists to DB; get_setting reads it back."""
+    from settings import get_setting, set_setting
+    set_setting('TEST_KEY_PHASE1', 'hello')
+    assert get_setting('TEST_KEY_PHASE1') == 'hello'
+
+
+def test_set_setting_updates_os_environ():
+    """set_setting immediately updates os.environ."""
+    from settings import set_setting
+    set_setting('TEST_KEY_ENVIRON', 'world')
+    assert os.environ.get('TEST_KEY_ENVIRON') == 'world'
+
+
+def test_get_setting_falls_back_to_environ():
+    """get_setting falls back to os.environ when no DB row exists."""
+    from settings import get_setting
+    os.environ['TEST_KEY_FALLBACK'] = 'from_env'
+    result = get_setting('TEST_KEY_FALLBACK')
+    assert result == 'from_env'
+    del os.environ['TEST_KEY_FALLBACK']
+
+
+def test_get_setting_default():
+    """get_setting returns default when key is absent from DB and env."""
+    from settings import get_setting
+    result = get_setting('TEST_KEY_MISSING_XYZ', default='mydefault')
+    assert result == 'mydefault'
+
+
+def test_hydrate_seeds_from_env():
+    """hydrate_settings seeds a DB-managed key from os.environ on first boot."""
+    import logging
+    from settings import hydrate_settings, get_setting
+    os.environ['VAULTTUBE_DL_DELAY'] = '42'
+    hydrate_settings(logging.getLogger('test'))
+    # Should now be in DB
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT setting_value FROM settings WHERE setting_key = 'VAULTTUBE_DL_DELAY'")
+    row = cur.fetchone()
+    cur.close()
+    con.close()
+    assert row is not None
+    assert row[0] == '42'
+    del os.environ['VAULTTUBE_DL_DELAY']
+
+
+def test_hydrate_db_wins_over_env():
+    """hydrate_settings overwrites os.environ with DB value unconditionally."""
+    import logging
+    from settings import set_setting, hydrate_settings
+    set_setting('VAULTTUBE_PROXY', 'http://db-proxy:8888')
+    os.environ['VAULTTUBE_PROXY'] = 'http://env-proxy:9999'
+    hydrate_settings(logging.getLogger('test'))
+    assert os.environ.get('VAULTTUBE_PROXY') == 'http://db-proxy:8888'
+
+
+def test_set_setting_none_removes_from_environ():
+    """set_setting with None removes the key from os.environ."""
+    from settings import set_setting
+    os.environ['TEST_KEY_NONE'] = 'present'
+    set_setting('TEST_KEY_NONE', None)
+    assert 'TEST_KEY_NONE' not in os.environ
+
 

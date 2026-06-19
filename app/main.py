@@ -4,6 +4,7 @@ from flask import Flask,render_template,send_file,Blueprint,request,redirect
 from api import api_bp
 from backend import backend_thread,deleted_check_thread
 from database import checkdb,get_resumable_queue_items
+from settings import hydrate_settings
 from scanner import start_scanner
 from downloader import start_dl_queue
 from transcoder import start_reaper_thread, start_cleanup_thread, shutdown_transcoder
@@ -32,8 +33,8 @@ timedHandler.setFormatter(formatter)
 timedHandler.setLevel(logging.INFO)
 logger.addHandler(timedHandler)
 
-required_vars = ['VAULTTUBE_VAULTDIR', 'VAULTTUBE_DBHOST', 'VAULTTUBE_DBUSER', 
-                  'VAULTTUBE_DBPASS', 'VAULTTUBE_DBNAME', 'VAULTTUBE_YTKEY']
+required_vars = ['VAULTTUBE_VAULTDIR', 'VAULTTUBE_DBHOST', 'VAULTTUBE_DBUSER',
+                  'VAULTTUBE_DBPASS', 'VAULTTUBE_DBNAME']
 for var in required_vars:
     if var not in os.environ:
         logger.error(f"Required environment variable {var} not set")
@@ -67,7 +68,7 @@ signal.signal(signal.SIGTERM, _graceful_exit)
 
 #Flask Startup
 app = Flask(__name__)
-app.debug = os.environ.get('VAULTTUBE_DEBUG', 'False').lower() in ('true', '1', 'yes')
+app.debug = False  # re-applied after hydration in startup()
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024  # 10GB max upload size
 
 #Video static
@@ -156,6 +157,12 @@ def startup():
     #Check Database
     dbpass = checkdb(logger)
     if(dbpass):
+        # Hydrate settings from DB into os.environ before anything reads them.
+        hydrate_settings(logger)
+
+        # Re-apply debug flag now that DB settings are loaded.
+        app.debug = os.environ.get('VAULTTUBE_DEBUG', 'False').lower() in ('true', '1', 'yes')
+
         q = queue.Queue()
         app.config['queue'] = q
         #Restore downloads that were queued or in-flight at last shutdown
@@ -165,12 +172,11 @@ def startup():
             qo.attempts = attempts
             q.put(qo)
             logger.info("Restored queued download: %s" % url)
-        if("VAULTTUBE_DISABLEBACK" in os.environ):
-            logger.info("Found Disable Backend variable of %s",os.environ['VAULTTUBE_DISABLEBACK'])
-            if(os.environ['VAULTTUBE_DISABLEBACK'] == "False"):
-                start_background_threads()
-        else:
+        disableback = os.environ.get('VAULTTUBE_DISABLEBACK', 'False').lower() in ('true', '1', 'yes')
+        if not disableback:
             start_background_threads()
+        else:
+            logger.info("Background threads disabled (VAULTTUBE_DISABLEBACK)")
         #Begin
         logger.info("Starting VaultTube")
         if "VAULTTUBE_PORT" in os.environ:
