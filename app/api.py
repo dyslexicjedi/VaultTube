@@ -1,5 +1,5 @@
 from flask import Blueprint,current_app,send_file,Response,abort,stream_with_context
-import mariadb,json,io,csv,math,os,queue as _queue
+import mariadb,json,io,csv,math,os,queue as _queue,threading,tempfile
 import subprocess
 from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse
 from backend import process_channel,save_uploaded_video_metadata
@@ -176,40 +176,131 @@ def api_channel_videos(channelid, page):
         current_app.logger.error("API Channel Videos Failed: %s" % e)
         return api_error(str(e), 500)
 
+_thumbnail_inflight = set()
+_thumbnail_inflight_lock = threading.Lock()
+
+def _fetch_and_store_thumbnail(video_id):
+    """On cache-miss: fetch the thumbnail from the appropriate source and persist it.
+    Returns image bytes on success, None on failure (caller retries next request).
+    An in-flight guard collapses concurrent requests for the same video to one fetch."""
+    with _thumbnail_inflight_lock:
+        if video_id in _thumbnail_inflight:
+            return None
+        _thumbnail_inflight.add(video_id)
+    try:
+        try:
+            con = get_connection(current_app.logger)
+            cur = con.cursor()
+            cur.execute("SELECT source, filepath FROM videos WHERE id = %s", (video_id,))
+            row = cur.fetchone()
+            cur.close()
+            con.close()
+        except Exception as e:
+            current_app.logger.error("Thumbnail lookup failed for %s: %s" % (video_id, e))
+            return None
+
+        if not row:
+            return None
+
+        source, filepath = row
+        img = None
+
+        if source == 'youtube':
+            for quality in ('hqdefault', 'sddefault'):
+                url = 'https://img.youtube.com/vi/%s/%s.jpg' % (video_id, quality)
+                try:
+                    r = requests.get(url, timeout=5)
+                    # YouTube serves a tiny grey placeholder for missing/private videos
+                    if r.status_code == 200 and len(r.content) > 5000:
+                        img = r.content
+                        break
+                except Exception as e:
+                    current_app.logger.debug("Thumbnail CDN miss %s/%s: %s" % (video_id, quality, e))
+        elif filepath:
+            fpath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], filepath.lstrip('/'))
+            if os.path.exists(fpath):
+                fd, out = tempfile.mkstemp(suffix='.jpg')
+                os.close(fd)
+                try:
+                    rc = subprocess.call(
+                        ['ffmpeg', '-y', '-i', fpath, '-ss', '00:00:01.000', '-vframes', '1', out],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                    if rc == 0 and os.path.exists(out):
+                        with open(out, 'rb') as f:
+                            img = f.read()
+                except Exception as e:
+                    current_app.logger.error("ffmpeg thumbnail failed for %s: %s" % (video_id, e))
+                finally:
+                    try:
+                        os.unlink(out)
+                    except OSError:
+                        pass
+            else:
+                current_app.logger.debug("Thumbnail: no file on disk for %s (%s)" % (video_id, fpath))
+        else:
+            current_app.logger.debug("Thumbnail: no filepath in DB for %s" % video_id)
+
+        if img:
+            try:
+                con = get_connection(current_app.logger)
+                cur = con.cursor()
+                # COALESCE ensures a racing NULL result never overwrites real bytes
+                cur.execute(
+                    "INSERT INTO images(id, image) VALUES(%s, %s) "
+                    "ON DUPLICATE KEY UPDATE image = COALESCE(VALUES(image), image)",
+                    (video_id, img)
+                )
+                con.commit()
+                cur.close()
+                con.close()
+            except Exception as e:
+                current_app.logger.error("Thumbnail store failed for %s: %s" % (video_id, e))
+
+        return img
+    finally:
+        with _thumbnail_inflight_lock:
+            _thumbnail_inflight.discard(video_id)
+
 @api_bp.route('/images/<string:id>')
 def imgid(id):
     try:
         current_app.logger.debug('Called Image ID: '+id)
         con = get_connection(current_app.logger)
         cur = con.cursor()
-        cur.execute("select image from images where id = %s;",(id,))
-        fallback = False
-        if cur.rowcount > 0:
-            img = cur.fetchone()[0]
-        else:
-            cur.execute("select image from images where id = '-1';")
-            result = cur.fetchone()
-            if result:
-                img = result[0]
-                fallback = True
-            else:
-                cur.close()
-                con.close()
-                return "Image not found", 404
+        cur.execute("SELECT image FROM images WHERE id = %s", (id,))
+        row = cur.fetchone()
         cur.close()
         con.close()
-        resp = send_file(io.BytesIO(img), mimetype='image/jpeg')
-        # send_file defaults BytesIO responses to no-cache, which would
-        # override max-age below
-        resp.cache_control.no_cache = None
-        resp.cache_control.public = True
-        if fallback:
-            # Placeholder: keep it short so the real thumbnail shows up soon
-            resp.cache_control.max_age = 300
+
+        if row is None or row[0] is None:
+            # No row, or a NULL row left by a prior failed fetch — retry
+            img = _fetch_and_store_thumbnail(id)
         else:
-            # A video's thumbnail never changes once stored
+            img = row[0]
+
+        if img:
+            resp = send_file(io.BytesIO(img), mimetype='image/jpeg')
+            resp.cache_control.no_cache = None
+            resp.cache_control.public = True
             resp.cache_control.max_age = 30 * 86400
             resp.cache_control.immutable = True
+            return resp
+
+        # Fallback to placeholder (either fetch failed or sentinel NULL stored)
+        con = get_connection(current_app.logger)
+        cur = con.cursor()
+        cur.execute("SELECT image FROM images WHERE id = '-1'")
+        result = cur.fetchone()
+        cur.close()
+        con.close()
+        if not result or not result[0]:
+            return "Image not found", 404
+        resp = send_file(io.BytesIO(result[0]), mimetype='image/jpeg')
+        resp.cache_control.no_cache = None
+        resp.cache_control.public = True
+        # Placeholder: keep it short so the real thumbnail shows up soon
+        resp.cache_control.max_age = 300
         return resp
     except Exception as e:
         current_app.logger.error("API Image Failed: %s"%e)
