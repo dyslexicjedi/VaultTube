@@ -12,25 +12,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-#Logging
+#Logging — handlers live on the root logger so every component-specific
+#child logger (backend, downloader, youtube, ...) propagates to them and
+#shows its own name in the source column instead of a generic 'main'.
 logging.getLogger('werkzeug').setLevel(logging.WARN)
-global logger
-logger = logging.getLogger('main')
-logger.setLevel(logging.INFO)
+logger = logging.getLogger('main')           # app-level/startup messages
 formatter = logging.Formatter("%(asctime)s.%(msecs)03d %(name)-14s %(levelname)-12s msg=%(message)s","%Y-%m-%d %H:%M:%S")
 
 #StreamHandler
 streamHandler = logging.StreamHandler()
 streamHandler.setFormatter(formatter)
 streamHandler.setLevel(logging.INFO)
-logger.addHandler(streamHandler)
 
 #File
 logfile = os.path.join(os.path.abspath(os.curdir), "VaultTube.log")
 timedHandler = TimedRotatingFileHandler(logfile,when="d",interval=1,backupCount=7)
 timedHandler.setFormatter(formatter)
 timedHandler.setLevel(logging.INFO)
-logger.addHandler(timedHandler)
+
+# Attach to root so all child loggers inherit them via propagation
+root = logging.getLogger()
+root.setLevel(logging.INFO)
+root.addHandler(streamHandler)
+root.addHandler(timedHandler)
 
 required_vars = ['VAULTTUBE_VAULTDIR', 'VAULTTUBE_DBHOST', 'VAULTTUBE_DBUSER', 
                   'VAULTTUBE_DBPASS', 'VAULTTUBE_DBNAME', 'VAULTTUBE_YTKEY']
@@ -57,7 +61,7 @@ sys.excepthook = log_uncaught_exceptions
 def _graceful_exit(signum, frame):
     logger.info("Received signal %s, shutting down", signum)
     try:
-        shutdown_transcoder(logger)
+        shutdown_transcoder()
     except Exception as e:
         logger.error("Transcoder shutdown error: %s", e)
     sys.exit(0)
@@ -139,27 +143,27 @@ def start_background_threads():
     logger.info("Starting Background Threads")
     #Start Threads (daemons: the queue is DB-backed so nothing is lost on
     #shutdown, and docker stop terminates instantly instead of timing out)
-    be = threading.Thread(target=backend_thread,args=(logger,app),daemon=True)
+    be = threading.Thread(target=backend_thread,args=(app,),daemon=True)
     be.start()
-    sc = threading.Thread(target=start_scanner,args=(logger,app),daemon=True)
+    sc = threading.Thread(target=start_scanner,args=(app,),daemon=True)
     sc.start()
-    dl = threading.Thread(target=start_dl_queue,args=(logger,app),daemon=True)
+    dl = threading.Thread(target=start_dl_queue,args=(app,),daemon=True)
     dl.start()
     #Re-enabled: lookups are batched 50/call now and only changes are logged
-    dc = threading.Thread(target=deleted_check_thread,args=(logger,app),daemon=True)
+    dc = threading.Thread(target=deleted_check_thread,args=(app,),daemon=True)
     dc.start()
     # HLS transcode reaper/cleanup threads
-    start_reaper_thread(logger)
-    start_cleanup_thread(logger)
+    start_reaper_thread()
+    start_cleanup_thread()
 
 def startup():
     #Check Database
-    dbpass = checkdb(logger)
+    dbpass = checkdb()
     if(dbpass):
         q = queue.Queue()
         app.config['queue'] = q
         #Restore downloads that were queued or in-flight at last shutdown
-        for rowid, url, source, channel_id, unsave, attempts in get_resumable_queue_items(logger):
+        for rowid, url, source, channel_id, unsave, attempts in get_resumable_queue_items():
             qo = QueueObject(url, channel_id or "", source, 0, "", unsave=bool(unsave))
             qo.row_id = rowid
             qo.attempts = attempts

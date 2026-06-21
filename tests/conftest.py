@@ -92,7 +92,7 @@ def _db_schema():
         )
     database.get_connection = _direct_connect
 
-    result = database.checkdb(logging.getLogger('test'))
+    result = database.checkdb()
     assert result, "checkdb() returned False — schema creation failed (check logs above)"
 
 

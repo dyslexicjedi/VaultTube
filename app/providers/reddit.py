@@ -1,11 +1,13 @@
 import os
+import logging
 import datetime
 from urllib.parse import urlparse
 import praw
-from flask import current_app
 from database import insert_not_found
 from backend import save_uploaded_video_metadata
 from providers.base import set_status, del_status, dl_status_lock, dl_status_map
+
+logger = logging.getLogger('reddit')
 
 
 def provider_domains():
@@ -30,7 +32,7 @@ def _get_reddit_client():
     )
 
 
-def download(q, logger):
+def download(q):
     url = q.url if hasattr(q, 'url') else q
     try:
         submission = None
@@ -44,9 +46,9 @@ def download(q, logger):
             video_id = extract_redgifs_id(url)
             if not video_id:
                 logger.error("Could not extract RedGIF ID from URL: %s" % url)
-                insert_not_found("redgifs_" + url.split('/')[-1][:50], logger)
+                insert_not_found("redgifs_" + url.split('/')[-1][:50])
                 return False
-            return download_video(url, video_id, video_id, 'redgifs', None, logger, webpage_url=url)
+            return download_video(url, video_id, video_id, 'redgifs', None, webpage_url=url)
 
         else:
             parsed = urlparse(url)
@@ -72,7 +74,7 @@ def download(q, logger):
                 is_image = submission.url.lower().split('?')[0].endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
             else:
                 logger.error("No media found in submission: %s" % url)
-                insert_not_found(video_id, logger)
+                insert_not_found(video_id)
                 return False
 
         logger.debug("Starting Reddit/RedGIF Download: %s" % url)
@@ -81,9 +83,9 @@ def download(q, logger):
 
         post_url = "https://www.reddit.com" + submission.permalink if submission.permalink else url
         if is_image:
-            result = download_image(video_url, video_id, channel_id, video_title, published_at, logger, webpage_url=post_url)
+            result = download_image(video_url, video_id, channel_id, video_title, published_at, webpage_url=post_url)
         else:
-            result = download_video(video_url, video_id, video_title, channel_id, published_at, logger, webpage_url=post_url)
+            result = download_video(video_url, video_id, video_title, channel_id, published_at, webpage_url=post_url)
 
         if result and submission and getattr(q, 'unsave', False):
             try:
@@ -99,7 +101,7 @@ def download(q, logger):
         return False
 
 
-def download_video(video_url, video_id, video_title, channel_id, published_at, logger, webpage_url=None):
+def download_video(video_url, video_id, video_title, channel_id, published_at, webpage_url=None):
     if published_at is None:
         published_at = datetime.datetime.utcnow()
     filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + ".mp4")
@@ -116,7 +118,7 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, l
                     elif d["status"] == "finished":
                         status_obj['progress'] = "100%"
             except Exception as e:
-                current_app.logger.error("dl_progress_hook Failed: %s" % e)
+                logger.error("dl_progress_hook Failed: %s" % e)
         return hook
 
     ydl_opts = {
@@ -137,7 +139,7 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, l
     return True
 
 
-def download_image(image_url, video_id, channel_id, video_title, published_at, logger, webpage_url=None):
+def download_image(image_url, video_id, channel_id, video_title, published_at, webpage_url=None):
     try:
         import requests
         if published_at is None:

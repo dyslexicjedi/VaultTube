@@ -1,5 +1,5 @@
 from flask import Blueprint,current_app,send_file,Response,abort,stream_with_context
-import mariadb,json,io,csv,math,os,queue as _queue,threading,tempfile
+import mariadb,json,io,csv,math,os,queue as _queue,threading,tempfile,logging
 import subprocess
 from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse
 from backend import process_channel,save_uploaded_video_metadata
@@ -14,6 +14,8 @@ from queue_utils import enqueue
 from chapters import parse_chapters
 from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for, cache_stats
 from werkzeug.exceptions import HTTPException
+
+logger = logging.getLogger('api')
 
 api_bp = Blueprint('api',__name__)
 
@@ -70,8 +72,8 @@ def build_duration_condition(min_dur, max_dur):
 @api_bp.route('/getvids/<string:status>/<string:opt>/<string:direction>/<string:page>')
 def getvids(status,opt,direction,page):
     try:
-        current_app.logger.debug("Called Latest %s %s %s"%(opt,direction,page))
-        con = get_connection(current_app.logger)
+        logger.debug("Called Latest %s %s %s"%(opt,direction,page))
+        con = get_connection(logger)
         cur = con.cursor()
         page_num = int(page) if page.isdigit() else 0
         
@@ -127,11 +129,11 @@ def getvids(status,opt,direction,page):
             params.append(to_date)
         params.append(page_num)
         
-        current_app.logger.debug("SQL: %s, Params: %s", sql, params)
+        logger.debug("SQL: %s, Params: %s", sql, params)
         cur.execute(sql, tuple(params))
         return parse_response(cur,con)
     except Exception as e:
-        current_app.logger.error("API Latest Failed: %s"%e)
+        logger.error("API Latest Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route('/channel/<string:channelid>/<string:page>')
@@ -145,8 +147,8 @@ def api_channel_videos(channelid, page):
       - direction: asc | desc                (default: desc)
     """
     try:
-        current_app.logger.debug("Called Channel Videos %s %s", channelid, page)
-        con = get_connection(current_app.logger)
+        logger.debug("Called Channel Videos %s %s", channelid, page)
+        con = get_connection(logger)
         cur = con.cursor()
         page_num = int(page) if page.isdigit() else 0
 
@@ -173,7 +175,7 @@ def api_channel_videos(channelid, page):
         cur.execute(sql, (channelid, page_num))
         return parse_response(cur, con)
     except Exception as e:
-        current_app.logger.error("API Channel Videos Failed: %s" % e)
+        logger.error("API Channel Videos Failed: %s" % e)
         return api_error(str(e), 500)
 
 _thumbnail_inflight = set()
@@ -189,14 +191,14 @@ def _fetch_and_store_thumbnail(video_id):
         _thumbnail_inflight.add(video_id)
     try:
         try:
-            con = get_connection(current_app.logger)
+            con = get_connection(logger)
             cur = con.cursor()
             cur.execute("SELECT source, filepath FROM videos WHERE id = %s", (video_id,))
             row = cur.fetchone()
             cur.close()
             con.close()
         except Exception as e:
-            current_app.logger.error("Thumbnail lookup failed for %s: %s" % (video_id, e))
+            logger.error("Thumbnail lookup failed for %s: %s" % (video_id, e))
             return None
 
         if not row:
@@ -215,7 +217,7 @@ def _fetch_and_store_thumbnail(video_id):
                         img = r.content
                         break
                 except Exception as e:
-                    current_app.logger.debug("Thumbnail CDN miss %s/%s: %s" % (video_id, quality, e))
+                    logger.debug("Thumbnail CDN miss %s/%s: %s" % (video_id, quality, e))
         elif filepath:
             fpath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], filepath.lstrip('/'))
             if os.path.exists(fpath):
@@ -230,20 +232,20 @@ def _fetch_and_store_thumbnail(video_id):
                         with open(out, 'rb') as f:
                             img = f.read()
                 except Exception as e:
-                    current_app.logger.error("ffmpeg thumbnail failed for %s: %s" % (video_id, e))
+                    logger.error("ffmpeg thumbnail failed for %s: %s" % (video_id, e))
                 finally:
                     try:
                         os.unlink(out)
                     except OSError:
                         pass
             else:
-                current_app.logger.debug("Thumbnail: no file on disk for %s (%s)" % (video_id, fpath))
+                logger.debug("Thumbnail: no file on disk for %s (%s)" % (video_id, fpath))
         else:
-            current_app.logger.debug("Thumbnail: no filepath in DB for %s" % video_id)
+            logger.debug("Thumbnail: no filepath in DB for %s" % video_id)
 
         if img:
             try:
-                con = get_connection(current_app.logger)
+                con = get_connection(logger)
                 cur = con.cursor()
                 # COALESCE ensures a racing NULL result never overwrites real bytes
                 cur.execute(
@@ -255,7 +257,7 @@ def _fetch_and_store_thumbnail(video_id):
                 cur.close()
                 con.close()
             except Exception as e:
-                current_app.logger.error("Thumbnail store failed for %s: %s" % (video_id, e))
+                logger.error("Thumbnail store failed for %s: %s" % (video_id, e))
 
         return img
     finally:
@@ -265,8 +267,8 @@ def _fetch_and_store_thumbnail(video_id):
 @api_bp.route('/images/<string:id>')
 def imgid(id):
     try:
-        current_app.logger.debug('Called Image ID: '+id)
-        con = get_connection(current_app.logger)
+        logger.debug('Called Image ID: '+id)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("SELECT image FROM images WHERE id = %s", (id,))
         row = cur.fetchone()
@@ -288,7 +290,7 @@ def imgid(id):
             return resp
 
         # Fallback to placeholder (either fetch failed or sentinel NULL stored)
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("SELECT image FROM images WHERE id = '-1'")
         result = cur.fetchone()
@@ -303,16 +305,16 @@ def imgid(id):
         resp.cache_control.max_age = 300
         return resp
     except Exception as e:
-        current_app.logger.error("API Image Failed: %s"%e)
+        logger.error("API Image Failed: %s"%e)
         return "Image error", 500
 
 @api_bp.route('/video/<string:id>')
 def getVideo(id):
     try:
-        current_app.logger.debug('Called Video ID: '+id)
+        logger.debug('Called Video ID: '+id)
         if(".mp4" in id):
             id = id.split(".")[0]
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where id = %s;",(id,))
         # serialize results into JSON
@@ -332,29 +334,29 @@ def getVideo(id):
                 rel = (v['filepath'][len('/videos/'):] if v['filepath'].startswith('/videos/') else v['filepath']).lstrip('/')
                 source_path = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], rel)
                 if os.path.isfile(source_path):
-                    info = get_codec_info(source_path, current_app.logger)
+                    info = get_codec_info(source_path)
                     if not info['container']:
                         info['container'] = get_container_from_ext(source_path)
                     if info['vcodec'] or info['acodec']:
-                        update_video_codec_info(id, info['vcodec'], info['acodec'], info['container'], current_app.logger)
+                        update_video_codec_info(id, info["vcodec"], info["acodec"], info["container"])
                         v['vcodec'] = info['vcodec']
                         v['acodec'] = info['acodec']
                         v['container'] = info['container']
             except Exception as e:
-                current_app.logger.error("Lazy codec backfill failed for %s: %s", id, e)
+                logger.error("Lazy codec backfill failed for %s: %s", id, e)
         cur.close()
         con.close()
         # return the results!
         return json.dumps(json_data, indent=4, sort_keys=True, default=str)
     except Exception as e:
-        current_app.logger.error("API Video Failed: %s"%e)
+        logger.error("API Video Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/watched/<string:id>")
 def watched(id):
     try:
-        current_app.logger.debug('Called Watched: '+id)
-        con = get_connection(current_app.logger)
+        logger.debug('Called Watched: '+id)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("Update videos set watched = 1 where id = %s;",(id,))
         cur.execute("Update videos set timestamp = 0 where id = %s;",(id,))
@@ -363,14 +365,14 @@ def watched(id):
         con.close()
         return api_success()
     except Exception as e:
-        current_app.logger.error("Mark Watched Failed: %s"%e)
+        logger.error("Mark Watched Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/unwatched/<string:id>")
 def unwatched(id):
     try:
-        current_app.logger.debug('Called UnWatched: '+id)
-        con = get_connection(current_app.logger)
+        logger.debug('Called UnWatched: '+id)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("Update videos set watched = 0 where id = %s;",(id,))
         con.commit()
@@ -378,15 +380,15 @@ def unwatched(id):
         con.close()
         return api_success()
     except Exception as e:
-        current_app.logger.error("Mark Unwatched Failed: %s"%e)
+        logger.error("Mark Unwatched Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/set_timestamp/<string:ts>/<string:id>")
 def set_timestamp(id,ts):
     try:
-        current_app.logger.debug('Called Set Timestamp %s at %s'%(id,ts))
+        logger.debug('Called Set Timestamp %s at %s'%(id,ts))
         ts = ts.split('.')[0]
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("Update videos set timestamp = %s where id = %s;",(ts,id))
         con.commit()
@@ -394,19 +396,19 @@ def set_timestamp(id,ts):
         con.close()
         return api_success()
     except Exception as e:
-        current_app.logger.error("Set Timestamp Failed: %s"%e)
+        logger.error("Set Timestamp Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/list/resume/")
 def list_resume():
     try:
-        current_app.logger.debug("Called List Resume")
-        con = get_connection(current_app.logger)
+        logger.debug("Called List Resume")
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where not timestamp = 0 order by PublishedAt desc limit 40;")
         return parse_response(cur,con)
     except Exception as e:
-        current_app.logger.error("API List Resume Failed: %s"%e)
+        logger.error("API List Resume Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/download/single", methods=["POST"])
@@ -425,17 +427,17 @@ def api_download():
         elif 'youtube.com' in url or 'youtu.be' in url:
             source = "youtube"
         i = QueueObject(url, "", source, 0, "")
-        enqueue(i, current_app.config['queue'], current_app.logger)
+        enqueue(i, current_app.config["queue"])
         return api_success()
     except Exception as e:
-        current_app.logger.error("API Download Failed: %s" % e)
+        logger.error("API Download Failed: %s" % e)
         return api_error(str(e), 500)
 
 @api_bp.route("/stats/video/count")
 def get_video_count():
     try:
-        current_app.logger.debug('Called Get_Video_Count')
-        con = get_connection(current_app.logger)
+        logger.debug('Called Get_Video_Count')
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("select count(*) from videos;")
         count = cur.fetchone()[0]
@@ -443,14 +445,14 @@ def get_video_count():
         con.close()
         return str(count)
     except Exception as e:
-        current_app.logger.error("API Video Count Failed: %s"%e)
+        logger.error("API Video Count Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route('/channels/<string:page>')
 def channels(page):
     try:
-        current_app.logger.debug("Called Channels %s"%(page,))
-        con = get_connection(current_app.logger)
+        logger.debug("Called Channels %s"%(page,))
+        con = get_connection(logger)
         cur = con.cursor()
         page_num = int(page) if page.isdigit() else 0
         # order=activity sorts by most recent video (used by the home page rails)
@@ -466,7 +468,7 @@ def channels(page):
         cur.execute(f"select channels.*,count(videos.id) as vidcount,max(PublishedAt) as lastvidtime,coalesce(sum(videos.watched = 0),0) as unwatched,max(videos.source) as source from channels left outer join videos on channels.channelId = videos.channelId group by channels.channelId{having} order by {order_by} limit 40 offset %s;",(*params, page_num))
         return parse_response(cur,con)
     except Exception as e:
-        current_app.logger.error("API Channel Failed: %s"%e)
+        logger.error("API Channel Failed: %s"%e)
         return api_error(str(e), 500)
 
 
@@ -529,7 +531,7 @@ def api_channel(channelid):
     source (YouTube by UC-prefixed ID, Patreon from the stored campaign json,
     Reddit by author name)."""
     try:
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("select channelname, subscribed, json from channels where channelid = %s;", (channelid,))
         row = cur.fetchone()
@@ -566,29 +568,29 @@ def api_channel(channelid):
             'video_count': int(vidcount),
         }, default=str)
     except Exception as e:
-        current_app.logger.error("API Channel Info Failed: %s" % e)
+        logger.error("API Channel Info Failed: %s" % e)
         return api_error(str(e), 500)
 
 @api_bp.route('/creator/<string:creator>/<string:page>')
 def api_creator(creator,page):
     try:
-        current_app.logger.debug("Called Creator %s %s"%(creator,page))
-        con = get_connection(current_app.logger)
+        logger.debug("Called Creator %s %s"%(creator,page))
+        con = get_connection(logger)
         cur = con.cursor()
         # Raw row offset, pre-multiplied by the caller like every other endpoint
         offset = int(page) if page.isdigit() else 0
         cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.channelId = %s order by v.PublishedAt desc limit 40 offset %s;", (creator, offset))
         return parse_response(cur,con)
     except Exception as e:
-        current_app.logger.error("API Creator Failed: %s"%e)
+        logger.error("API Creator Failed: %s"%e)
         return api_error(str(e), 500)
 
 #Removed 11/20/25
 # @api_bp.route('/unwatched/<string:opt>/<string:page>')
 # def get_unwatched(opt,page):
 #     try:
-#         current_app.logger.debug("Called Unwatched %s %s"%(opt,page))
-#         con = get_connection(current_app.logger)
+#         logger.debug("Called Unwatched %s %s"%(opt,page))
+#         con = get_connection(logger)
 #         cur = con.cursor()
         
 #         # Get sort parameters from query string
@@ -609,14 +611,14 @@ def api_creator(creator,page):
 #             cur.execute("select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.watched = 0 order by v.PublishedAt %s limit 40 offset %s;"%(sort_release, page))
 #         return parse_response(cur,con)
 #     except Exception as e:
-#         current_app.logger.error("API Unwatched Failed: %s"%e)
+#         logger.error("API Unwatched Failed: %s"%e)
 #         return "[]"
 
 @api_bp.route('/search/<string:searchtxt>/<string:page>')
 def api_search(searchtxt,page):
     try:
-        current_app.logger.debug("Called Search %s %s"%(searchtxt,page))
-        con = get_connection(current_app.logger)
+        logger.debug("Called Search %s %s"%(searchtxt,page))
+        con = get_connection(logger)
         cur = con.cursor()
         try:
             offset = int(page)
@@ -640,27 +642,27 @@ def api_search(searchtxt,page):
             )
         return parse_response(cur,con)
     except Exception as e:
-        current_app.logger.error("API Search Failed: %s"%e)
+        logger.error("API Search Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/sub_status/<string:type>/<string:value>")
 def sub_status(type,value):
     try:
-        current_app.logger.debug('Called Sub_status: %s %s'%(type,value))
-        con = get_connection(current_app.logger)
+        logger.debug('Called Sub_status: %s %s'%(type,value))
+        con = get_connection(logger)
         cur = con.cursor()
         if(type == "channel"):
             cur.execute("Select subscribed from channels where channelid = %s;",(value,))
             if(not cur.rowcount):
-                current_app.logger.error("sub_status: Channel not found")
-                process_channel('/videos/'+value,current_app.logger)
+                logger.error("sub_status: Channel not found")
+                process_channel("/videos/"+value)
                 data = ""
             else:
                 data = cur.fetchone()[0]
         elif(type == "playlist"):
             cur.execute("Select subscribed from playlists where playlistId = %s;",(value,))
             if(not cur.rowcount):
-                current_app.logger.error("sub_status: playlist not found")
+                logger.error("sub_status: playlist not found")
                 data = ""
             else:
                 data = cur.fetchone()[0]
@@ -670,14 +672,14 @@ def sub_status(type,value):
         # return the results!
         return str(data)
     except Exception as e:
-        current_app.logger.error("sub_status Failed: %s"%e)
+        logger.error("sub_status Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/watch_status/<string:vid>")
 def watch_status(vid):
     try:
-        current_app.logger.debug('Called Watch Status: '+vid)
-        con = get_connection(current_app.logger)
+        logger.debug('Called Watch Status: '+vid)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("Select watched from videos where id = %s;",(vid,))
         row = cur.fetchone()
@@ -687,19 +689,19 @@ def watch_status(vid):
             return api_error("Video not found", 404)
         return str(row[0])
     except Exception as e:
-        current_app.logger.error("Watch Status Failed: %s"%e)
+        logger.error("Watch Status Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/checkdb")
 def api_checkdb():
-    return str(checkdb(current_app.logger))
+    return str(checkdb())
 
 @api_bp.route("/health")
 def api_health():
     """Liveness probe for the Docker HEALTHCHECK: one pooled SELECT 1
     (checkdb is too heavy to run every probe interval)."""
     try:
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("SELECT 1")
         cur.fetchone()
@@ -707,7 +709,7 @@ def api_health():
         con.close()
         return api_success()
     except Exception as e:
-        current_app.logger.error("Health check failed: %s" % e)
+        logger.error("Health check failed: %s" % e)
         return api_error("unhealthy: %s" % e, 503)
 
 @api_bp.route('/status/queue/')
@@ -767,8 +769,7 @@ def status_stream():
 @api_bp.route('/downloads/errors/')
 def get_download_errors_api():
     try:
-        logger = current_app.logger
-        errors = get_download_errors(logger, 50)
+        errors = get_download_errors(50)
         data = []
         for err in errors:
             data.append({
@@ -780,7 +781,7 @@ def get_download_errors_api():
             })
         return json.dumps(data, indent=4, sort_keys=True, default=str)
     except Exception as e:
-        current_app.logger.error("API Get Download Errors Failed: %s" % e)
+        logger.error("API Get Download Errors Failed: %s" % e)
         return json.dumps([])
 
 @api_bp.route('/downloads/retry', methods=['POST'])
@@ -793,42 +794,41 @@ def retry_download_api():
         if not url:
             return api_error("Missing URL", 400)
         qo = QueueObject(url, "", body.get('source') or 'youtube', 0, "")
-        enqueued = enqueue(qo, current_app.config['queue'], current_app.logger)
+        enqueued = enqueue(qo, current_app.config["queue"])
         if body.get('id') is not None:
-            delete_download_error(body['id'], current_app.logger)
+            delete_download_error(body["id"])
         return api_success({"enqueued": enqueued})
     except Exception as e:
-        current_app.logger.error("API Retry Download Failed: %s" % e)
+        logger.error("API Retry Download Failed: %s" % e)
         return api_error(str(e), 500)
 
 @api_bp.route('/downloads/errors/', methods=['DELETE'])
 def clear_download_errors_api():
     try:
-        logger = current_app.logger
-        clear_download_errors(logger)
+        clear_download_errors()
         return api_success()
     except Exception as e:
-        current_app.logger.error("API Clear Download Errors Failed: %s" % e)
+        logger.error("API Clear Download Errors Failed: %s" % e)
         return api_error(str(e), 500)
 
 @api_bp.route("/subscribe/<string:type>/<string:value>")
 def api_subscribe(type,value):
     ret = False
     try:
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
         if(type == "playlist"):
-            current_app.logger.debug('Called Playlist Subscribe: '+value)
+            logger.debug('Called Playlist Subscribe: '+value)
             cur.execute("Select * from playlists where playlistId = %s",(value,))
             if(not cur.rowcount):
-                plinfo = get_playlist_info(value,current_app.logger)
-                insert_playlist(plinfo,current_app.logger)
+                plinfo = get_playlist_info(value)
+                insert_playlist(plinfo)
                 ret = True
             else:
                 cur.execute("Update playlists set subscribed = 1 where playlistId = %s;",(value,))
                 ret = True
         elif(type == "channel"):
-            current_app.logger.debug('Called Channel Subscribe: '+value)
+            logger.debug('Called Channel Subscribe: '+value)
             cur.execute("Update channels set subscribed = 1 where channelid = %s;",(value,))
             ret = True
         con.commit()
@@ -836,59 +836,59 @@ def api_subscribe(type,value):
         con.close()
         return api_success(ret)
     except Exception as e:
-        current_app.logger.error("Playlist Subscribe Failed: %s"%e)
+        logger.error("Playlist Subscribe Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/unsubscribe/<string:type>/<string:value>")
 def api_unsubscribe(type,value):
     try:
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
         if(type == "playlist"):
-            current_app.logger.debug('Called Playlist Unsubscribe: '+value)
+            logger.debug('Called Playlist Unsubscribe: '+value)
             cur.execute("Update playlists set subscribed = 0 where playlistId = %s;",(value,))
         elif(type == "channel"):
-            current_app.logger.debug('Called Channel Unsubscribe: '+value)
+            logger.debug('Called Channel Unsubscribe: '+value)
             cur.execute("Update channels set subscribed = 0 where channelid = %s;",(value,))
         con.commit()
         cur.close()
         con.close()
         return api_success()
     except Exception as e:
-        current_app.logger.error("Playlist Unsubscribe Failed: %s"%e)
+        logger.error("Playlist Unsubscribe Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route('/playlists/<string:page>')
 def playlists(page):
     try:
-        current_app.logger.debug("Called Playlists %s"%(page,))
-        con = get_connection(current_app.logger)
+        logger.debug("Called Playlists %s"%(page,))
+        con = get_connection(logger)
         cur = con.cursor()
         page_num = int(page) if page.isdigit() else 0
         cur.execute("select * from playlists order by playlistName desc limit 40 offset %s;",(page_num,))
         return parse_response(cur,con)
     except Exception as e:
-        current_app.logger.error("API Playlists Failed: %s"%e)
+        logger.error("API Playlists Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route('/playlist/<string:playlist>/<string:page>')
 def api_playlist(playlist,page):
     try:
-        current_app.logger.debug("Called playlist %s %s"%(playlist,page))
-        con = get_connection(current_app.logger)
+        logger.debug("Called playlist %s %s"%(playlist,page))
+        con = get_connection(logger)
         cur = con.cursor()
         page_num = int(page) if page.isdigit() else 0
         cur.execute("select videos.*,playlistName from videos left outer join pl2vid on videos.id = pl2vid.videoId left outer join playlists on pl2vid.playlistId = playlists.playlistId where pl2vid.playlistId = %s order by PublishedAt desc limit 40 offset %s;",(playlist,page_num))
         return parse_response(cur,con)
     except Exception as e:
-        current_app.logger.error("API Playlist Failed: %s"%e)
+        logger.error("API Playlist Failed: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route('/random')
 def api_random():
     try:
-        current_app.logger.debug("Called Random")
-        con = get_connection(current_app.logger)
+        logger.debug("Called Random")
+        con = get_connection(logger)
         cur = con.cursor()
         include_reddit = request.args.get('include_reddit', '0')
         if include_reddit == '1':
@@ -897,7 +897,7 @@ def api_random():
             cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.source in ('youtube','patreon') order by RAND() LIMIT 40;")
         return parse_response(cur,con)
     except Exception as e:
-        current_app.logger.error("API Random Fail: %s"%e)
+        logger.error("API Random Fail: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/up_next/<string:vid>")
@@ -906,12 +906,12 @@ def api_up_next(vid):
     channel in series order (published after the current one first, then older
     ones newest-first), topped up with recent unwatched from other channels."""
     try:
-        current_app.logger.debug("Called Up Next %s" % vid)
+        logger.debug("Called Up Next %s" % vid)
         try:
             limit = min(max(int(request.args.get('limit', 10)), 1), 25)
         except ValueError:
             limit = 10
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("select channelId, PublishedAt from videos where id = %s;", (vid,))
         if not cur.rowcount:
@@ -943,7 +943,7 @@ def api_up_next(vid):
         con.close()
         return json.dumps(results, indent=4, sort_keys=True, default=str)
     except Exception as e:
-        current_app.logger.error("API Up Next Failed: %s" % e)
+        logger.error("API Up Next Failed: %s" % e)
         return "[]"
 
 @api_bp.route("/chapters/<string:vid>")
@@ -957,7 +957,7 @@ def api_chapters(vid):
     ``chapters.parse_chapters`` for the parsing rules.
     """
     try:
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("select description from videos where id = %s;", (vid,))
         row = cur.fetchone()
@@ -966,24 +966,24 @@ def api_chapters(vid):
         description = row[0] if row else None
         return jsonify({"chapters": parse_chapters(description)})
     except Exception as e:
-        current_app.logger.error("API Chapters Failed: %s" % e)
+        logger.error("API Chapters Failed: %s" % e)
         return jsonify({"chapters": []})
 
 
 @api_bp.route("/find_next_previous/<string:vid>")
 def api_fnp(vid):
     try:
-        current_app.logger.debug("Called FNP")
-        ret = find_next_previous(vid,current_app.logger)
+        logger.debug("Called FNP")
+        ret = find_next_previous(vid)
         return json.dumps(ret, indent=4, sort_keys=True, default=str)
     except Exception as e:
-        current_app.logger.error("API FNP Fail: %s"%e)
+        logger.error("API FNP Fail: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/delete/<string:vid>")
 def api_delete(vid):
     try:
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("select filepath from videos where id = %s",(vid,))
         row = cur.fetchone()
@@ -997,17 +997,17 @@ def api_delete(vid):
         try:
             os.remove(filepath)
         except Exception as e:
-            current_app.logger.error("API Delete File Missing: %s"%e)
+            logger.error("API Delete File Missing: %s"%e)
         cur.execute("Delete from videos where id = %s",(vid,))
         cur.execute("Delete from images where id = %s",(vid,))
         cur.execute("Insert ignore into IgnoreVid(id) values(%s)",(vid,))
         con.commit()
         cur.close()
         con.close()
-        current_app.logger.info("Deleted Video %s"%vid)
+        logger.info("Deleted Video %s"%vid)
         return api_success()
     except Exception as e:
-        current_app.logger.error("API Delete: %s"%e)
+        logger.error("API Delete: %s"%e)
         return api_error(str(e), 500)
     
 @api_bp.route("/stats")
@@ -1015,7 +1015,7 @@ def api_stats():
     """Dashboard data."""
     try:
         data = {}
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
 
         cur.execute("select count(*), coalesce(sum(watched=1),0), coalesce(sum(TIME_TO_SEC(`length`)),0), coalesce(round(avg(TIME_TO_SEC(`length`))),0) from videos")
@@ -1059,7 +1059,7 @@ def api_stats():
         con.close()
         return json.dumps(data, default=str)
     except Exception as e:
-        current_app.logger.error("API Stats Error: %s"%e)
+        logger.error("API Stats Error: %s"%e)
         return api_error(str(e), 500)
 
 @api_bp.route("/storage")
@@ -1067,7 +1067,7 @@ def api_storage():
     """Disk-usage dashboard data: vault bytes by source/channel/week + transcode cache status."""
     try:
         data = {}
-        con = get_connection(current_app.logger)
+        con = get_connection(logger)
         cur = con.cursor()
 
         # Total vault bytes + video count
@@ -1104,7 +1104,7 @@ def api_storage():
 
         return json.dumps(data, default=str)
     except Exception as e:
-        current_app.logger.error("API Storage Error: %s"%e)
+        logger.error("API Storage Error: %s"%e)
         return api_error(str(e), 500)
     
 @api_bp.route('/transcode/<string:video_id>/playlist.m3u8')
@@ -1119,18 +1119,18 @@ def transcode_playlist(video_id):
     aren't on disk yet block in the segment endpoint rather than 404-ing.
     """
     try:
-        current_app.logger.debug('Called HLS playlist for: %s', video_id)
-        source_path = source_path_for(video_id, current_app.logger)
+        logger.debug('Called HLS playlist for: %s', video_id)
+        source_path = source_path_for(video_id)
         if not source_path or not os.path.isfile(source_path):
             abort(404)
 
         # Kick off (or confirm) the encode so segments start being produced.
-        cache_dir = generate_hls(video_id, current_app.logger, source_path=source_path)
+        cache_dir = generate_hls(video_id, source_path=source_path)
         if not cache_dir:
             abort(404)
         touch_cache_access(video_id)
 
-        body = build_vod_playlist(get_duration(source_path, current_app.logger))
+        body = build_vod_playlist(get_duration(source_path))
         if body is not None:
             return current_app.response_class(
                 body, mimetype='application/vnd.apple.mpegurl')
@@ -1147,7 +1147,7 @@ def transcode_playlist(video_id):
     except HTTPException:
         raise
     except Exception as e:
-        current_app.logger.error("HLS playlist failed for %s: %s", video_id, e)
+        logger.error("HLS playlist failed for %s: %s", video_id, e)
         return api_error(str(e), 500)
 
 
@@ -1162,7 +1162,7 @@ def transcode_segment(video_id, segment):
     A genuine out-of-range index or a timeout still 404s.
     """
     try:
-        current_app.logger.debug('Called HLS segment %s for: %s', segment, video_id)
+        logger.debug('Called HLS segment %s for: %s', segment, video_id)
         if not segment.isdigit():
             abort(404)
         index = int(segment)
@@ -1178,23 +1178,23 @@ def transcode_segment(video_id, segment):
 
         # Fast path: already on disk.
         if not (os.path.isfile(real_seg) and os.path.getsize(real_seg) > 0):
-            source_path = source_path_for(video_id, current_app.logger)
+            source_path = source_path_for(video_id)
             if not source_path or not os.path.isfile(source_path):
                 abort(404)
 
             # Reject indices beyond the real end of the video.
-            total = segment_count_for_duration(get_duration(source_path, current_app.logger))
+            total = segment_count_for_duration(get_duration(source_path))
             if total and index >= total:
                 abort(404)
 
             # Ensure an encode is running (it may have been reaped mid-session).
-            generate_hls(video_id, current_app.logger, source_path=source_path)
+            generate_hls(video_id, source_path=source_path)
 
             timeout = _segment_wait_timeout()
             ready = wait_for_segment(
                 cache_dir, index, transcode_key(video_id), timeout=timeout)
             if not ready:
-                current_app.logger.warning(
+                logger.warning(
                     "HLS segment %s timed out/unavailable for %s", index, video_id)
                 abort(404)
 
@@ -1210,7 +1210,7 @@ def transcode_segment(video_id, segment):
     except HTTPException:
         raise
     except Exception as e:
-        current_app.logger.error("HLS segment failed for %s/%s: %s", video_id, segment, e)
+        logger.error("HLS segment failed for %s/%s: %s", video_id, segment, e)
         return api_error(str(e), 500)
 
 
@@ -1264,7 +1264,7 @@ def api_upload_video():
 
         return "Upload successful", 200
     except Exception as e:
-        current_app.logger.error(f"API Upload Video Failed: {e}")
+        logger.error(f"API Upload Video Failed: {e}")
         return "Internal server error", 500
 
 @api_bp.route("/reddit/saved", methods=["POST"])
@@ -1303,19 +1303,19 @@ def api_reddit_saved():
                 continue
             url = "https://www.reddit.com" + item.permalink
             qo = QueueObject(url, "", "reddit", 0, "", unsave=True)
-            enqueue(qo, q, current_app.logger)
+            enqueue(qo, q)
             enqueued += 1
 
         return api_success({"enqueued": enqueued, "skipped": skipped})
     except Exception as e:
-        current_app.logger.error("API Reddit Saved Failed: %s" % e)
+        logger.error("API Reddit Saved Failed: %s" % e)
         return api_error(str(e), 500)
 
 @api_bp.route('/creator/count/<string:creator>')
 def api_creator_count(creator):
     try:
-        current_app.logger.debug("Called Creator Count %s"%(creator,))
-        con = get_connection(current_app.logger)
+        logger.debug("Called Creator Count %s"%(creator,))
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("select count(*) from videos where channelId = %s;", (creator,))
         count = cur.fetchone()[0]
@@ -1323,14 +1323,14 @@ def api_creator_count(creator):
         con.close()
         return jsonify({'count': count})
     except Exception as e:
-        current_app.logger.error("API Creator Count Failed: %s"%e)
+        logger.error("API Creator Count Failed: %s"%e)
         return jsonify({'count': 0})
 
 @api_bp.route("/stats/video/unwatched")
 def get_video_unwatched_count():
     try:
-        current_app.logger.debug('Called Get_Video_Unwatched_Count')
-        con = get_connection(current_app.logger)
+        logger.debug('Called Get_Video_Unwatched_Count')
+        con = get_connection(logger)
         cur = con.cursor()
         cur.execute("select count(*) from videos where watched = 0;")
         count = cur.fetchone()[0]
@@ -1338,7 +1338,7 @@ def get_video_unwatched_count():
         con.close()
         return str(count)
     except Exception as e:
-        current_app.logger.error("API Unwatched Count Failed: %s"%e)
+        logger.error("API Unwatched Count Failed: %s"%e)
         return api_error(str(e), 500)
 
 def _build_export_config():
@@ -1382,7 +1382,7 @@ def _build_export_config():
 def api_export():
     include_json = request.args.get('include_json', '0') == '1'
     fmt = request.args.get('format', 'json').lower()
-    logger = current_app.logger
+
     ts = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
 
     if fmt == 'csv':
@@ -1395,7 +1395,7 @@ def api_export():
                     'isDeleted', 'description']
             writer.writerow(cols)
             yield buf.getvalue()
-            for row in export_video_rows(logger, include_json=False):
+            for row in export_video_rows(include_json=False):
                 buf.seek(0)
                 buf.truncate()
                 writer.writerow([row.get(c) for c in cols])
@@ -1407,7 +1407,7 @@ def api_export():
         )
 
     def generate_json():
-        counts = export_row_counts(logger)
+        counts = export_row_counts()
         meta = {
             'exported_at': datetime.datetime.utcnow().isoformat() + 'Z',
             'include_json': include_json,
@@ -1415,16 +1415,16 @@ def api_export():
         }
         yield '{"meta":' + json.dumps(meta, default=str) + ',"catalog":['
         first = True
-        for row in export_video_rows(logger, include_json):
+        for row in export_video_rows(include_json):
             if not first:
                 yield ','
             yield json.dumps(row, default=str)
             first = False
-        channels = export_subscribed_channels(logger)
-        playlists = export_subscribed_playlists(logger)
+        channels = export_subscribed_channels()
+        playlists = export_subscribed_playlists()
         yield '],"subscriptions":' + json.dumps({'channels': channels, 'playlists': playlists}, default=str)
-        yield ',"mappings":' + json.dumps(export_pl2vid(logger), default=str)
-        yield ',"tombstones":' + json.dumps(export_tombstones(logger), default=str)
+        yield ',"mappings":' + json.dumps(export_pl2vid(), default=str)
+        yield ',"tombstones":' + json.dumps(export_tombstones(), default=str)
         yield ',"config":' + json.dumps(_build_export_config(), default=str) + '}'
 
     return Response(
@@ -1434,7 +1434,7 @@ def api_export():
     )
 
 
-def get_playlist_info(playlistid, logger):
+def get_playlist_info(playlistid):
     try:
         curl = "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&id=%s&key=%s" % (playlistid, os.environ['VAULTTUBE_YTKEY'])
         r = requests.get(curl, timeout=30)

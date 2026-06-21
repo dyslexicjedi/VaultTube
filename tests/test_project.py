@@ -476,11 +476,11 @@ def test_db_checks_fail_closed(monkeypatch):
 
     monkeypatch.setattr(database, 'get_connection', boom)
     log = logging.getLogger('test')
-    assert database.check_db_video('AnyVid', log) is True
-    assert database.check_db_channel('AnyChan', log) is True
-    assert database.check_pl2vid_info('AnyPl', 'AnyVid', log) is True
-    assert database.check_db_video_length('AnyVid', log) is True
-    assert database.get_video_index(log) is None
+    assert database.check_db_video('AnyVid') is True
+    assert database.check_db_channel('AnyChan') is True
+    assert database.check_pl2vid_info('AnyPl', 'AnyVid') is True
+    assert database.check_db_video_length('AnyVid') is True
+    assert database.get_video_index() is None
 
 
 def test_get_video_index(client):
@@ -491,7 +491,7 @@ def test_get_video_index(client):
     cur.execute("Insert ignore into IgnoreVid(id) values('TombVid1');")
     con.close()
 
-    lengths, ignored = database.get_video_index(logging.getLogger('test'))
+    lengths, ignored = database.get_video_index()
     assert lengths.get('GetVid1') == '0:10:00'
     assert 'TombVid1' in ignored
 
@@ -538,7 +538,7 @@ def test_patreon_db_info_json(client):
     import logging, datetime
     from providers.patreon import patreon_db_info
 
-    assert patreon_db_info('PatVid1', '11752268', datetime.datetime(2024, 1, 1), 'Pat Title', logging.getLogger('test')) is True
+    assert patreon_db_info('PatVid1', '11752268', datetime.datetime(2024, 1, 1), 'Pat Title') is True
 
     con = _db_connect()
     cur = con.cursor()
@@ -572,7 +572,7 @@ def test_run_deleted_check_batched(client, monkeypatch):
     monkeypatch.setattr(requests, 'get', fake_get)
 
     with client.application.app_context():
-        backend.run_deleted_check(logging.getLogger('test'), rows=[('DelVid1', 0), ('DelVid2', 1)])
+        backend.run_deleted_check(rows=[('DelVid1', 0), ('DelVid2', 1)])
 
     assert len(calls) == 1                       # both IDs in one batched call
     assert 'DelVid1' in calls[0] and 'DelVid2' in calls[0]
@@ -626,7 +626,7 @@ def test_channel_scan_paginates(client, monkeypatch):
 
     consumed = []
 
-    def fake_iter(playlist_id, logger):
+    def fake_iter(playlist_id):
         consumed.append(playlist_id)
         for vid in ['VtScanVid1', 'VtScanVid2', 'VtScanVid3']:
             yield vid
@@ -634,7 +634,7 @@ def test_channel_scan_paginates(client, monkeypatch):
     monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
 
     with client.application.app_context():
-        scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
+        scanner.get_channel_video_list(('UCVtTestChannel1',))
 
     assert consumed == ['UUVtTestChannel1']           # uploads playlist derived, no API call
     assert q.qsize() == 3
@@ -658,7 +658,7 @@ def test_channel_scan_stops_when_caught_up(client, monkeypatch):
 
     fully_consumed = {'value': False}
 
-    def fake_iter(playlist_id, logger):
+    def fake_iter(playlist_id):
         yield 'VtScanVid1'    # known — scan stops immediately, generator abandoned
         fully_consumed['value'] = True
         yield 'VtScanVid99'
@@ -666,7 +666,7 @@ def test_channel_scan_stops_when_caught_up(client, monkeypatch):
     monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
 
     with client.application.app_context():
-        scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
+        scanner.get_channel_video_list(('UCVtTestChannel1',))
 
     assert fully_consumed['value'] is False   # generator abandoned at the first known video
     assert q.qsize() == 0
@@ -685,7 +685,7 @@ def test_channel_scan_mixed_page_takes_new_only(client, monkeypatch):
 
     fully_consumed = {'value': False}
 
-    def fake_iter(playlist_id, logger):
+    def fake_iter(playlist_id):
         yield 'VtScanVid3'    # new — enqueued
         yield 'VtScanVid1'    # known — stop, generator abandoned
         fully_consumed['value'] = True
@@ -694,7 +694,7 @@ def test_channel_scan_mixed_page_takes_new_only(client, monkeypatch):
     monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
 
     with client.application.app_context():
-        scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
+        scanner.get_channel_video_list(('UCVtTestChannel1',))
 
     assert fully_consumed['value'] is False
     assert q.qsize() == 1
@@ -707,7 +707,7 @@ def test_download_playlist_writes_queue_rows(client, monkeypatch):
     import providers.youtube as yt
     q = _ensure_queue(client)
 
-    def fake_iter(playlist_id, logger):
+    def fake_iter(playlist_id):
         for vid in ['VtPlVid1', 'VtPlVid2']:
             yield vid
 
@@ -715,7 +715,7 @@ def test_download_playlist_writes_queue_rows(client, monkeypatch):
 
     from QueueObject import QueueObject
     with client.application.app_context():
-        result = yt.download_playlist(QueueObject('PLVtTest123', '', 'youtube', 0, ''), logging.getLogger('test'))
+        result = yt.download_playlist(QueueObject('PLVtTest123', '', 'youtube', 0, ''))
 
     assert result is True
     assert q.qsize() == 2
@@ -752,7 +752,7 @@ def test_iter_playlist_video_ids_uses_ytdlp_flat(monkeypatch):
             return {'entries': [{'id': 'VidA'}, {'id': 'VidB'}, None, {'id': 'VidC'}]}
 
     monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
-    ids = list(yt.iter_playlist_video_ids('PLTest123', logging.getLogger('test')))
+    ids = list(yt.iter_playlist_video_ids('PLTest123'))
 
     assert ids == ['VidA', 'VidB', 'VidC']
     assert captured['opts'].get('extract_flat_playlist') is True
@@ -774,7 +774,7 @@ def test_iter_playlist_video_ids_handles_error(monkeypatch):
             raise RuntimeError("boom")
 
     monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
-    ids = list(yt.iter_playlist_video_ids('PLTest123', logging.getLogger('test')))
+    ids = list(yt.iter_playlist_video_ids('PLTest123'))
     assert ids == []
 
 
@@ -791,7 +791,7 @@ def test_iter_playlist_video_ids_no_entries(monkeypatch):
             return {}
 
     monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
-    ids = list(yt.iter_playlist_video_ids('PLTest123', logging.getLogger('test')))
+    ids = list(yt.iter_playlist_video_ids('PLTest123'))
     assert ids == []
 
 
@@ -807,7 +807,7 @@ def test_flat_playlist_opts_cookies_use_stringio(monkeypatch, tmp_path):
     cookie_file.write_text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tFALSE\t0\ttest\t1\n")
 
     monkeypatch.setenv('VAULTTUBE_YTCOOKIE', str(cookie_file))
-    opts, handle = yt._flat_playlist_opts(logging.getLogger('test'))
+    opts, handle = yt._flat_playlist_opts()
     try:
         assert isinstance(opts.get('cookiefile'), StringIO)
         assert opts['cookiefile'].getvalue().startswith('# Netscape')
@@ -821,7 +821,7 @@ def test_flat_playlist_opts_no_cookies_when_unset(monkeypatch):
     import providers.youtube as yt
 
     monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
-    opts, handle = yt._flat_playlist_opts(logging.getLogger('test'))
+    opts, handle = yt._flat_playlist_opts()
     assert 'cookiefile' not in opts
     assert handle is None
 
@@ -940,7 +940,7 @@ def test_getvids_channel_id_query_filter(client):
 def test_insert_not_found_goes_to_ignorevid(client):
     import logging
     from database import insert_not_found
-    insert_not_found('TombVid2', logging.getLogger('test'))
+    insert_not_found('TombVid2')
 
     con = _db_connect()
     cur = con.cursor()
@@ -1271,15 +1271,15 @@ def test_patreon_scan_campaign_filters(client, monkeypatch):
         {'id': '3', 'attributes': {'post_type': 'video_external_file', 'current_user_can_view': True, 'title': 'already have'}},
         {'id': '4', 'attributes': {'post_type': 'video_external_file', 'current_user_can_view': True, 'title': 'new video'}},
     ]}
-    monkeypatch.setattr(patreon, '_api_get', lambda url, logger: posts)
-    monkeypatch.setattr(patreon, 'check_db_video', lambda id, logger: id == '3')
+    monkeypatch.setattr(patreon, '_api_get', lambda url: posts)
+    monkeypatch.setattr(patreon, 'check_db_video', lambda id: id == '3')
     # bypass DB persistence so the fake post URL never lands in the real queue table
-    monkeypatch.setattr(patreon, 'enqueue', lambda qo, q, logger: q.put(qo))
+    monkeypatch.setattr(patreon, 'enqueue', lambda qo, q: q.put(qo))
     monkeypatch.setenv('VAULTTUBE_PATREONCOOKIE', '/tmp/fake-cookie')
 
     client.application.config['queue'] = _queue.Queue()
     with client.application.app_context():
-        patreon.scan_campaign('11752268', client.application.logger)
+        patreon.scan_campaign('11752268')
 
     q = client.application.config['queue']
     assert q.qsize() == 1
@@ -1295,12 +1295,12 @@ def test_queue_persistence_roundtrip(client):
 
     logger = client.application.logger
     qo = QueueObject("https://example.com/vt-test-queue-row", "", "youtube", 0, "")
-    rowid = qo.row_id = insert_queue_item(qo, logger)
+    rowid = qo.row_id = insert_queue_item(qo)
     assert rowid is not None
     try:
-        assert any(r[0] == rowid for r in get_resumable_queue_items(logger))
-        update_queue_status(rowid, 'done', logger)
-        assert not any(r[0] == rowid for r in get_resumable_queue_items(logger))
+        assert any(r[0] == rowid for r in get_resumable_queue_items())
+        update_queue_status(rowid, "done")
+        assert not any(r[0] == rowid for r in get_resumable_queue_items())
     finally:
         con = _db_connect()
         cur = con.cursor()
@@ -1337,9 +1337,9 @@ def test_handle_failure_retries_transient(client, monkeypatch):
     errors = []
     timers = []
     monkeypatch.setattr(downloader, 'update_queue_status',
-                        lambda rowid, status, logger, error=None, attempts=None: updates.append((status, attempts)))
+                        lambda rowid, status, error=None, attempts=None: updates.append((status, attempts)))
     monkeypatch.setattr(downloader, 'insert_download_error',
-                        lambda url, et, em, logger: errors.append(et))
+                        lambda url, et, em: errors.append(et))
 
     class FakeTimer:
         def __init__(self, delay, fn, args=()):
@@ -1357,18 +1357,18 @@ def test_handle_failure_retries_transient(client, monkeypatch):
 
     # Transient: requeued, no download_errors row
     qo = QueueObject("https://example.com/a")
-    downloader.handle_failure(qo, q, 'Network Error', 'Connection timed out', logger)
+    downloader.handle_failure(qo, q, 'Network Error', 'Connection timed out')
     assert updates == [('pending', 1)] and timers and not errors
 
     # Exhausted attempts: marked failed and recorded
     qo2 = QueueObject("https://example.com/b")
     qo2.attempts = downloader.MAX_ATTEMPTS - 1
-    downloader.handle_failure(qo2, q, 'Network Error', 'Connection timed out', logger)
+    downloader.handle_failure(qo2, q, 'Network Error', 'Connection timed out')
     assert updates[-1] == ('failed', downloader.MAX_ATTEMPTS) and errors == ['Network Error']
 
     # Permanent: marked failed immediately
     qo3 = QueueObject("https://example.com/c")
-    downloader.handle_failure(qo3, q, 'Provider Error', 'No supported media', logger)
+    downloader.handle_failure(qo3, q, 'Provider Error', 'No supported media')
     assert updates[-1] == ('failed', 1) and errors[-1] == 'Provider Error'
 
 
@@ -1382,8 +1382,8 @@ def test_enqueue_dedups_pending_urls(client):
     q = _queue.Queue()
     url = "https://example.com/vt-test-queue-row"
     try:
-        assert enqueue(QueueObject(url), q, logger) is True
-        assert enqueue(QueueObject(url), q, logger) is False
+        assert enqueue(QueueObject(url), q) is True
+        assert enqueue(QueueObject(url), q) is False
         assert q.qsize() == 1
     finally:
         con = _db_connect()
@@ -1703,7 +1703,7 @@ def test_update_video_filesize():
     con.commit()
     con.close()
 
-    update_video_filesize('SizeVid1', 1048576, logging.getLogger('test'))
+    update_video_filesize('SizeVid1', 1048576)
 
     con = _db_connect()
     cur = con.cursor()
@@ -1738,7 +1738,7 @@ def test_maybe_update_filesize_backfills_from_null(tmp_path):
     con.close()
 
     log = logging.getLogger('test')
-    _maybe_update_filesize('BackfillVid1', fpath, log)
+    _maybe_update_filesize('BackfillVid1', fpath)
 
     con = _db_connect()
     cur = con.cursor()
@@ -1750,7 +1750,7 @@ def test_maybe_update_filesize_backfills_from_null(tmp_path):
     assert int(row[0]) == 2048
 
     # Second call must be a no-op (filesize already non-NULL → no probe)
-    _maybe_update_filesize('BackfillVid1', fpath, log)
+    _maybe_update_filesize('BackfillVid1', fpath)
 
     con = _db_connect()
     cur = con.cursor()
@@ -1912,7 +1912,7 @@ def test_save_video_persists_filesize(tmp_path):
     }
 
     log = logging.getLogger('test')
-    save_video('SaveVid1', ret, None, log, source='youtube')
+    save_video('SaveVid1', ret, None, source='youtube')
 
     con = _db_connect()
     cur = con.cursor()
@@ -1924,6 +1924,293 @@ def test_save_video_persists_filesize(tmp_path):
     assert int(row[0]) == 4096
     assert row[1] == 'h264'
     assert row[2] == 'Save Test'
+
+
+# ---------------------------------------------------------------------------
+# Logger naming regression (issue #33)
+# ---------------------------------------------------------------------------
+# Each module must log under its own component-specific logger name so log
+# lines identify their source (replacing the generic 'main' logger).
+
+def _capture_logger_records(name):
+    """Attach a memory handler to logger <name>, return (logger, records, handler).
+
+    Temporarily lowers the logger level to DEBUG so debug-level records (which
+    most code paths emit) are captured regardless of the root logger's level."""
+    import logging
+
+    log = logging.getLogger(name)
+    records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Capture(level=logging.DEBUG)
+    log.addHandler(handler)
+    prev_level = log.level
+    log.setLevel(logging.DEBUG)
+    return log, records, handler, prev_level
+
+
+def _detach(log, handler, prev_level):
+    log.removeHandler(handler)
+    log.setLevel(prev_level)
+
+
+def test_module_loggers_have_component_names():
+    """Each module exposes a module-level logger with the expected short name."""
+    import backend, scanner, downloader, transcoder, database, api
+    import providers.youtube as youtube
+    import providers.patreon as patreon
+    import providers.reddit as reddit
+    import queue_utils
+
+    expected = {
+        backend: 'backend',
+        scanner: 'scanner',
+        downloader: 'downloader',
+        transcoder: 'transcoder',
+        database: 'database',
+        api: 'api',
+        youtube: 'youtube',
+        patreon: 'patreon',
+        reddit: 'reddit',
+        queue_utils: 'queue',
+    }
+    for mod, name in expected.items():
+        assert mod.logger.name == name, \
+            "%r.logger.name=%r, expected %r" % (mod.__name__, mod.logger.name, name)
+
+
+def test_database_checkdb_logs_under_database_logger():
+    """checkdb log records carry the 'database' logger name, not 'main'."""
+    log, records, handler, prev_level = _capture_logger_records('database')
+    try:
+        import database
+        database.checkdb()
+    finally:
+        _detach(log, handler, prev_level)
+
+    assert records, "checkdb produced no log records"
+    assert all(r.name == 'database' for r in records), \
+        "found records not under 'database': %r" % {r.name for r in records}
+    assert not any(r.name == 'main' for r in records), \
+        "checkdb still logging under 'main'"
+
+
+def test_backend_scan_vault_logs_under_backend_logger(client, monkeypatch):
+    """scan_vault log records carry the 'backend' logger name."""
+    log, records, handler, prev_level = _capture_logger_records('backend')
+    try:
+        import backend
+        # Avoid hitting the real vault dir / DB queries; make get_video_index
+        # return None so scan_vault exits immediately after logging the skip.
+        monkeypatch.setattr(backend, 'get_video_index', lambda: None)
+        with client.application.app_context():
+            backend.scan_vault()
+    finally:
+        _detach(log, handler, prev_level)
+
+    names = {r.name for r in records}
+    assert 'backend' in names, "scan_vault did not log under 'backend' (got %r)" % names
+    assert 'main' not in names
+    # The "could not load video index" line is the documented skip message
+    assert any('could not load video index' in r.getMessage() for r in records)
+
+
+def test_downloader_handle_failure_logs_under_downloader_logger(client, monkeypatch):
+    """handle_failure retry/failed log lines carry the 'downloader' logger name."""
+    import downloader
+    from QueueObject import QueueObject
+
+    monkeypatch.setattr(downloader, 'update_queue_status',
+                        lambda rowid, status, error=None, attempts=None: None)
+    monkeypatch.setattr(downloader, 'insert_download_error',
+                        lambda url, et, em: None)
+    monkeypatch.setattr(downloader.threading, 'Timer',
+                        lambda delay, fn, args=(): type('T', (), {'start': staticmethod(lambda: None)})())
+
+    log, records, handler, prev_level = _capture_logger_records('downloader')
+    try:
+        # Transient Network Error → handle_failure logs the "Retrying" line
+        qo = QueueObject("https://example.com/x")
+        downloader.handle_failure(qo, type('Q', (), {'put': lambda self, item: None})(),
+                                 'Network Error', 'Connection timed out')
+    finally:
+        _detach(log, handler, prev_level)
+
+    names = {r.name for r in records}
+    assert 'downloader' in names, "got %r" % names
+    assert 'main' not in names
+    assert any('Retrying' in r.getMessage() for r in records)
+
+
+def test_youtube_download_logs_under_youtube_logger(monkeypatch):
+    """yt-dlp download path logs under the 'youtube' logger name."""
+    import providers.youtube as youtube
+
+    # Force the cookie path so download_video reads a fake cookie file.
+    import tempfile, os
+    cookie = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+    cookie.write('cookies')
+    cookie.close()
+    monkeypatch.setenv('VAULTTUBE_YTCOOKIE', cookie.name)
+
+    def _fail(url, ydl_opts, cookies_contents, label=''):
+        raise RuntimeError('stop')
+
+    monkeypatch.setattr(youtube, '_download_attempt', _fail)
+
+    log, records, handler, prev_level = _capture_logger_records('youtube')
+    try:
+        try:
+            youtube.download_video('https://www.youtube.com/watch?v=abcdefghijk')
+        except RuntimeError:
+            pass
+    finally:
+        _detach(log, handler, prev_level)
+        os.unlink(cookie.name)
+
+    names = {r.name for r in records}
+    assert 'youtube' in names, "got %r" % names
+    assert 'main' not in names
+    # The "Starting Download" debug line is emitted before the attempt
+    assert any('Starting Download' in r.getMessage() for r in records)
+
+
+def test_patreon_scan_logs_under_patreon_logger(client, monkeypatch):
+    """Patreon scan_campaign log lines carry the 'patreon' logger name."""
+    import queue as _queue
+    import providers.patreon as patreon
+
+    posts = {'data': [
+        {'id': '4', 'attributes': {'post_type': 'video_external_file',
+                                    'current_user_can_view': True, 'title': 'new video'}},
+    ]}
+    monkeypatch.setattr(patreon, '_api_get', lambda url: posts)
+    monkeypatch.setattr(patreon, 'check_db_video', lambda id: False)
+    monkeypatch.setattr(patreon, 'enqueue', lambda qo, q: q.put(qo))
+    monkeypatch.setenv('VAULTTUBE_PATREONCOOKIE', '/tmp/fake-cookie')
+
+    client.application.config['queue'] = _queue.Queue()
+    log, records, handler, prev_level = _capture_logger_records('patreon')
+    try:
+        with client.application.app_context():
+            patreon.scan_campaign('11752268')
+    finally:
+        _detach(log, handler, prev_level)
+
+    names = {r.name for r in records}
+    assert 'patreon' in names, "got %r" % names
+    assert 'main' not in names
+    # "Processing Patreon post" is the documented info line for a new post
+    assert any('Processing Patreon post' in r.getMessage() for r in records)
+
+
+def test_api_routes_log_under_api_logger(client):
+    """API route handlers log under the 'api' logger name, not 'main'."""
+    log, records, handler, prev_level = _capture_logger_records('api')
+    try:
+        # /api/getvids emits a debug "Called Latest" line on entry
+        client.get('/api/getvids/all/PublishedAt/desc/0')
+    finally:
+        _detach(log, handler, prev_level)
+
+    names = {r.name for r in records}
+    assert 'api' in names, "got %r" % names
+    assert 'main' not in names
+
+
+def test_transcoder_logs_under_transcoder_logger(tmp_path):
+    """get_codec_info failure path logs under the 'transcoder' logger name."""
+    import transcoder
+
+    log, records, handler, prev_level = _capture_logger_records('transcoder')
+    try:
+        # Nonexistent file → ffprobe fails → logs the error under 'transcoder'
+        transcoder.get_codec_info(str(tmp_path / 'does-not-exist.mkv'))
+    finally:
+        _detach(log, handler, prev_level)
+
+    names = {r.name for r in records}
+    assert 'transcoder' in names, "got %r" % names
+    assert 'main' not in names
+    assert any('ffprobe failed' in r.getMessage() for r in records)
+
+
+def test_scanner_logs_under_scanner_logger(client):
+    """scanner log lines carry the 'scanner' logger name (not 'main')."""
+    import scanner
+
+    def fake_iter(playlist_id):
+        # Yield one unknown ID → scanner logs "Processing" then enqueues it
+        yield 'ScannerProbeVid1'
+
+    log, records, handler, prev_level = _capture_logger_records('scanner')
+    try:
+        orig = scanner.iter_playlist_pages
+        scanner.iter_playlist_pages = fake_iter
+        # check_db_video returns False so the scan enqueues instead of stopping
+        import database
+        orig_check = database.check_db_video
+        database.check_db_video = lambda vid: False
+        try:
+            with client.application.app_context():
+                scanner.get_channel_video_list(('UCScannerTest',))
+        finally:
+            scanner.iter_playlist_pages = orig
+            database.check_db_video = orig_check
+    finally:
+        _detach(log, handler, prev_level)
+
+    names = {r.name for r in records}
+    assert 'scanner' in names, "got %r" % names
+    assert 'main' not in names
+    assert any('Processing' in r.getMessage() for r in records)
+
+
+def test_root_logger_has_handlers_configured():
+    """main.py attaches handlers to the root logger so all component loggers
+    propagate to them (otherwise component log lines would be dropped)."""
+    import logging
+    root = logging.getLogger()
+    assert root.handlers, "root logger has no handlers — component logs would be lost"
+
+
+def test_no_logger_argument_in_function_signatures():
+    """Provider/download/db entry-point functions no longer take a `logger`
+    parameter — this guards against re-introducing the old convention."""
+    import inspect
+    import database, backend, scanner, downloader, queue_utils
+    import providers.youtube as youtube
+    import providers.patreon as patreon
+    import providers.reddit as reddit
+
+    checks = [
+        (database.checkdb,           []),
+        (database.save_video,        ['id', 'ret', 'img', 'source']),
+        # get_connection keeps logger=None for test-monkeypatch compat; skip it
+        (backend.scan_vault,         []),
+        (backend.process_new_video,  ['id', 'fpath']),
+        (scanner.start_scanner,     ['app']),
+        (downloader.start_dl_queue, ['app']),
+        (downloader.handle_failure,  ['qo', 'q', 'error_type', 'error_msg']),
+        (queue_utils.enqueue,        ['qo', 'q']),
+        (youtube.download,           ['qo']),
+        (youtube.download_video,     ['url', 'cookies']),
+        (patreon.download,           ['q']),
+        (patreon.scan_campaign,      ['campaign_id']),
+        (reddit.download,            ['q']),
+    ]
+    for fn, expected_args in checks:
+        sig = inspect.signature(fn)
+        actual = list(sig.parameters)
+        assert 'logger' not in actual, \
+            "%s still takes a 'logger' parameter: %r" % (fn.__qualname__, actual)
+        if expected_args:
+            assert actual == expected_args, \
+                "%s signature %r != expected %r" % (fn.__qualname__, actual, expected_args)
 
 
 

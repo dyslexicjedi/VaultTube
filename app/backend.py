@@ -1,7 +1,8 @@
 import glob,time,os,re,requests,datetime,json,cv2,logging
-from flask import current_app
 from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted,get_video_index,update_video_filesize
 from transcoder import get_codec_info, get_container_from_ext
+
+logger = logging.getLogger('backend')
 
 # yt-dlp working files: *.part, *.part-FragN, *.ytdl, and pre-merge *.fNNN.* streams
 _PARTIAL_RE = re.compile(r'\.part(-Frag\d+)?$|\.ytdl$|\.f\d+\.')
@@ -17,18 +18,18 @@ def looks_like_youtube(fpath):
     parent = os.path.basename(os.path.dirname(fpath))
     return parent.startswith('UC') and len(vid) == 11
 
-def backend_thread(logger,app):
+def backend_thread(app):
     logger.info("*Starting Backend")
     while 1:
         with app.app_context():
-            scan_vault(logger)
+            scan_vault()
         time.sleep(5000)
 
-def scan_vault(logger):
+def scan_vault():
     """Walk the vault and reconcile it with the DB. The dedupe index is
     fetched once up front (two queries) instead of two queries per file."""
     started = time.time()
-    index = get_video_index(logger)
+    index = get_video_index()
     if index is None:
         logger.error("Vault scan skipped: could not load video index")
         return
@@ -45,34 +46,34 @@ def scan_vault(logger):
                 continue
             if id in lengths:
                 if lengths[id] == "0":
-                    _update_video_length(id, fpath, logger)
+                    _update_video_length(id, fpath)
                     lengths[id] = "updated"
                 # Backfill codec/container metadata lazily during scan
-                _maybe_update_codec_info(id, fpath, logger)
+                _maybe_update_codec_info(id, fpath)
                 # Backfill filesize lazily during scan
-                _maybe_update_filesize(id, fpath, logger)
+                _maybe_update_filesize(id, fpath)
             elif looks_like_youtube(fpath):
                 logger.info("Processing New Video: %s"%fpath)
-                process_new_video(id,fpath,logger)
+                process_new_video(id,fpath)
                 lengths[id] = "added"
             else:
                 # Likely a non-YouTube download caught before its DB row was
                 # written; the provider/upload paths own importing these
                 logger.debug("Skipping non-YouTube file with no DB row: %s"%fpath)
         else:
-            process_channel(filename,logger)
+            process_channel(filename)
     logger.info("Vault scan complete: %d files in %.1fs" % (files, time.time() - started))
 
 
-def _maybe_update_codec_info(id, fpath, logger):
+def _maybe_update_codec_info(id, fpath):
     from database import get_connection
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("SELECT vcodec, acodec, container FROM videos WHERE id = %s", (id,))
         row = cur.fetchone()
         if row and (row[0] is None or row[1] is None or row[2] is None):
-            info = get_codec_info(fpath, logger)
+            info = get_codec_info(fpath)
             if info['vcodec'] or info['acodec']:
                 cur.execute(
                     "UPDATE videos SET vcodec=%s, acodec=%s, container=%s WHERE id=%s",
@@ -84,11 +85,11 @@ def _maybe_update_codec_info(id, fpath, logger):
     except Exception as e:
         logger.error("Error updating codec info for %s: %s" % (id, e))
 
-def _maybe_update_filesize(id, fpath, logger):
+def _maybe_update_filesize(id, fpath):
     """Backfill videos.filesize lazily during scans. NULL = not yet measured."""
     from database import get_connection
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("SELECT filesize FROM videos WHERE id = %s", (id,))
         row = cur.fetchone()
@@ -97,11 +98,11 @@ def _maybe_update_filesize(id, fpath, logger):
         if row and row[0] is None and os.path.isfile(fpath):
             size = os.path.getsize(fpath)
             if size > 0:
-                update_video_filesize(id, size, logger)
+                update_video_filesize(id, size)
     except Exception as e:
         logger.error("Error updating filesize for %s: %s" % (id, e))
 
-def _update_video_length(id, fpath, logger):
+def _update_video_length(id, fpath):
     try:
         logger.info("Updating Length for id: %s"%fpath)
         data = cv2.VideoCapture(fpath)
@@ -109,32 +110,32 @@ def _update_video_length(id, fpath, logger):
         fps = data.get(cv2.CAP_PROP_FPS)
         seconds = round(frames / fps) if fps and fps > 0 else 0
         data.release()
-        update_length(id,datetime.timedelta(seconds=seconds),logger)
+        update_length(id,datetime.timedelta(seconds=seconds))
     except Exception as e:
         logger.error("Error updating video length for %s: %s"%(id,e))
 
-def get_video(fpath,logger):
+def get_video(fpath):
     """Reconcile a single just-downloaded file with the DB (provider path)."""
     try:
         fname = os.path.basename(fpath)
         id = fname.split('.')[0]
-        if(check_db_video(id,logger)):
+        if(check_db_video(id)):
             #In database
-            if(not check_db_video_length(id,logger)):
-                _update_video_length(id, fpath, logger)
-            _maybe_update_codec_info(id, fpath, logger)
-            _maybe_update_filesize(id, fpath, logger)
+            if(not check_db_video_length(id)):
+                _update_video_length(id, fpath)
+            _maybe_update_codec_info(id, fpath)
+            _maybe_update_filesize(id, fpath)
         else:
             #Missing from database
             logger.info("Processing New Video: %s"%fpath)
-            process_new_video(id,fpath,logger)
+            process_new_video(id,fpath)
     except Exception as e:
         logger.error("Error in get_video Failed: %s"%e)
 
-def _extract_codec_info(fpath, logger):
+def _extract_codec_info(fpath):
     """Probe codec/container for a newly-discovered file."""
     try:
-        info = get_codec_info(fpath, logger)
+        info = get_codec_info(fpath)
         if not info['container']:
             info['container'] = get_container_from_ext(fpath)
         return info
@@ -142,7 +143,7 @@ def _extract_codec_info(fpath, logger):
         logger.error("Error extracting codec info for %s: %s" % (fpath, e))
         return {'vcodec': None, 'acodec': None, 'container': get_container_from_ext(fpath)}
 
-def process_new_video(id,fpath,logger):
+def process_new_video(id,fpath):
     ret = {}
     try:
         r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=snippet&id='+id+'&key='+os.environ['VAULTTUBE_YTKEY'], timeout=30)
@@ -171,7 +172,7 @@ def process_new_video(id,fpath,logger):
             data.release()
             ret['length'] = datetime.timedelta(seconds=seconds)
             # Codec/container metadata
-            codec_info = _extract_codec_info(fpath, logger)
+            codec_info = _extract_codec_info(fpath)
             ret.update(codec_info)
             # File size for storage accounting
             try:
@@ -189,26 +190,26 @@ def process_new_video(id,fpath,logger):
                 img = data.content
             else:
                 img = None
-            save_video(id,ret,img,logger)
+            save_video(id,ret,img)
         else:
             logger.info("Unable to import video: %s"%str(retj))
-            insert_not_found(id,logger)
+            insert_not_found(id)
             
     except Exception as e:
         logger.error("Error in Process_new_video: %s"%e)
 
-def process_channel(fname,logger):
+def process_channel(fname):
     id = fname.split('/')[-1]
     if id.isdigit():
         # Numeric directory names are Patreon campaign IDs
         from providers.patreon import ensure_channel
-        ensure_channel(id, logger)
+        ensure_channel(id)
         return
     if not id.startswith('UC'):
         logger.debug("Skipping non-YouTube channel directory: %s" % id)
         return
     try:
-        if(check_db_channel(id,logger)):
+        if(check_db_channel(id)):
             pass
         else:
             logger.info("Processing Channel: "+id)
@@ -218,27 +219,27 @@ def process_channel(fname,logger):
                 time.sleep(3600)
                 return
             if(r['pageInfo']['totalResults'] > 0):
-                save_channel(r['items'][0]['id'],r['items'][0]['snippet']['title'],r,logger)
+                save_channel(r['items'][0]['id'],r['items'][0]['snippet']['title'],r)
             else:
                 logger.info("Unable to find Channel: %s"%id)
     except Exception as e:
         logger.error("Error in Channel %s: %s"%(id,e))
 
 
-def deleted_check_thread(logger,app):
+def deleted_check_thread(app):
     logger.info("*Starting Deleted Check")
     while 1:
         with app.app_context():
-            run_deleted_check(logger)
+            run_deleted_check()
         time.sleep(86400)
 
-def run_deleted_check(logger, rows=None, batch_size=50):
+def run_deleted_check(rows=None, batch_size=50):
     """Mark YouTube videos that were removed at the source (feeds the
     isDeleted flag behind browse's "Gone from source" view). Batched 50 IDs
     per videos.list call: a 1,000-video pass costs 20 quota units, not 1,000.
     Only status *changes* are logged, plus one summary line per pass."""
     if rows is None:
-        rows = get_oldest_video_check(logger)
+        rows = get_oldest_video_check()
     if not rows:
         return
     checked = newly_gone = restored = 0
@@ -266,7 +267,7 @@ def run_deleted_check(logger, rows=None, batch_size=50):
                 else:
                     restored += 1
                     logger.info("Video back on YouTube: %s" % vid)
-            update_video_deleted(vid, is_deleted, logger)
+            update_video_deleted(vid, is_deleted)
             checked += 1
     logger.info("Deleted check: %d checked, %d newly gone, %d restored" % (checked, newly_gone, restored))
 
@@ -275,19 +276,19 @@ _YTDLP_STRIP_KEYS = frozenset({
     'subtitles', 'automatic_captions', 'heatmap',
 })
 
-def save_video_from_ytdlp(video_id, info, fpath, logger):
+def save_video_from_ytdlp(video_id, info, fpath):
     """Populate the DB for a just-downloaded YouTube video using yt-dlp's info
     dict, bypassing the YouTube Data API call that process_new_video makes."""
     try:
-        if check_db_video(video_id, logger):
+        if check_db_video(video_id):
             logger.debug("Video %s already in DB, skipping yt-dlp save" % video_id)
             return
 
         channel_id = info.get('channel_id', '')
-        if channel_id and not check_db_channel(channel_id, logger):
+        if channel_id and not check_db_channel(channel_id):
             channel_name = info.get('channel') or info.get('uploader', '')
             save_channel(channel_id, channel_name,
-                         {'channel_id': channel_id, 'channel': channel_name}, logger)
+                         {'channel_id': channel_id, 'channel': channel_name})
 
         published_at = None
         if info.get('timestamp'):
@@ -297,7 +298,7 @@ def save_video_from_ytdlp(video_id, info, fpath, logger):
 
         length = datetime.timedelta(seconds=int(info.get('duration') or 0))
 
-        codec_info = _extract_codec_info(fpath, logger)
+        codec_info = _extract_codec_info(fpath)
 
         try:
             filesize = os.path.getsize(fpath)
@@ -329,7 +330,7 @@ def save_video_from_ytdlp(video_id, info, fpath, logger):
         ret.update(codec_info)
         ret['filesize'] = filesize
 
-        save_video(video_id, ret, img, logger)
+        save_video(video_id, ret, img)
     except Exception as e:
         logger.error("save_video_from_ytdlp failed for %s: %s" % (video_id, e))
 
@@ -364,7 +365,7 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
                         thumbnail_img = buf.tobytes()
                 data.release()
         except Exception:
-            current_app.logger.error("Unable to Extract Frame")
+            logger.error("Unable to Extract Frame")
 
         # Insert video record
         ret = {}
@@ -383,7 +384,7 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         ret['length'] = length_td
         ret['title'] = title
         ret['description'] = ""
-        codec_info = _extract_codec_info(file_path, current_app.logger)
+        codec_info = _extract_codec_info(file_path)
         ret.update(codec_info)
         # File size for storage accounting
         try:
@@ -391,8 +392,8 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         except OSError:
             ret['filesize'] = None
 
-        save_video(video_id,ret,thumbnail_img,current_app.logger,source)
+        save_video(video_id,ret,thumbnail_img,source)
     except Exception as e:
         # Raise exception so api can log & handle
-        current_app.logger.error("Error in Save_Uploaded_Video_Metadata: %s"%e)
+        logger.error("Error in Save_Uploaded_Video_Metadata: %s"%e)
         raise e

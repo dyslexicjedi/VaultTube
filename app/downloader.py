@@ -1,10 +1,13 @@
 import os
 import time
 import threading
+import logging
 import providers
 from QueueObject import QueueObject
 from flask import current_app
 from database import insert_download_error, update_queue_status
+
+logger = logging.getLogger('downloader')
 
 MAX_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 60
@@ -30,11 +33,11 @@ def get_provider_by_source(source):
             return provider
     return None
 
-def handle_failure(qo, q, error_type, error_msg, logger):
+def handle_failure(qo, q, error_type, error_msg):
     """Retry transient failures up to MAX_ATTEMPTS; record permanent ones."""
     if error_type == 'Network Error' and qo.attempts + 1 < MAX_ATTEMPTS:
         qo.attempts += 1
-        update_queue_status(qo.row_id, 'pending', logger, error=error_msg, attempts=qo.attempts)
+        update_queue_status(qo.row_id, 'pending', error=error_msg, attempts=qo.attempts)
         logger.info("Retrying %s in %ds (attempt %d/%d)" % (qo.url, RETRY_DELAY_SECONDS, qo.attempts + 1, MAX_ATTEMPTS))
         timer = threading.Timer(RETRY_DELAY_SECONDS, q.put, args=(qo,))
         # Daemon, or a pending retry blocks interpreter shutdown (the queue row
@@ -42,36 +45,36 @@ def handle_failure(qo, q, error_type, error_msg, logger):
         timer.daemon = True
         timer.start()
     else:
-        update_queue_status(qo.row_id, 'failed', logger, error=error_msg, attempts=qo.attempts + 1)
-        insert_download_error(qo.url, error_type, error_msg, logger)
+        update_queue_status(qo.row_id, 'failed', error=error_msg, attempts=qo.attempts + 1)
+        insert_download_error(qo.url, error_type, error_msg)
 
-def start_dl_queue(logger, app):
+def start_dl_queue(app):
     logger.info("Starting Download Queue Process")
     q = app.config['queue']
     while 1:
         qo = q.get()  # blocks until an item is enqueued
         with app.app_context():
             logger.info("Downloading %s" % qo.url)
-            update_queue_status(qo.row_id, 'downloading', logger)
+            update_queue_status(qo.row_id, 'downloading')
             provider = providers.get_provider(qo.url)
             if not provider and qo.source:
                 provider = get_provider_by_source(qo.source)
             if provider:
                 logger.info("*Dispatching to provider: %s" % provider.__name__)
                 try:
-                    if provider.download(qo, logger):
+                    if provider.download(qo):
                         logger.info("Download Successful")
-                        update_queue_status(qo.row_id, 'done', logger)
+                        update_queue_status(qo.row_id, 'done')
                     else:
                         logger.error("Error occurred during download")
-                        handle_failure(qo, q, 'Provider Error', 'Download returned False', logger)
+                        handle_failure(qo, q, 'Provider Error', 'Download returned False')
                 except Exception as e:
                     logger.error("Exception during download: %s" % e)
-                    handle_failure(qo, q, get_error_type(str(e)), str(e), logger)
+                    handle_failure(qo, q, get_error_type(str(e)), str(e))
             else:
                 logger.error("No provider found for URL: %s" % qo.url)
-                update_queue_status(qo.row_id, 'failed', logger, error='No provider found for URL')
-                insert_download_error(qo.url, 'Provider Error', 'No provider found for URL', logger)
+                update_queue_status(qo.row_id, 'failed', error='No provider found for URL')
+                insert_download_error(qo.url, 'Provider Error', 'No provider found for URL')
         # Only pace back-to-back items; a single add still starts instantly
         if DOWNLOAD_DELAY_SECONDS and not q.empty():
             time.sleep(DOWNLOAD_DELAY_SECONDS)

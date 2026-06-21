@@ -1,19 +1,21 @@
-import mariadb,requests,json,os,threading
+import mariadb,requests,json,os,threading,logging
 from difflib import SequenceMatcher
 
+logger = logging.getLogger('database')
+
 #Perform database checks on startup
-def checkdb(logger):
+def checkdb():
     logger.info("Startup Database Checks")
     try:
         logger.info("Testing connection to database")
-        dbcheck = get_connection(logger)
+        dbcheck = get_connection()
         dbcheck.close()
     except Exception as e:
         logger.error("Unable to connect to database: %s"%e)
 
     #Create Database if doesn't exist
     try:
-        dbcheck = get_connection(logger)
+        dbcheck = get_connection()
         dbcur = dbcheck.cursor()
         dbcur.execute("CREATE DATABASE %s;"%(os.environ['VAULTTUBE_DBNAME']))
         dbcur.close()
@@ -22,7 +24,7 @@ def checkdb(logger):
         pass
     #Create Tables if doesn't exist
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         #Images Table
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'images' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
@@ -169,18 +171,18 @@ def checkdb(logger):
             logger.info("Download Errors table created")
         cur.close()
         con.close()
-        cleanup_old_errors(logger, 7)
-        cleanup_old_queue_rows(logger, 7)
+        cleanup_old_errors(7)
+        cleanup_old_queue_rows(7)
         return True
     except Exception as e:
         logger.error("Failed during table create: %s",e)
         return False
 
-def check_db_video(id,logger):
+def check_db_video(id):
     logger.debug("Checking db for video id: %s",id)
     test = False
     try:
-        check = get_connection(logger)
+        check = get_connection()
         cur = check.cursor()
         cur.execute("Select * FROM videos where id = ?", (id,))
         if(cur.fetchone()):
@@ -197,12 +199,12 @@ def check_db_video(id,logger):
         logger.error("Error during check_db_video: %s"%e)
         return True
 
-def get_video_index(logger):
+def get_video_index():
     """The whole dedupe index in two queries: {video_id: length} plus the
     ignored-ID set. Used by the vault sweep instead of two queries per file.
     Returns None on DB failure so callers can skip the pass entirely."""
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("Select id, length FROM videos")
         lengths = {row[0]: row[1] for row in cur.fetchall()}
@@ -215,9 +217,9 @@ def get_video_index(logger):
         logger.error("Error during get_video_index: %s"%e)
         return None
 
-def save_video(id,ret,img,logger,source='youtube'):
+def save_video(id,ret,img,source='youtube'):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         #Save Video Data
         sql = "Insert Ignore into videos(id,channel_name,json,filepath,PublishedAt,channelId,length,source,title,description,vcodec,acodec,container,filesize) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
@@ -231,11 +233,11 @@ def save_video(id,ret,img,logger,source='youtube'):
     except Exception as e:
         logger.error("Error during save_video: %s"%e)
 
-def check_db_channel(id,logger):
+def check_db_channel(id):
     logger.debug("Checking db for channel id: %s",id)
     test = False
     try:
-        check = get_connection(logger)
+        check = get_connection()
         cur = check.cursor()
         cur.execute("Select * FROM channels where channelid = %s",(id,))
         if(not cur.fetchone()):
@@ -250,9 +252,9 @@ def check_db_channel(id,logger):
         logger.error("Error during check_db_channel: %s"%e)
         return True
 
-def save_channel(channelid,channelname,jdata,logger):
+def save_channel(channelid,channelname,jdata):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         #Save Video Data
         sql = "Insert into channels(channelid,channelname,json) values(%s,%s,%s);"
@@ -263,9 +265,9 @@ def save_channel(channelid,channelname,jdata,logger):
     except Exception as e:
         logger.error("Error during save_channel: %s"%e)
 
-def get_active_subscriptions(logger):
+def get_active_subscriptions():
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("select channelid from channels where subscribed = 1;")
         rv = cur.fetchall()
@@ -291,10 +293,11 @@ def _conn_kwargs():
         port=int(os.environ['VAULTTUBE_DBPORT']),
     )
 
-def get_connection(logger):
+def get_connection(logger=None):
     """Hand out a pooled connection (close() returns it to the pool). Falls
     back to a one-off direct connection if the pool is exhausted, so bursts
-    degrade instead of failing."""
+    degrade instead of failing. The logger arg is kept for test-monkeypatch
+    signature compatibility; the module logger is used internally."""
     global _pool
     try:
         if _pool is None:
@@ -312,11 +315,11 @@ def get_connection(logger):
     except Exception as e:
         logger.error("Unable to get connection: %s"%e)
 
-def check_db_video_length(id,logger):
+def check_db_video_length(id):
     logger.debug("Checking db for video length: %s",id)
     test = False
     try:
-        check = get_connection(logger)
+        check = get_connection()
         cur = check.cursor()
         cur.execute("Select length FROM videos where id = %s",(id,))
         row = cur.fetchone()
@@ -330,9 +333,9 @@ def check_db_video_length(id,logger):
         logger.error("Error during check_db_video_length: %s"%e)
         return True
 
-def update_video_codec_info(id, vcodec, acodec, container, logger):
+def update_video_codec_info(id, vcodec, acodec, container):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute(
             "UPDATE videos SET vcodec=%s, acodec=%s, container=%s WHERE id=%s",
@@ -345,9 +348,9 @@ def update_video_codec_info(id, vcodec, acodec, container, logger):
         logger.error("Error during update_video_codec_info: %s" % e)
 
 
-def update_video_filesize(id, filesize, logger):
+def update_video_filesize(id, filesize):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("UPDATE videos SET filesize=%s WHERE id=%s", (filesize, id))
         con.commit()
@@ -357,9 +360,9 @@ def update_video_filesize(id, filesize, logger):
         logger.error("Error during update_video_filesize: %s" % e)
 
 
-def update_length(id,length,logger):
+def update_length(id,length):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("Update videos set length = %s where id=%s;",(length,id))
         con.commit()
@@ -368,9 +371,9 @@ def update_length(id,length,logger):
     except Exception as e:
         logger.error("Error duing update_length: %s"%e)
 
-def insert_playlist(plinfo,logger):
+def insert_playlist(plinfo):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         #Save Video Data
         sql = "Insert into playlists(playlistId,playlistName,channelId,json,subscribed) values(%s,%s,%s,%s,%s);"
@@ -381,9 +384,9 @@ def insert_playlist(plinfo,logger):
     except Exception as e:
         logger.error("Error during insert_playlist: %s"%e)
 
-def get_active_playlist_subs(logger):
+def get_active_playlist_subs():
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("select playlistId from playlists where subscribed = 1;")
         rv = cur.fetchall()
@@ -394,11 +397,11 @@ def get_active_playlist_subs(logger):
         logger.error("Error during playlist subscription poll: %s" % e)
         return []
 
-def check_pl2vid_info(pl,vid,logger):
+def check_pl2vid_info(pl,vid):
     logger.debug("Checking pl2vid for playlists %s and video %s"%(pl,vid))
     test = False
     try:
-        check = get_connection(logger)
+        check = get_connection()
         cur = check.cursor()
         cur.execute("Select * FROM pl2vid where playlistId = %s and videoId = %s",(pl,vid))
         if(cur.fetchone()):
@@ -411,11 +414,11 @@ def check_pl2vid_info(pl,vid,logger):
         logger.error("Error during check_pl2vid_info: %s"%e)
         return True
 
-def insert_pl2vid_info(pl,vid,logger):
+def insert_pl2vid_info(pl,vid):
     con = None
     cur = None
     try:
-        con = get_connection(logger)
+        con = get_connection()
         if con is None:
             logger.error("Unable to get connection for insert_pl2vid_info")
             return
@@ -437,13 +440,13 @@ def insert_pl2vid_info(pl,vid,logger):
             except Exception:
                 pass
 
-def find_next_previous(vid,logger):
+def find_next_previous(vid):
     """Neighbouring episodes of the same series: same channel, fuzzy title
     match (>0.9), ordered by PublishedAt. Keys on channelId and the title
     column — the legacy channel_name column is empty for Patreon/Reddit rows and
     JSON_EXTRACT over every blob made this a full-table parse per player load."""
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("Select channelId, title from videos where id = %s;",(vid,))
         row = cur.fetchone()
@@ -472,20 +475,20 @@ def find_next_previous(vid,logger):
         logger.error("Error during find_next_previous: %s"%e)
         return {}
 
-def insert_not_found(vid,logger):
+def insert_not_found(vid):
     """Mark an ID the source says doesn't exist so scanners never retry it.
     A manual single-URL download still bypasses this (like deleted videos)."""
-    con = get_connection(logger)
+    con = get_connection()
     cur = con.cursor()
     cur.execute("Insert ignore into IgnoreVid(id) values(%s);",(vid,))
     con.commit()
     cur.close()
     con.close()
 
-def get_oldest_video_check(logger):
+def get_oldest_video_check():
     """(id, isDeleted) for the 1000 least-recently-checked YouTube videos."""
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("Select id, isDeleted from videos where source = 'youtube' order by lastScanned asc limit 1000;")
         rv = cur.fetchall()
@@ -496,8 +499,8 @@ def get_oldest_video_check(logger):
         logger.error("Error during oldest video check: %s" % e)
         return []
 
-def update_video_deleted(vid,isDeleted,logger):
-    con = get_connection(logger)
+def update_video_deleted(vid,isDeleted):
+    con = get_connection()
     cur = con.cursor()
     sql = "update videos set isDeleted=%s,lastScanned=now()  where id=%s;"
     cur.execute(sql,(isDeleted,vid))
@@ -506,9 +509,9 @@ def update_video_deleted(vid,isDeleted,logger):
     con.close()
     logger.debug("Updated video deleted status %s for vid %s",isDeleted,vid)
 
-def insert_download_error(url, error_type, error_msg, logger):
+def insert_download_error(url, error_type, error_msg):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         sql = "INSERT INTO download_errors(url, error_type, error_message) VALUES(%s, %s, %s)"
         cur.execute(sql, (url, error_type, error_msg))
@@ -518,9 +521,9 @@ def insert_download_error(url, error_type, error_msg, logger):
     except Exception as e:
         logger.error("Error during insert_download_error: %s", e)
 
-def get_download_errors(logger, limit=50):
+def get_download_errors(limit=50):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         sql = "SELECT id, url, error_type, error_message, created_at FROM download_errors ORDER BY created_at DESC LIMIT %s"
         cur.execute(sql, (limit,))
@@ -532,9 +535,9 @@ def get_download_errors(logger, limit=50):
         logger.error("Error during get_download_errors: %s", e)
         return []
 
-def clear_download_errors(logger):
+def clear_download_errors():
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("DELETE FROM download_errors")
         con.commit()
@@ -544,9 +547,9 @@ def clear_download_errors(logger):
     except Exception as e:
         logger.error("Error during clear_download_errors: %s", e)
 
-def delete_download_error(error_id, logger):
+def delete_download_error(error_id):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("DELETE FROM download_errors WHERE id = %s", (error_id,))
         con.commit()
@@ -555,10 +558,10 @@ def delete_download_error(error_id, logger):
     except Exception as e:
         logger.error("Error during delete_download_error: %s", e)
 
-def insert_queue_item(qo, logger):
+def insert_queue_item(qo):
     """Persist a queued download. Returns the row id, or None on failure."""
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         sql = "INSERT INTO queue(url, source, channel_id, unsave, status, attempts) VALUES(%s, %s, %s, %s, 'pending', %s)"
         cur.execute(sql, (qo.url, qo.source, qo.channel_id, 1 if qo.unsave else 0, qo.attempts))
@@ -571,11 +574,11 @@ def insert_queue_item(qo, logger):
         logger.error("Error during insert_queue_item: %s" % e)
         return None
 
-def update_queue_status(rowid, status, logger, error=None, attempts=None):
+def update_queue_status(rowid, status, error=None, attempts=None):
     if rowid is None:
         return
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         if attempts is not None:
             cur.execute("UPDATE queue SET status=%s, last_error=%s, attempts=%s WHERE id=%s", (status, error, attempts, rowid))
@@ -587,10 +590,10 @@ def update_queue_status(rowid, status, logger, error=None, attempts=None):
     except Exception as e:
         logger.error("Error during update_queue_status: %s" % e)
 
-def queue_has_url(url, logger):
+def queue_has_url(url):
     """True if the URL is already queued or downloading."""
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("SELECT 1 FROM queue WHERE url = %s AND status IN ('pending','downloading') LIMIT 1", (url,))
         rv = cur.fetchone() is not None
@@ -601,10 +604,10 @@ def queue_has_url(url, logger):
         logger.error("Error during queue_has_url: %s" % e)
         return False
 
-def get_resumable_queue_items(logger):
+def get_resumable_queue_items():
     """Rows that were pending or mid-download when the app last stopped."""
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("SELECT id, url, source, channel_id, unsave, attempts FROM queue WHERE status IN ('pending','downloading') ORDER BY id")
         rv = cur.fetchall()
@@ -615,9 +618,9 @@ def get_resumable_queue_items(logger):
         logger.error("Error during get_resumable_queue_items: %s" % e)
         return []
 
-def cleanup_old_queue_rows(logger, days=7):
+def cleanup_old_queue_rows(days=7):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("DELETE FROM queue WHERE status IN ('done','failed') AND updated_at < DATE_SUB(NOW(), INTERVAL %s DAY)", (days,))
         con.commit()
@@ -626,9 +629,9 @@ def cleanup_old_queue_rows(logger, days=7):
     except Exception as e:
         logger.error("Error during cleanup_old_queue_rows: %s" % e)
 
-def cleanup_old_errors(logger, days=7):
+def cleanup_old_errors(days=7):
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("DELETE FROM download_errors WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)", (days,))
         con.commit()
@@ -640,10 +643,10 @@ def cleanup_old_errors(logger, days=7):
 
 # --- Export helpers ---
 
-def export_video_rows(logger, include_json=False):
+def export_video_rows(include_json=False):
     """Generator yielding one catalog dict per video for the export endpoint."""
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         json_sel = ", v.json" if include_json else ""
         cur.execute(
@@ -679,9 +682,9 @@ def export_video_rows(logger, include_json=False):
         logger.error("export_video_rows failed: %s", e)
 
 
-def export_subscribed_channels(logger):
+def export_subscribed_channels():
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("SELECT channelid, channelname, json FROM channels WHERE subscribed = 1")
         rows = []
@@ -701,9 +704,9 @@ def export_subscribed_channels(logger):
         return []
 
 
-def export_subscribed_playlists(logger):
+def export_subscribed_playlists():
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("SELECT playlistId, playlistName, channelId, json FROM playlists WHERE subscribed = 1")
         rows = []
@@ -723,9 +726,9 @@ def export_subscribed_playlists(logger):
         return []
 
 
-def export_pl2vid(logger):
+def export_pl2vid():
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("SELECT playlistId, videoId FROM pl2vid ORDER BY playlistId")
         rows = [{'playlistId': r[0], 'videoId': r[1]} for r in cur]
@@ -737,9 +740,9 @@ def export_pl2vid(logger):
         return []
 
 
-def export_tombstones(logger):
+def export_tombstones():
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         cur.execute("SELECT id FROM IgnoreVid")
         ids = [r[0] for r in cur]
@@ -751,9 +754,9 @@ def export_tombstones(logger):
         return []
 
 
-def export_row_counts(logger):
+def export_row_counts():
     try:
-        con = get_connection(logger)
+        con = get_connection()
         cur = con.cursor()
         counts = {}
         for name, sql in [

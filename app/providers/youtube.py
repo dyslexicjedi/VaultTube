@@ -1,4 +1,5 @@
 import os
+import logging
 from io import StringIO
 from urllib.parse import urlparse, parse_qs
 import yt_dlp
@@ -10,6 +11,8 @@ from backend import save_video_from_ytdlp
 from providers.base import set_status, update_status, del_status
 from QueueObject import QueueObject
 from queue_utils import enqueue
+
+logger = logging.getLogger('youtube')
 
 
 def dl_progress_hook(d):
@@ -24,9 +27,9 @@ def dl_progress_hook(d):
         elif d["status"] == "finished":
             update_status(video_id, {'progress': '100%'})
     except Exception as e:
-        current_app.logger.error("dl_progress_hook Failed: %s" % e)
+        logger.error("dl_progress_hook Failed: %s" % e)
 
-def _flat_playlist_opts(logger=None):
+def _flat_playlist_opts():
     """yt-dlp options for flat (no-download) playlist enumeration.
 
     Uses the same proxy/deno configuration as downloads. Cookies are read
@@ -63,7 +66,7 @@ def _flat_playlist_opts(logger=None):
     return opts, cookie_file
 
 
-def iter_playlist_video_ids(playlist_id, logger):
+def iter_playlist_video_ids(playlist_id):
     """Yield video IDs from a YouTube playlist via yt-dlp flat extraction.
 
     Replaces the YouTube Data API playlistItems call so subscriptions no
@@ -73,7 +76,7 @@ def iter_playlist_video_ids(playlist_id, logger):
     logs and stops (yields nothing further) — callers treat that as an
     empty scan this cycle and retry next hour."""
     url = "https://www.youtube.com/playlist?list=%s" % playlist_id
-    opts, cookie_file = _flat_playlist_opts(logger)
+    opts, cookie_file = _flat_playlist_opts()
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -128,7 +131,7 @@ def parse_youtube_url(url):
             return ('playlist', url)
     return (None, None)
 
-def _download_attempt(url, ydl_opts, cookies_contents, logger, label=''):
+def _download_attempt(url, ydl_opts, cookies_contents, label=''):
     """Run a single yt-dlp download attempt. Returns True on success.
     Cleans up progress status and any temporary cookie StringIO it creates."""
     opts = dict(ydl_opts)
@@ -146,7 +149,7 @@ def _download_attempt(url, ydl_opts, cookies_contents, logger, label=''):
                 logger.info("YouTube %s attempt: downloading %s" % (label, url))
             ydl.download(url)
         fpath = os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4"
-        save_video_from_ytdlp(videoID, data, fpath, current_app.logger)
+        save_video_from_ytdlp(videoID, data, fpath)
         return True
     finally:
         if videoID is not None:
@@ -156,7 +159,7 @@ def _download_attempt(url, ydl_opts, cookies_contents, logger, label=''):
             cookiefile.close()
 
 
-def download_video(url, logger, cookies=None):
+def download_video(url, cookies=None):
     vid = url.split('/watch?v=')[1] if '/watch?v=' in url else url.split('/shorts/')[1].split('/')[0] if '/shorts/' in url else None
     if not vid:
         if len(url) == 11 and not url.startswith('http'):
@@ -196,24 +199,24 @@ def download_video(url, logger, cookies=None):
 
     proxy_url = os.environ.get('VAULTTUBE_PROXY')
     try:
-        _download_attempt(url, base_opts, cookies_contents, logger, label='')
+        _download_attempt(url, base_opts, cookies_contents, label='')
     except DownloadError as e:
         err_msg = str(e)
         if proxy_url and 'country' in err_msg.lower() and 'blocked' in err_msg.lower():
             logger.info("YouTube country block detected; retrying through proxy %s" % proxy_url)
             proxy_opts = dict(base_opts)
             proxy_opts['proxy'] = proxy_url
-            _download_attempt(url, proxy_opts, cookies_contents, logger, label='proxy')
+            _download_attempt(url, proxy_opts, cookies_contents, label='proxy')
         elif any(p in err_msg.lower() for p in ('video unavailable', 'this video does not exist',
                                                   'has been removed', 'private video', 'not available')):
-            insert_not_found(vid, logger)
+            insert_not_found(vid)
             logger.error("Video not available, added to ignore list: %s" % vid)
             return False
         else:
             raise
     return True
 
-def download_playlist(qo, logger):
+def download_playlist(qo):
     """Expand a playlist into individual video queue items, then remove the playlist entry."""
     try:
         playlist_url = qo.url if hasattr(qo, 'url') else qo
@@ -229,28 +232,28 @@ def download_playlist(qo, logger):
             logger.error("Could not extract playlist ID from URL: %s" % playlist_url)
             return False
 
-        all_video_ids = list(iter_playlist_video_ids(playlist_id, logger))
+        all_video_ids = list(iter_playlist_video_ids(playlist_id))
         logger.info("Playlist %s contains %d videos, adding to queue" % (playlist_id, len(all_video_ids)))
 
         for vid_id in all_video_ids:
-            if check_db_video(vid_id, logger):
+            if check_db_video(vid_id):
                 logger.debug("Already exists in DB: %s" % vid_id)
-                insert_pl2vid_info(playlist_id, vid_id, logger)
+                insert_pl2vid_info(playlist_id, vid_id)
             else:
                 logger.info("Queueing video from playlist: %s" % vid_id)
                 url = "https://www.youtube.com/watch?v=%s" % vid_id
                 qi = QueueObject(url, "", "youtube", 0, "")
                 # enqueue() writes the queue table row (restart resumption +
                 # duplicate-skip); a bare q.put() would not
-                enqueue(qi, current_app.config['queue'], logger)
-                insert_pl2vid_info(playlist_id, vid_id, logger)
+                enqueue(qi, current_app.config['queue'])
+                insert_pl2vid_info(playlist_id, vid_id)
 
         return True
     except Exception as e:
         logger.error("download_playlist failed: %s" % e)
         return False
 
-def download_channel(qo, logger):
+def download_channel(qo):
     try:
         channel_id = qo.url if hasattr(qo, 'url') else qo
         if not channel_id:
@@ -271,12 +274,12 @@ def download_channel(qo, logger):
         uploads_id = 'UU' + channel_id[2:]
         logger.info("Using uploads playlist %s for channel %s" % (uploads_id, channel_id))
         qo_playlist = QueueObject(uploads_id, "", "youtube", 0, "")
-        return download_playlist(qo_playlist, logger)
+        return download_playlist(qo_playlist)
     except Exception as e:
         logger.error("download_channel failed: %s" % e)
         return False
 
-def download(qo, logger):
+def download(qo):
     """Accept a QueueObject or a plain URL string."""
     url = qo.url if hasattr(qo, 'url') else qo
     try:
@@ -288,11 +291,11 @@ def download(qo, logger):
                 url = "https://www.youtube.com/shorts/%s" % vid
             elif 'youtu.be' in url:
                 url = "https://www.youtube.com/watch?v=%s" % vid
-            return download_video(url, logger)
+            return download_video(url)
         elif url_type == 'playlist':
-            return download_playlist(qo, logger)
+            return download_playlist(qo)
         elif url_type == 'channel':
-            return download_channel(qo, logger)
+            return download_channel(qo)
         elif url_type == 'custom':
             logger.error("Custom channel URLs (e.g. /c/ or /user/) require channel ID conversion. URL: %s" % url)
             return False

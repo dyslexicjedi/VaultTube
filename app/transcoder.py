@@ -1,5 +1,7 @@
-import json, math, os, re, subprocess, threading, time, shutil, glob, hashlib
+import json, math, os, re, subprocess, threading, time, shutil, glob, hashlib, logging
 from pathlib import Path
+
+logger = logging.getLogger('transcoder')
 
 _FFPROBE_LOCK = threading.Lock()
 _ffprobe_cache = {}
@@ -13,7 +15,7 @@ def _ffprobe_key(path):
         return path, None
 
 
-def get_codec_info(filepath, logger=None):
+def get_codec_info(filepath):
     """Return {'vcodec': ..., 'acodec': ..., 'container': ...} from ffprobe.
 
     Uses a small in-process cache keyed by (path, mtime). Empty/missing
@@ -48,8 +50,7 @@ def get_codec_info(filepath, logger=None):
             elif codec_type == 'audio' and not acodec:
                 acodec = codec_name
     except Exception as e:
-        if logger:
-            logger.error("ffprobe failed for %s: %s", filepath, e)
+        logger.error("ffprobe failed for %s: %s", filepath, e)
 
     ext = os.path.splitext(filepath)[1].lstrip('.').lower()
     container = ext if ext else None
@@ -68,7 +69,7 @@ _DURATION_LOCK = threading.Lock()
 _duration_cache = {}
 
 
-def get_duration(filepath, logger=None):
+def get_duration(filepath):
     """Return the source duration in seconds (float) via ffprobe, or None.
 
     Cached per (path, mtime) like get_codec_info. Used to synthesize a
@@ -98,8 +99,7 @@ def get_duration(filepath, logger=None):
         if raw is not None:
             duration = float(raw)
     except Exception as e:
-        if logger:
-            logger.error("ffprobe duration failed for %s: %s", filepath, e)
+        logger.error("ffprobe duration failed for %s: %s", filepath, e)
 
     with _DURATION_LOCK:
         _duration_cache[filepath] = (key, duration)
@@ -160,15 +160,15 @@ def transcode_key(video_id, settings=None):
     return (video_id, _settings_hash(settings or get_transcode_settings()))
 
 
-def source_path_for(video_id, logger):
+def source_path_for(video_id):
     """Public wrapper: resolve the absolute source file path for a video_id."""
-    return _source_path_for(video_id, logger)
+    return _source_path_for(video_id)
 
 
-def _source_path_for(video_id, logger):
+def _source_path_for(video_id):
     """Resolve a vault-relative filepath from the DB by video_id."""
     from database import get_connection
-    con = get_connection(logger)
+    con = get_connection()
     cur = con.cursor()
     cur.execute("SELECT filepath FROM videos WHERE id = %s", (video_id,))
     row = cur.fetchone()
@@ -223,7 +223,7 @@ def _count_running():
         )
 
 
-def generate_hls(video_id, logger, source_path=None):
+def generate_hls(video_id, source_path=None):
     """Ensure an HLS cache exists for video_id. Launch FFmpeg if needed.
 
     Blocks up to ~30s until playlist + first segment exist.
@@ -242,12 +242,12 @@ def generate_hls(video_id, logger, source_path=None):
 
     # Determine source path outside any lock
     if source_path is None:
-        source_path = _source_path_for(video_id, logger)
+        source_path = _source_path_for(video_id)
     if not source_path or not os.path.isfile(source_path):
         return None
 
     # Try to start a new encode. Do expensive/size checks first, then lock.
-    _enforce_cache_size_cap(logger)
+    _enforce_cache_size_cap()
 
     if _count_running() >= _max_concurrent():
         logger.info("Max concurrent transcodes reached for %s", video_id)
@@ -441,7 +441,7 @@ def _kill_proc(item):
     return True
 
 
-def transcode_reaper(logger, idle_timeout=60.0):
+def transcode_reaper(idle_timeout=60.0):
     """Killed orphaned encodes that haven't served a segment recently."""
     cutoff = time.time() - idle_timeout
     removed = []
@@ -452,28 +452,27 @@ def transcode_reaper(logger, idle_timeout=60.0):
                 removed.append(key)
         for key in removed:
             del _active[key]
-    if removed and logger:
+    if removed:
         logger.debug("Reaper killed %d idle transcode(s): %s", len(removed), removed)
 
 
-def start_reaper_thread(logger, interval=30.0, idle_timeout=60.0):
+def start_reaper_thread(interval=30.0, idle_timeout=60.0):
     def loop():
         while True:
             time.sleep(interval)
-            transcode_reaper(logger, idle_timeout)
+            transcode_reaper(idle_timeout)
     t = threading.Thread(target=loop, daemon=True)
     t.start()
     return t
 
 
-def shutdown_transcoder(logger=None):
+def shutdown_transcoder():
     """Terminate every active transcode. Call on SIGTERM/exit."""
     with _active_lock:
         for item in _active.values():
             _kill_proc(item)
         _active.clear()
-    if logger:
-        logger.info("Transcoder shutdown complete")
+    logger.info("Transcoder shutdown complete")
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +490,7 @@ def _cache_dir_size(cache_dir):
     return total
 
 
-def _enforce_cache_size_cap(logger):
+def _enforce_cache_size_cap():
     max_bytes = _max_cache_bytes()
     base = _cache_base_dir()
     if not os.path.isdir(base):
@@ -517,14 +516,12 @@ def _enforce_cache_size_cap(logger):
         try:
             shutil.rmtree(d, ignore_errors=True)
             total -= size
-            if logger:
-                logger.info("Evicted transcode cache %s (%.1f MB)", d, size / 1e6)
+            logger.info("Evicted transcode cache %s (%.1f MB)", d, size / 1e6)
         except Exception as e:
-            if logger:
-                logger.error("Failed to evict %s: %s", d, e)
+            logger.error("Failed to evict %s: %s", d, e)
 
 
-def cleanup_stale_caches(logger, ttl_seconds=None):
+def cleanup_stale_caches(ttl_seconds=None):
     """Delete cache dirs not accessed within ttl_seconds."""
     ttl_seconds = ttl_seconds or int(os.environ.get('VAULTTUBE_TRANSCODE_TTL', '86400'))
     cutoff = time.time() - ttl_seconds
@@ -541,9 +538,8 @@ def cleanup_stale_caches(logger, ttl_seconds=None):
                 shutil.rmtree(entry, ignore_errors=True)
                 removed += 1
         except Exception as e:
-            if logger:
-                logger.error("Failed to prune %s: %s", entry, e)
-    if removed and logger:
+            logger.error("Failed to prune %s: %s", entry, e)
+    if removed:
         logger.info("Pruned %d stale transcode cache(s)", removed)
 
 
@@ -594,12 +590,12 @@ def cache_stats():
             'active_transcodes': _count_running()}
 
 
-def start_cleanup_thread(logger, interval=300.0, ttl_seconds=None):
+def start_cleanup_thread(interval=300.0, ttl_seconds=None):
     def loop():
         while True:
             time.sleep(interval)
-            cleanup_stale_caches(logger, ttl_seconds)
-            _enforce_cache_size_cap(logger)
+            cleanup_stale_caches(ttl_seconds)
+            _enforce_cache_size_cap()
     t = threading.Thread(target=loop, daemon=True)
     t.start()
     return t
