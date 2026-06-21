@@ -620,24 +620,23 @@ def test_error_type_classification():
 
 
 def test_channel_scan_paginates(client, monkeypatch):
-    """The scan must walk every playlistItems page, not just the first."""
-    import logging, requests, scanner
+    """The scan must walk every yt-dlp flat-playlist entry, not just the first."""
+    import logging, scanner
     q = _ensure_queue(client)
 
-    pages = [
-        _playlist_page(['VtScanVid1', 'VtScanVid2'], next_token='p2'),
-        _playlist_page(['VtScanVid3']),
-    ]
-    calls = []
-    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(pages[len(calls) - 1]))[1])
+    consumed = []
+
+    def fake_iter(playlist_id, logger):
+        consumed.append(playlist_id)
+        for vid in ['VtScanVid1', 'VtScanVid2', 'VtScanVid3']:
+            yield vid
+
+    monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
 
     with client.application.app_context():
         scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
 
-    assert len(calls) == 2
-    assert 'UUVtTestChannel1' in calls[0]          # uploads playlist derived, no channels.list call
-    assert 'maxResults=50' in calls[0]
-    assert 'pageToken=p2' in calls[1]
+    assert consumed == ['UUVtTestChannel1']           # uploads playlist derived, no API call
     assert q.qsize() == 3
     urls = sorted(qo.url for qo in list(q.queue))
     assert urls == [
@@ -648,8 +647,8 @@ def test_channel_scan_paginates(client, monkeypatch):
 
 
 def test_channel_scan_stops_when_caught_up(client, monkeypatch):
-    """A page with nothing new means everything older is known: stop paging."""
-    import logging, requests, scanner
+    """The first video already in the DB means everything older is known: stop."""
+    import logging, scanner
     q = _ensure_queue(client)
 
     con = _db_connect()
@@ -657,20 +656,26 @@ def test_channel_scan_stops_when_caught_up(client, monkeypatch):
     cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
     con.close()
 
-    calls = []
-    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(_playlist_page(['VtScanVid1'], next_token='p2')))[1])
+    fully_consumed = {'value': False}
+
+    def fake_iter(playlist_id, logger):
+        yield 'VtScanVid1'    # known — scan stops immediately, generator abandoned
+        fully_consumed['value'] = True
+        yield 'VtScanVid99'
+
+    monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
 
     with client.application.app_context():
         scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
 
-    assert len(calls) == 1   # did not fetch page 2
+    assert fully_consumed['value'] is False   # generator abandoned at the first known video
     assert q.qsize() == 0
 
 
 def test_channel_scan_mixed_page_takes_new_only(client, monkeypatch):
-    """New uploads on a page with known videos are enqueued, but paging stops
+    """New uploads are enqueued up to the first known video; paging stops
     there — a subscription must not backfill deep history."""
-    import logging, requests, scanner
+    import logging, scanner
     q = _ensure_queue(client)
 
     con = _db_connect()
@@ -678,31 +683,42 @@ def test_channel_scan_mixed_page_takes_new_only(client, monkeypatch):
     cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
     con.close()
 
-    calls = []
-    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(_playlist_page(['VtScanVid3', 'VtScanVid1'], next_token='p2')))[1])
+    fully_consumed = {'value': False}
+
+    def fake_iter(playlist_id, logger):
+        yield 'VtScanVid3'    # new — enqueued
+        yield 'VtScanVid1'    # known — stop, generator abandoned
+        fully_consumed['value'] = True
+        yield 'VtScanVid99'
+
+    monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
 
     with client.application.app_context():
         scanner.get_channel_video_list(('UCVtTestChannel1',), logging.getLogger('test'))
 
-    assert len(calls) == 1
+    assert fully_consumed['value'] is False
     assert q.qsize() == 1
     assert list(q.queue)[0].url == 'https://www.youtube.com/watch?v=VtScanVid3'
 
 
 def test_download_playlist_writes_queue_rows(client, monkeypatch):
     """Playlist expansion must go through enqueue() so queue rows persist."""
-    import logging, requests
+    import logging
     import providers.youtube as yt
     q = _ensure_queue(client)
 
-    monkeypatch.setattr(requests, 'get', lambda url, **kw: _FakeResp(_playlist_page(['VtPlVid1'])))
+    def fake_iter(playlist_id, logger):
+        for vid in ['VtPlVid1', 'VtPlVid2']:
+            yield vid
+
+    monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
 
     from QueueObject import QueueObject
     with client.application.app_context():
         result = yt.download_playlist(QueueObject('PLVtTest123', '', 'youtube', 0, ''), logging.getLogger('test'))
 
     assert result is True
-    assert q.qsize() == 1
+    assert q.qsize() == 2
 
     con = _db_connect()
     cur = con.cursor()
@@ -711,7 +727,103 @@ def test_download_playlist_writes_queue_rows(client, monkeypatch):
     assert row is not None and row[0] == 'pending'
     cur.execute("Select count(*) from pl2vid where playlistId = 'PLVtTest123' and videoId = 'VtPlVid1'")
     assert cur.fetchone()[0] == 1
+    cur.execute("Select count(*) from pl2vid where playlistId = 'PLVtTest123' and videoId = 'VtPlVid2'")
+    assert cur.fetchone()[0] == 1
     con.close()
+
+
+def test_iter_playlist_video_ids_uses_ytdlp_flat(monkeypatch):
+    """iter_playlist_video_ids must use extract_flat_playlist and hit the
+    youtube.com/playlist?list= URL, never the Data API."""
+    import logging
+    import providers.youtube as yt
+
+    captured = {}
+
+    class FakeYDL:
+        def __init__(self, opts):
+            captured['opts'] = opts
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def extract_info(self, url, download=False):
+            captured['url'] = url
+            return {'entries': [{'id': 'VidA'}, {'id': 'VidB'}, None, {'id': 'VidC'}]}
+
+    monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
+    ids = list(yt.iter_playlist_video_ids('PLTest123', logging.getLogger('test')))
+
+    assert ids == ['VidA', 'VidB', 'VidC']
+    assert captured['opts'].get('extract_flat_playlist') is True
+    assert captured['opts'].get('skip_download') is True
+    assert 'googleapis.com' not in captured['url']
+    assert 'youtube.com/playlist?list=PLTest123' in captured['url']
+
+
+def test_iter_playlist_video_ids_handles_error(monkeypatch):
+    """On extraction failure the generator yields nothing and logs the error."""
+    import logging
+    import providers.youtube as yt
+
+    class FakeYDL:
+        def __init__(self, opts): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def extract_info(self, url, download=False):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
+    ids = list(yt.iter_playlist_video_ids('PLTest123', logging.getLogger('test')))
+    assert ids == []
+
+
+def test_iter_playlist_video_ids_no_entries(monkeypatch):
+    """A response with no entries yields nothing and logs an error."""
+    import logging
+    import providers.youtube as yt
+
+    class FakeYDL:
+        def __init__(self, opts): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def extract_info(self, url, download=False):
+            return {}
+
+    monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
+    ids = list(yt.iter_playlist_video_ids('PLTest123', logging.getLogger('test')))
+    assert ids == []
+
+
+def test_flat_playlist_opts_cookies_use_stringio(monkeypatch, tmp_path):
+    """Cookies must be loaded into an in-memory StringIO, not passed as a
+    file path — yt-dlp rewrites Netscape cookies.txt on load and fails on
+    a read-only mount (the Docker image mounts cookies :ro)."""
+    import logging
+    import providers.youtube as yt
+    from io import StringIO
+
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tFALSE\t0\ttest\t1\n")
+
+    monkeypatch.setenv('VAULTTUBE_YTCOOKIE', str(cookie_file))
+    opts, handle = yt._flat_playlist_opts(logging.getLogger('test'))
+    try:
+        assert isinstance(opts.get('cookiefile'), StringIO)
+        assert opts['cookiefile'].getvalue().startswith('# Netscape')
+    finally:
+        handle.close()
+
+
+def test_flat_playlist_opts_no_cookies_when_unset(monkeypatch):
+    """No VAULTTUBE_YTCOOKIE → no cookiefile in opts, no handle to close."""
+    import logging
+    import providers.youtube as yt
+
+    monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
+    opts, handle = yt._flat_playlist_opts(logging.getLogger('test'))
+    assert 'cookiefile' not in opts
+    assert handle is None
 
 
 def test_channel_source_url(client):

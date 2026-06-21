@@ -56,13 +56,13 @@ Required:
 |----------|---------|
 | `VAULTTUBE_VAULTDIR` | Video storage path (generally `/videos`) |
 | `VAULTTUBE_DBHOST` / `DBUSER` / `DBPASS` / `DBNAME` / `DBPORT` | MariaDB connection |
-| `VAULTTUBE_YTKEY` | YouTube Data API key |
+| `VAULTTUBE_YTKEY` | YouTube Data API key (used by `deleted_check` and playlist-info lookup; subscription scanning uses yt-dlp and consumes no quota) |
 
 Optional:
 
 | Variable | Purpose |
 |----------|---------|
-| `VAULTTUBE_YTCOOKIE` | Path to a Netscape-format cookies.txt for YouTube |
+| `VAULTTUBE_YTCOOKIE` | Path to a Netscape-format cookies.txt for YouTube (used by downloads and subscription scanning) |
 | `VAULTTUBE_PATREONCOOKIE` | Path to a Netscape-format cookies.txt for Patreon |
 | `VAULTTUBE_DENOPATH` | Path to a deno binary for yt-dlp's JS runtime |
 | `VAULTTUBE_REDDIT_CLIENT_ID` / `CLIENT_SECRET` / `USERNAME` / `PASSWORD` / `USER_AGENT` | Reddit API credentials (all five required to use the Reddit provider) |

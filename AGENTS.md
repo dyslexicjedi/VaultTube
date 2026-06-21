@@ -94,7 +94,7 @@ VaultTube/
 Required at startup (validated in `main.py`):
 - `VAULTTUBE_VAULTDIR` - Video storage path
 - `VAULTTUBE_DBHOST/DBUSER/DBPASS/DBNAME/DBPORT` - Database credentials
-- `VAULTTUBE_YTKEY` - YouTube API key
+- `VAULTTUBE_YTKEY` - YouTube API key (used by `deleted_check` and `get_playlist_info`; no longer used for subscription scanning)
 
 Optional:
 - `VAULTTUBE_YTCOOKIE` - YouTube cookies file (Netscape cookies.txt path)
@@ -142,7 +142,7 @@ Optional:
 7. After download, `backend.py` scans and adds to DB
 
 ## Subscription Scanning (`scanner.py`, hourly)
-- YouTube channels (`UC...` IDs) and playlists: polled via the YouTube Data API
+- YouTube channels (`UC...` IDs) and playlists: enumerated via yt-dlp's flat-playlist extraction (`providers/youtube.py:iter_playlist_video_ids`), no YouTube Data API quota. Cookies/proxy/deno config (see env vars) apply to scanning as well as downloads
 - Patreon campaigns (numeric IDs in `channels`): polled via the Patreon posts API with cookies + impersonation (`scan_campaign` in `providers/patreon.py`); a post is enqueued if it's a `*video*` post type OR a block-editor post with an inline video block in `content_json_string` (these report `text_only`). Posts with neither are skipped
 - Patreon campaigns get their `channels` row auto-created on first download or vault scan (`ensure_channel`); subscribe via the normal `/api/subscribe/channel/<campaign_id>` endpoint
 

@@ -1,4 +1,3 @@
-import requests
 import os
 from io import StringIO
 from urllib.parse import urlparse, parse_qs
@@ -26,6 +25,74 @@ def dl_progress_hook(d):
             update_status(video_id, {'progress': '100%'})
     except Exception as e:
         current_app.logger.error("dl_progress_hook Failed: %s" % e)
+
+def _flat_playlist_opts(logger=None):
+    """yt-dlp options for flat (no-download) playlist enumeration.
+
+    Uses the same proxy/deno configuration as downloads. Cookies are read
+    into an in-memory StringIO (matching _download_attempt) rather than
+    passing cookiefile directly: yt-dlp rewrites/normalizes Netscape
+    cookies.txt on load, which fails on a read-only mount (the Docker
+    image mounts cookies :ro). The caller is responsible for closing the
+    StringIO via the returned cleanup handle.
+
+    Returns (opts, cookie_file_handle_or_None)."""
+    opts = {
+        'extract_flat_playlist': True,
+        'skip_download': True,
+        'quiet': True,
+        'noplaylist': False,
+        'socket_timeout': 30,
+        'retries': 5,
+    }
+    deno = os.environ.get('VAULTTUBE_DENOPATH')
+    if deno:
+        opts['js_runtimes'] = {'deno': {'path': deno}}
+    cookie_file = None
+    cookie_path = os.environ.get('VAULTTUBE_YTCOOKIE')
+    if cookie_path:
+        try:
+            with open(cookie_path) as f:
+                cookie_file = StringIO(f.read())
+            opts['cookiefile'] = cookie_file
+        except OSError as e:
+            logger.warning("Could not read YouTube cookies at %s: %s" % (cookie_path, e))
+    proxy = os.environ.get('VAULTTUBE_PROXY')
+    if proxy:
+        opts['proxy'] = proxy
+    return opts, cookie_file
+
+
+def iter_playlist_video_ids(playlist_id, logger):
+    """Yield video IDs from a YouTube playlist via yt-dlp flat extraction.
+
+    Replaces the YouTube Data API playlistItems call so subscriptions no
+    longer burn quota. yt-dlp returns entries newest-first for YouTube
+    playlists, matching the API's ordering, so callers' "stop when caught
+    up" logic continues to work. On any extraction error the generator
+    logs and stops (yields nothing further) — callers treat that as an
+    empty scan this cycle and retry next hour."""
+    url = "https://www.youtube.com/playlist?list=%s" % playlist_id
+    opts, cookie_file = _flat_playlist_opts(logger)
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:
+        logger.error("yt-dlp playlist extraction failed for %s: %s" % (playlist_id, e))
+        return
+    finally:
+        if cookie_file is not None:
+            cookie_file.close()
+    if not info or 'entries' not in info:
+        logger.error("No entries returned for playlist %s" % playlist_id)
+        return
+    for entry in info['entries']:
+        if entry is None:
+            continue
+        vid = entry.get('id')
+        if vid:
+            yield vid
+
 
 def provider_domains():
     return ['youtube.com','youtu.be']
@@ -162,35 +229,7 @@ def download_playlist(qo, logger):
             logger.error("Could not extract playlist ID from URL: %s" % playlist_url)
             return False
 
-        key = os.environ['VAULTTUBE_YTKEY']
-        all_video_ids = []
-        page_token = None
-
-        while True:
-            curl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=%s&key=%s&maxResults=50" % (playlist_id, key)
-            if page_token:
-                curl += "&pageToken=%s" % page_token
-
-            r = requests.get(curl, timeout=30)
-            retj = r.json()
-            r.close()
-
-            if 'items' not in retj:
-                logger.error("Invalid playlist response for ID: %s" % playlist_id)
-                return False
-
-            for vid in retj['items']:
-                content_details = vid.get('contentDetails', {})
-                vid_id = content_details.get('videoId')
-                if not vid_id:
-                    continue
-                all_video_ids.append(vid_id)
-
-            if 'nextPageToken' in retj:
-                page_token = retj['nextPageToken']
-            else:
-                break
-
+        all_video_ids = list(iter_playlist_video_ids(playlist_id, logger))
         logger.info("Playlist %s contains %d videos, adding to queue" % (playlist_id, len(all_video_ids)))
 
         for vid_id in all_video_ids:
