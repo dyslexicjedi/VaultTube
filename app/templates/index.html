@@ -63,7 +63,7 @@
         document.getElementById('hero-img').src = '/api/images/' + encodeURIComponent(v.id);
         document.getElementById('hero-title').textContent = v.title;
         var meta = [];
-        if (v.youtuber) meta.push('<a href="/creator.html?creator=' + encodeURIComponent(v.channelId) + '">' + VT.esc(v.youtuber) + '</a>');
+        if (v.channel_name) meta.push('<a href="/creator.html?creator=' + encodeURIComponent(v.channelId) + '">' + VT.esc(v.channel_name) + '</a>');
         if (v.PublishedAt) meta.push(VT.esc(VT.fmtDate(v.PublishedAt)));
         if (v.length) meta.push(VT.esc(VT.fmtDur(v.length)));
         document.getElementById('hero-meta').innerHTML = meta.join(' &nbsp;·&nbsp; ');

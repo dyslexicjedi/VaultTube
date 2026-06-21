@@ -114,7 +114,7 @@
         document.title = v.title + ' — VaultTube';
         $id('title').textContent = v.title;
         var sub = [];
-        if (v.youtuber) sub.push('<a href="/creator.html?creator=' + encodeURIComponent(v.channelId) + '">' + VT.esc(v.youtuber) + '</a>');
+        if (v.channel_name) sub.push('<a href="/creator.html?creator=' + encodeURIComponent(v.channelId) + '">' + VT.esc(v.channel_name) + '</a>');
         if (v.PublishedAt) sub.push(VT.esc(VT.fmtDate(v.PublishedAt)));
         if (v.length && v.length !== '0') sub.push(VT.esc(VT.fmtDur(v.length)));
         $id('subline').innerHTML = sub.join(' &nbsp;·&nbsp; ');
@@ -329,7 +329,7 @@
                 + (v.length && v.length !== '0' ? '<span class="vt-dur">' + VT.esc(VT.fmtDur(v.length)) + '</span>' : '')
                 + '</div>'
                 + '<div><div class="vt-upnext-title">' + VT.esc(v.title) + '</div>'
-                + '<div class="vt-upnext-meta">' + VT.esc(v.youtuber || v.channelId || '') + (v.PublishedAt ? ' · ' + VT.esc(VT.fmtDate(v.PublishedAt)) : '') + '</div></div>'
+                + '<div class="vt-upnext-meta">' + VT.esc(v.channel_name || v.channelId || '') + (v.PublishedAt ? ' · ' + VT.esc(VT.fmtDate(v.PublishedAt)) : '') + '</div></div>'
                 + '</div>';
         }).join('');
         $id('upnext-list').innerHTML = html || '<div class="vt-empty" style="padding:20px 0">Nothing else unwatched.</div>';

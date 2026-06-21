@@ -156,7 +156,7 @@ def process_new_video(id,fpath,logger):
                     return
         if(retj['pageInfo']['totalResults'] > 0):
             ret["PublishedAt"] = datetime.datetime.strptime(retj["items"][0]["snippet"]["publishedAt"], '%Y-%m-%dT%H:%M:%SZ')
-            ret['Youtuber'] = retj["items"][0]["snippet"]["channelTitle"]
+            ret['channel_name'] = retj["items"][0]["snippet"]["channelTitle"]
             ret['channelId'] = retj["items"][0]["snippet"]["channelId"]
             ret['title'] = retj["items"][0]["snippet"]["title"]
             ret['description'] = retj["items"][0]["snippet"].get("description", "")
@@ -317,7 +317,7 @@ def save_video_from_ytdlp(video_id, info, fpath, logger):
         stored_json = {k: v for k, v in info.items() if k not in _YTDLP_STRIP_KEYS}
 
         ret = {
-            'Youtuber': info.get('channel') or info.get('uploader', ''),
+            'channel_name': info.get('channel') or info.get('uploader', ''),
             'Json': stored_json,
             'Filepath': fpath,
             'PublishedAt': published_at,
@@ -368,7 +368,7 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
 
         # Insert video record
         ret = {}
-        ret["Youtuber"] = ""
+        ret["channel_name"] = ""
         ret["Json"] = {
             'id': video_id,
             'title': title,

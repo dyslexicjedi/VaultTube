@@ -44,7 +44,7 @@ window.VT = (function () {
     function cardHTML(v, opts) {
         opts = opts || {};
         var watched = String(v.watched) === '1';
-        var creator = v.youtuber || v.channelId || '';
+        var creator = v.channel_name || v.channelId || '';
         var dur = fmtDur(v.length);
         var html = '<div class="vt-card' + (watched ? ' watched' : '') + '" data-id="' + esc(v.id) + '" role="button" tabindex="0" aria-label="' + esc(v.title) + '">';
         html += '<div class="vt-thumb"><img src="/api/images/' + encodeURIComponent(v.id) + '" alt="" loading="lazy">';

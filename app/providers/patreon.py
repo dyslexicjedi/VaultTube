@@ -267,9 +267,9 @@ def patreon_db_info(videoid,channelid,PublishedAt,title,logger):
         cur.execute(sql,(videoid,))
         if cur.fetchone():
             logger.info("Video already exists in database, updating")
-            sql = "Update videos set youtuber=%s,channelId=%s,filepath=%s,PublishedAt=%s,json=%s,source=%s,title=%s  where id=%s"
+            sql = "Update videos set channel_name=%s,channelId=%s,filepath=%s,PublishedAt=%s,json=%s,source=%s,title=%s  where id=%s"
         else:
-            sql = "Insert into videos(youtuber,channelId,filepath,PublishedAt,json,source,title,id) values(%s,%s,%s,%s,%s,%s,%s,%s)"
+            sql = "Insert into videos(channel_name,channelId,filepath,PublishedAt,json,source,title,id) values(%s,%s,%s,%s,%s,%s,%s,%s)"
         cur.execute(sql,("",channelid,"/"+channelid+"/"+str(videoid)+".mp4",PublishedAt.strftime('%Y-%m-%d %H:%M:%S.%f'),json.dumps(t),source,title,videoid))
         con.commit()
         logger.debug("Metadata saved")

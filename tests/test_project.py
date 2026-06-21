@@ -21,7 +21,7 @@ def _insert_chvids():
     cur.execute("REPLACE INTO channels(channelid, channelname, json, subscribed) VALUES('ChVids1','Ch Vids','{}',0);")
     for n, (title, watched) in enumerate([('A', 0), ('B', 1), ('C', 0)], start=1):
         cur.execute(
-            "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched) "
+            "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, watched) "
             "VALUES(%s, 'Ch Vids', 'ChVids1', '{}', %s, %s, %s, %s);",
             ('ChVidsVid%d' % n, '/videos/%d.mp4' % n, '2024-01-0%d 10:00:00' % n, title, watched)
         )
@@ -44,7 +44,7 @@ def test_populate_db(client):
         con.commit()
         cur.execute("Select * from channels limit 1;")
         assert 1 == cur.rowcount
-        cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('Test123','Test123','Test123','TestJSON','/videos/1','2023-10-21 15:15:15',0,0);")
+        cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp) values('Test123','Test123','Test123','TestJSON','/videos/1','2023-10-21 15:15:15',0,0);")
         con.commit()
         cur.execute("Select * from videos limit 1;")
         assert 1 == cur.rowcount
@@ -94,7 +94,7 @@ def test_search_fulltext(client):
     con = _db_connect()
     cur = con.cursor()
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, description) "
         "VALUES('SearchFT1', 'TestCreator', 'TestChannel1', '{}', '/videos/search1.mp4', "
         "'2023-10-21 15:15:15', 'Python Tutorial Advanced', 'Learn advanced Python programming techniques for vaulttubefulltextkw');"
     )
@@ -128,7 +128,7 @@ def test_search_short_query(client):
     con = _db_connect()
     cur = con.cursor()
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, description) "
         "VALUES('SearchLIKE1', 'TestCreator', 'TestChannel1', '{}', '/videos/search2.mp4', "
         "'2023-10-21 15:15:15', 'Zynced Workflow Tool', 'A unique workflow tool');"
     )
@@ -153,7 +153,7 @@ def test_get_video(client):
     )
     con.commit()
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description, watched) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, description, watched) "
         "VALUES('GetVid1', 'GetVidYoutuber', 'GetVidCh1', '{}', '/videos/getvid1.mp4', "
         "'2024-01-01 10:00:00', 'Get Video Test', 'Testing get video API', 0);"
     )
@@ -164,7 +164,7 @@ def test_get_video(client):
     data = json.loads(response.get_data(as_text=True))
     assert len(data) > 0
     assert data[0]['id'] == 'GetVid1'
-    assert data[0]['youtuber'] == 'GetVidYoutuber'
+    assert data[0]['channel_name'] == 'GetVidYoutuber'
     assert data[0]['title'] == 'Get Video Test'
 
 
@@ -176,7 +176,7 @@ def test_get_video_mp4_suffix(client):
     con = _db_connect()
     cur = con.cursor()
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, watched) "
         "VALUES('GetVidMp4', 'TestYt', 'Ch1', '{}', '/videos/GetVidMp4.mp4', "
         "'2024-01-01 10:00:00', 'Mp4 Test', 0);"
     )
@@ -196,7 +196,7 @@ def test_mark_watched(client):
     con = _db_connect()
     cur = con.cursor()
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched, timestamp) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, watched, timestamp) "
         "VALUES('WatchVid1', 'TestYt', 'Ch1', '{}', '/videos/watchvid1.mp4', "
         "'2024-01-01 10:00:00', 'Watch Test', 0, 0);"
     )
@@ -224,7 +224,7 @@ def test_mark_unwatched(client):
     con = _db_connect()
     cur = con.cursor()
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched, timestamp) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, watched, timestamp) "
         "VALUES('UnwatchVid1', 'TestYt', 'Ch1', '{}', '/videos/unwatchvid1.mp4', "
         "'2024-01-01 10:00:00', 'Unwatch Test', 1, 0);"
     )
@@ -249,7 +249,7 @@ def test_set_timestamp(client):
     con = _db_connect()
     cur = con.cursor()
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched, timestamp) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, watched, timestamp) "
         "VALUES('TsVid1', 'TestYt', 'Ch1', '{}', '/videos/tsvid1.mp4', "
         "'2024-01-01 10:00:00', 'Timestamp Test', 0, 0);"
     )
@@ -386,11 +386,11 @@ def test_up_next(client):
     con = _db_connect()
     cur = con.cursor()
     cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('UpNextCh1','UpNextCh1','{}',0);")
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext1','UpNextCh1','UpNextCh1','{}','/videos/1','2023-01-02 12:00:00',0,0);")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext1','UpNextCh1','UpNextCh1','{}','/videos/1','2023-01-02 12:00:00',0,0);")
     # Published after the current video and unwatched -> must be first in the list
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext2','UpNextCh1','UpNextCh1','{}','/videos/2','2023-01-03 12:00:00',0,0);")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext2','UpNextCh1','UpNextCh1','{}','/videos/2','2023-01-03 12:00:00',0,0);")
     # Watched -> must never appear
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext3','UpNextCh1','UpNextCh1','{}','/videos/3','2023-01-01 12:00:00',1,0);")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp) values('UpNext3','UpNextCh1','UpNextCh1','{}','/videos/3','2023-01-01 12:00:00',1,0);")
     con.close()
 
     response = client.get("/api/up_next/UpNext1?limit=5")
@@ -487,7 +487,7 @@ def test_get_video_index(client):
     import logging, database
     con = _db_connect()
     cur = con.cursor()
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,length) values('GetVid1','X','GetVidCh1','{}','/videos/1','2024-01-01 10:00:00',0,0,'0:10:00');")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp,length) values('GetVid1','X','GetVidCh1','{}','/videos/1','2024-01-01 10:00:00',0,0,'0:10:00');")
     cur.execute("Insert ignore into IgnoreVid(id) values('TombVid1');")
     con.close()
 
@@ -510,13 +510,13 @@ def test_connection_pool_reuse(client):
 
 def test_find_next_previous_series(client):
     """Series detection keys on channelId + title column, so it works for
-    Patreon/Reddit rows too (their legacy youtuber column is empty)."""
+    Patreon/Reddit rows too (their legacy channel_name column is empty)."""
     con = _db_connect()
     cur = con.cursor()
-    # youtuber deliberately empty, like Patreon rows
+    # channel_name deliberately empty, like Patreon rows
     for n in (1, 2, 3):
         cur.execute(
-            "Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,title) "
+            "Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp,title) "
             "values(%s,'','UpNextCh1','{}','/videos/x',%s,0,0,%s);",
             ('FnpVid%d' % n, '2024-01-0%d 10:00:00' % n, 'My Series Episode %d' % n))
     con.close()
@@ -560,8 +560,8 @@ def test_run_deleted_check_batched(client, monkeypatch):
 
     con = _db_connect()
     cur = con.cursor()
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted,source) values('DelVid1','X','GetVidCh1','{}','/videos/1','2024-01-01 10:00:00',0,0,0,'youtube');")
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted,source) values('DelVid2','X','GetVidCh1','{}','/videos/2','2024-01-02 10:00:00',0,0,1,'youtube');")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted,source) values('DelVid1','X','GetVidCh1','{}','/videos/1','2024-01-01 10:00:00',0,0,0,'youtube');")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted,source) values('DelVid2','X','GetVidCh1','{}','/videos/2','2024-01-02 10:00:00',0,0,1,'youtube');")
     con.close()
 
     calls = []
@@ -653,7 +653,7 @@ def test_channel_scan_stops_when_caught_up(client, monkeypatch):
 
     con = _db_connect()
     cur = con.cursor()
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
     con.close()
 
     fully_consumed = {'value': False}
@@ -680,7 +680,7 @@ def test_channel_scan_mixed_page_takes_new_only(client, monkeypatch):
 
     con = _db_connect()
     cur = con.cursor()
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
     con.close()
 
     fully_consumed = {'value': False}
@@ -832,7 +832,7 @@ def test_channel_source_url(client):
     cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('UCVtTestChannel1','YT Test','{}',0);")
     cur.execute("""Insert into channels(channelid,channelname,json,subscribed) values('987654321099','Patreon Test','{"data":{"attributes":{"name":"Patreon Test","url":"https://www.patreon.com/vttest"}}}',0);""")
     cur.execute("Insert into channels(channelid,channelname,json,subscribed) values('VtTestRedditUser','VtTestRedditUser','{}',0);")
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp) values('RedVid1','VtTestRedditUser','VtTestRedditUser','{}','/videos/1','2023-03-01 12:00:00',0,0);")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp) values('RedVid1','VtTestRedditUser','VtTestRedditUser','{}','/videos/1','2023-03-01 12:00:00',0,0);")
     cur.execute("Update videos set source='reddit' where id='RedVid1';")
     con.close()
 
@@ -863,11 +863,11 @@ def test_channel_info_enriched(client):
         "VALUES('ChInfo1', 'Ch Info Name', '{\"items\":[{\"snippet\":{\"description\":\"Test description\",\"thumbnails\":{\"medium\":{\"url\":\"https://example.com/thumb.jpg\"}}}}]}', 1);"
     )
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, watched) "
         "VALUES('ChInfoVid1', 'Ch Info Name', 'ChInfo1', '{}', '/videos/1.mp4', '2024-01-01 10:00:00', 'Ch Info Video', 0);"
     )
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, watched) "
         "VALUES('ChInfoVid2', 'Ch Info Name', 'ChInfo1', '{}', '/videos/2.mp4', '2024-01-02 10:00:00', 'Ch Info Video 2', 1);"
     )
     con.commit()
@@ -894,7 +894,7 @@ def test_channel_videos_paged(client):
     assert 'ChVidsVid1' in ids
     assert 'ChVidsVid2' in ids
     assert 'ChVidsVid3' in ids
-    assert all('youtuber' in v and 'title' in v for v in data)
+    assert all('channel_name' in v and 'title' in v for v in data)
 
 
 def test_channel_videos_status_filter(client):
@@ -955,7 +955,7 @@ def test_tombstone_migration(client):
     con = _db_connect()
     cur = con.cursor()
     # A legacy-style tombstone row, as old insert_not_found wrote them
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,watched,timestamp,length) values('TombVid1','404','404','404','404',1,0,'0');")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,watched,timestamp,length) values('TombVid1','404','404','404','404',1,0,'0');")
     con.close()
 
     response = client.get("/api/checkdb")
@@ -973,8 +973,8 @@ def test_tombstone_migration(client):
 def test_getvids_deleted_filter(client):
     con = _db_connect()
     cur = con.cursor()
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted) values('DelVid1','GetVidCh1','GetVidCh1','{}','/videos/1','2023-02-01 12:00:00',0,0,1);")
-    cur.execute("Insert into videos(id,youtuber,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted) values('DelVid2','GetVidCh1','GetVidCh1','{}','/videos/2','2023-02-02 12:00:00',0,0,0);")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted) values('DelVid1','GetVidCh1','GetVidCh1','{}','/videos/1','2023-02-01 12:00:00',0,0,1);")
+    cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp,isDeleted) values('DelVid2','GetVidCh1','GetVidCh1','{}','/videos/2','2023-02-02 12:00:00',0,0,0);")
     con.close()
 
     response = client.get("/api/getvids/all/PublishedAt/desc/0?deleted=1&channel_ids[]=GetVidCh1")
@@ -1435,7 +1435,7 @@ def test_video_codec_fields_and_hls(client):
         con = _db_connect()
         cur = con.cursor()
         cur.execute(
-            "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, watched, timestamp, source) "
+            "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, watched, timestamp, source) "
             "VALUES('HlsVid1', 'HlsTestChannel', 'HlsTestChannel', '{}', 'HlsTestChannel/HlsVid1.webm', "
             "'2024-01-01 10:00:00', 'HLS Test', 0, 0, 'youtube');"
         )
@@ -1644,14 +1644,14 @@ def test_chapters_endpoint(client):
     cur = con.cursor()
     desc = "0:00 Intro\n2:15 Setup\n10:42 Demo\n"
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, description) "
         "VALUES('ChapEP1', 'ChapCreator', 'ChapCh1', '{}', '/videos/chap1.mp4', "
         "'2024-01-01 10:00:00', 'Chapter Test', %s);",
         (desc,)
     )
     # Chapter-less video → empty list
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, description) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, description) "
         "VALUES('ChapEP2', 'ChapCreator', 'ChapCh1', '{}', '/videos/chap2.mp4', "
         "'2024-01-02 10:00:00', 'No Chapters', 'Just a plain description with no timestamps.');"
     )
@@ -1696,7 +1696,7 @@ def test_update_video_filesize():
     con = _db_connect()
     cur = con.cursor()
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title) "
         "VALUES('SizeVid1', 'TestCreator', 'TestCh1', '{}', '/videos/size1.mp4', "
         "'2024-01-01 10:00:00', 'Size Test');"
     )
@@ -1729,7 +1729,7 @@ def test_maybe_update_filesize_backfills_from_null(tmp_path):
     con = _db_connect()
     cur = con.cursor()
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title) "
         "VALUES('BackfillVid1', 'TestCreator', 'TestCh1', '{}', %s, "
         "'2024-01-01 10:00:00', 'Backfill Test');",
         (fpath,)
@@ -1772,17 +1772,17 @@ def test_api_storage(client):
     )
     # Two YouTube videos with known sizes + one Patreon video with NULL filesize
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, source, filesize) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, source, filesize) "
         "VALUES('StorV1', 'Stor Channel', 'StorCh1', '{}', '/videos/s1.mkv', "
         "'2024-01-01 10:00:00', 'V1', 'youtube', 1000000);"
     )
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, source, filesize) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, source, filesize) "
         "VALUES('StorV2', 'Stor Channel', 'StorCh1', '{}', '/videos/s2.mkv', "
         "'2024-01-02 10:00:00', 'V2', 'youtube', 2500000);"
     )
     cur.execute(
-        "REPLACE INTO videos(id, youtuber, channelId, json, filepath, PublishedAt, title, source, filesize) "
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, source, filesize) "
         "VALUES('StorV3', 'Patreon Creator', 'PatCh1', '{}', '/videos/s3.mp4', "
         "'2024-01-03 10:00:00', 'V3', 'patreon', NULL);"
     )
@@ -1897,7 +1897,7 @@ def test_save_video_persists_filesize(tmp_path):
 
     # Minimal ret dict matching the shape process_new_video builds
     ret = {
-        'Youtuber': 'SaveVidCreator',
+        'channel_name': 'SaveVidCreator',
         'Json': {'id': 'SaveVid1', 'title': 'Save Test'},
         'Filepath': str(tmp_path / 'save1.mkv'),
         'PublishedAt': _dt.datetime(2024, 1, 1, 10, 0, 0),

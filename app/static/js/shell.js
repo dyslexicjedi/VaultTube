@@ -74,7 +74,7 @@ function do_search() {
             return '<div class="vt-search-hit" data-id="' + esc(v.id) + '">'
                 + '<img src="/api/images/' + encodeURIComponent(v.id) + '" alt="" loading="lazy">'
                 + '<div><div class="vt-search-hit-title">' + esc(v.title) + '</div>'
-                + '<div class="vt-search-hit-sub">' + esc(v.youtuber || v.channelId || '') + '</div></div>'
+                + '<div class="vt-search-hit-sub">' + esc(v.channel_name || v.channelId || '') + '</div></div>'
                 + '</div>';
         }).join('')
         + '<button type="button" class="vt-search-all">All results for “' + esc(query) + '”</button>';

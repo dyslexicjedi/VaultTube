@@ -50,7 +50,7 @@ def checkdb(logger):
             logger.info("Tags Videos not created, creating...")
             cur.execute("""CREATE TABLE `videos` (
                 `id` varchar(50) COLLATE utf8mb4_bin NOT NULL,
-                `youtuber` varchar(255) COLLATE utf8mb4_bin DEFAULT NULL,
+                `channel_name` varchar(255) COLLATE utf8mb4_bin DEFAULT NULL,
                 `channelId` varchar(255) DEFAULT NULL,
                 `json` longtext COLLATE utf8mb4_bin DEFAULT NULL,
                 `filepath` varchar(2000) COLLATE utf8mb4_bin DEFAULT NULL,
@@ -118,15 +118,24 @@ def checkdb(logger):
         if(not cur.fetchone()):
             logger.info("IgnoreVid Table not created, creating...")
             cur.execute("create table IgnoreVid (`id` varchar(50) COLLATE utf8mb4_bin NOT NULL,PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
-        # Migrate legacy not-found tombstones (youtuber='404' placeholder rows)
+        # Rename legacy `youtuber` column to `channel_name`. The name is
+        # YouTube-specific and doesn't fit Patreon/Reddit content. Guarded so
+        # it runs once on existing databases and is a no-op on fresh installs
+        # (where CREATE TABLE already uses the new name). Must run before the
+        # tombstone block below so both see a consistent column name.
+        cur.execute("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = %s AND table_name = 'videos' AND column_name = 'youtuber'", (os.environ['VAULTTUBE_DBNAME'],))
+        if cur.fetchone()[0] > 0:
+            logger.info("Renaming videos.youtuber column to channel_name...")
+            cur.execute("ALTER TABLE videos RENAME COLUMN `youtuber` TO `channel_name`")
+        # Migrate legacy not-found tombstones (channel_name='404' placeholder rows)
         # into IgnoreVid; the videos table holds only real content
-        cur.execute("SELECT COUNT(*) FROM videos WHERE youtuber='404'")
+        cur.execute("SELECT COUNT(*) FROM videos WHERE channel_name='404'")
         tombstones = cur.fetchone()[0]
         if tombstones:
             logger.info("Migrating %s not-found tombstone rows from videos to IgnoreVid...", tombstones)
-            cur.execute("INSERT IGNORE INTO IgnoreVid(id) SELECT id FROM videos WHERE youtuber='404'")
-            cur.execute("DELETE images FROM images JOIN videos ON images.id = videos.id WHERE videos.youtuber='404'")
-            cur.execute("DELETE FROM videos WHERE youtuber='404'")
+            cur.execute("INSERT IGNORE INTO IgnoreVid(id) SELECT id FROM videos WHERE channel_name='404'")
+            cur.execute("DELETE images FROM images JOIN videos ON images.id = videos.id WHERE videos.channel_name='404'")
+            cur.execute("DELETE FROM videos WHERE channel_name='404'")
         #Queue
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'queue' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
@@ -211,8 +220,8 @@ def save_video(id,ret,img,logger,source='youtube'):
         con = get_connection(logger)
         cur = con.cursor()
         #Save Video Data
-        sql = "Insert Ignore into videos(id,youtuber,json,filepath,PublishedAt,channelId,length,source,title,description,vcodec,acodec,container,filesize) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["Youtuber"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title'],ret.get('description',''),ret.get('vcodec'),ret.get('acodec'),ret.get('container'),ret.get('filesize')))
+        sql = "Insert Ignore into videos(id,channel_name,json,filepath,PublishedAt,channelId,length,source,title,description,vcodec,acodec,container,filesize) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
+        cur.execute(sql,(id,ret["channel_name"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title'],ret.get('description',''),ret.get('vcodec'),ret.get('acodec'),ret.get('container'),ret.get('filesize')))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))
@@ -431,7 +440,7 @@ def insert_pl2vid_info(pl,vid,logger):
 def find_next_previous(vid,logger):
     """Neighbouring episodes of the same series: same channel, fuzzy title
     match (>0.9), ordered by PublishedAt. Keys on channelId and the title
-    column — the legacy youtuber column is empty for Patreon/Reddit rows and
+    column — the legacy channel_name column is empty for Patreon/Reddit rows and
     JSON_EXTRACT over every blob made this a full-table parse per player load."""
     try:
         con = get_connection(logger)
