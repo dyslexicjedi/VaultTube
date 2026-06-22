@@ -620,23 +620,24 @@ def test_error_type_classification():
 
 
 def test_channel_scan_paginates(client, monkeypatch):
-    """The scan must walk every yt-dlp flat-playlist entry, not just the first."""
-    import logging, scanner
+    """The scan must walk every playlistItems page, not just the first."""
+    import requests, scanner
     q = _ensure_queue(client)
 
-    consumed = []
-
-    def fake_iter(playlist_id):
-        consumed.append(playlist_id)
-        for vid in ['VtScanVid1', 'VtScanVid2', 'VtScanVid3']:
-            yield vid
-
-    monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
+    pages = [
+        _playlist_page(['VtScanVid1', 'VtScanVid2'], next_token='p2'),
+        _playlist_page(['VtScanVid3']),
+    ]
+    calls = []
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(pages[len(calls) - 1]))[1])
 
     with client.application.app_context():
         scanner.get_channel_video_list(('UCVtTestChannel1',))
 
-    assert consumed == ['UUVtTestChannel1']           # uploads playlist derived, no API call
+    assert len(calls) == 2
+    assert 'UUVtTestChannel1' in calls[0]          # uploads playlist derived, no channels.list call
+    assert 'maxResults=50' in calls[0]
+    assert 'pageToken=p2' in calls[1]
     assert q.qsize() == 3
     urls = sorted(qo.url for qo in list(q.queue))
     assert urls == [
@@ -647,8 +648,8 @@ def test_channel_scan_paginates(client, monkeypatch):
 
 
 def test_channel_scan_stops_when_caught_up(client, monkeypatch):
-    """The first video already in the DB means everything older is known: stop."""
-    import logging, scanner
+    """A page with nothing new means everything older is known: stop paging."""
+    import requests, scanner
     q = _ensure_queue(client)
 
     con = _db_connect()
@@ -656,26 +657,20 @@ def test_channel_scan_stops_when_caught_up(client, monkeypatch):
     cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
     con.close()
 
-    fully_consumed = {'value': False}
-
-    def fake_iter(playlist_id):
-        yield 'VtScanVid1'    # known — scan stops immediately, generator abandoned
-        fully_consumed['value'] = True
-        yield 'VtScanVid99'
-
-    monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
+    calls = []
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(_playlist_page(['VtScanVid1'], next_token='p2')))[1])
 
     with client.application.app_context():
         scanner.get_channel_video_list(('UCVtTestChannel1',))
 
-    assert fully_consumed['value'] is False   # generator abandoned at the first known video
+    assert len(calls) == 1   # did not fetch page 2
     assert q.qsize() == 0
 
 
 def test_channel_scan_mixed_page_takes_new_only(client, monkeypatch):
-    """New uploads are enqueued up to the first known video; paging stops
+    """New uploads on a page with known videos are enqueued, but paging stops
     there — a subscription must not backfill deep history."""
-    import logging, scanner
+    import requests, scanner
     q = _ensure_queue(client)
 
     con = _db_connect()
@@ -683,35 +678,24 @@ def test_channel_scan_mixed_page_takes_new_only(client, monkeypatch):
     cur.execute("Insert into videos(id,channel_name,channelId,json,filepath,PublishedAt,watched,timestamp) values('VtScanVid1','UCVtTestChannel1','UCVtTestChannel1','{}','/videos/1','2024-01-01 10:00:00',0,0);")
     con.close()
 
-    fully_consumed = {'value': False}
-
-    def fake_iter(playlist_id):
-        yield 'VtScanVid3'    # new — enqueued
-        yield 'VtScanVid1'    # known — stop, generator abandoned
-        fully_consumed['value'] = True
-        yield 'VtScanVid99'
-
-    monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
+    calls = []
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(_playlist_page(['VtScanVid3', 'VtScanVid1'], next_token='p2')))[1])
 
     with client.application.app_context():
         scanner.get_channel_video_list(('UCVtTestChannel1',))
 
-    assert fully_consumed['value'] is False
+    assert len(calls) == 1
     assert q.qsize() == 1
     assert list(q.queue)[0].url == 'https://www.youtube.com/watch?v=VtScanVid3'
 
 
 def test_download_playlist_writes_queue_rows(client, monkeypatch):
     """Playlist expansion must go through enqueue() so queue rows persist."""
-    import logging
+    import requests
     import providers.youtube as yt
     q = _ensure_queue(client)
 
-    def fake_iter(playlist_id):
-        for vid in ['VtPlVid1', 'VtPlVid2']:
-            yield vid
-
-    monkeypatch.setattr('providers.youtube.iter_playlist_video_ids', fake_iter)
+    monkeypatch.setattr(requests, 'get', lambda url, **kw: _FakeResp(_playlist_page(['VtPlVid1', 'VtPlVid2'])))
 
     from QueueObject import QueueObject
     with client.application.app_context():
@@ -730,107 +714,6 @@ def test_download_playlist_writes_queue_rows(client, monkeypatch):
     cur.execute("Select count(*) from pl2vid where playlistId = 'PLVtTest123' and videoId = 'VtPlVid2'")
     assert cur.fetchone()[0] == 1
     con.close()
-
-
-def test_iter_playlist_video_ids_uses_ytdlp_flat(monkeypatch):
-    """iter_playlist_video_ids must use extract_flat_playlist and hit the
-    youtube.com/playlist?list= URL, never the Data API."""
-    import logging
-    import providers.youtube as yt
-
-    captured = {}
-
-    class FakeYDL:
-        def __init__(self, opts):
-            captured['opts'] = opts
-        def __enter__(self):
-            return self
-        def __exit__(self, *a):
-            return False
-        def extract_info(self, url, download=False):
-            captured['url'] = url
-            return {'entries': [{'id': 'VidA'}, {'id': 'VidB'}, None, {'id': 'VidC'}]}
-
-    monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
-    ids = list(yt.iter_playlist_video_ids('PLTest123'))
-
-    assert ids == ['VidA', 'VidB', 'VidC']
-    assert captured['opts'].get('extract_flat_playlist') is True
-    assert captured['opts'].get('skip_download') is True
-    assert 'googleapis.com' not in captured['url']
-    assert 'youtube.com/playlist?list=PLTest123' in captured['url']
-
-
-def test_iter_playlist_video_ids_handles_error(monkeypatch):
-    """On extraction failure the generator yields nothing and logs the error."""
-    import logging
-    import providers.youtube as yt
-
-    class FakeYDL:
-        def __init__(self, opts): pass
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def extract_info(self, url, download=False):
-            raise RuntimeError("boom")
-
-    monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
-    ids = list(yt.iter_playlist_video_ids('PLTest123'))
-    assert ids == []
-
-
-def test_iter_playlist_video_ids_no_entries(monkeypatch):
-    """A response with no entries yields nothing and logs an error."""
-    import logging
-    import providers.youtube as yt
-
-    class FakeYDL:
-        def __init__(self, opts): pass
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def extract_info(self, url, download=False):
-            return {}
-
-    monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
-    ids = list(yt.iter_playlist_video_ids('PLTest123'))
-    assert ids == []
-
-
-def test_flat_playlist_opts_cookies_use_stringio(monkeypatch, tmp_path):
-    """Cookies must be loaded into an in-memory StringIO, not passed as a
-    file path — yt-dlp rewrites Netscape cookies.txt on load and fails on
-    a read-only mount (the Docker image mounts cookies :ro)."""
-    import logging
-    import providers.youtube as yt
-    from io import StringIO
-
-    cookie_file = tmp_path / "cookies.txt"
-    cookie_file.write_text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tFALSE\t0\ttest\t1\n")
-
-    monkeypatch.setenv('VAULTTUBE_YTCOOKIE', str(cookie_file))
-    opts, handle, capture = yt._flat_playlist_opts()
-    try:
-        assert isinstance(opts.get('cookiefile'), StringIO)
-        assert opts['cookiefile'].getvalue().startswith('# Netscape')
-        assert 'logger' in opts  # warning-capture logger installed
-    finally:
-        handle.close()
-        if capture is not None:
-            opts['logger'].removeHandler(capture)
-
-
-def test_flat_playlist_opts_no_cookies_when_unset(monkeypatch):
-    """No VAULTTUBE_YTCOOKIE → no cookiefile in opts, no handle to close."""
-    import logging
-    import providers.youtube as yt
-
-    monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
-    opts, handle, capture = yt._flat_playlist_opts()
-    try:
-        assert 'cookiefile' not in opts
-        assert handle is None
-    finally:
-        if capture is not None:
-            opts['logger'].removeHandler(capture)
 
 
 def test_channel_source_url(client):
@@ -2151,8 +2034,8 @@ def test_scanner_logs_under_scanner_logger(client):
     import scanner
 
     def fake_iter(playlist_id):
-        # Yield one unknown ID → scanner logs "Processing" then enqueues it
-        yield 'ScannerProbeVid1'
+        # Yield one page of one unknown ID → scanner logs "Processing" then enqueues it
+        yield ['ScannerProbeVid1']
 
     log, records, handler, prev_level = _capture_logger_records('scanner')
     try:
@@ -2280,59 +2163,6 @@ def test_status_alerts_endpoint(client):
         _clear_all_alerts()
 
 
-def test_iter_playlist_video_ids_cookie_invalid_raises_alert(monkeypatch):
-    """When yt-dlp reports the cookies are no longer valid, a sticky alert
-    is raised so the frontend can surface a banner instead of failing silently."""
-    import providers.youtube as yt
-    from providers.base import get_alerts
-    _clear_all_alerts()
-    try:
-        class FakeYDL:
-            def __init__(self, opts): pass
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
-            def extract_info(self, url, download=False):
-                raise RuntimeError("The provided YouTube account cookies are no longer valid. "
-                                    "They have likely been rotated in the browser as a security measure.")
-
-        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
-        monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
-
-        ids = list(yt.iter_playlist_video_ids('PLTest123'))
-        assert ids == []
-
-        alerts = {a['id']: a for a in get_alerts()}
-        assert 'youtube_cookies_invalid' in alerts
-        assert 'cookies' in alerts['youtube_cookies_invalid']['message'].lower()
-    finally:
-        _clear_all_alerts()
-
-
-def test_iter_playlist_video_ids_clears_alert_on_success(monkeypatch):
-    """A successful extraction clears any stale cookie-invalid alert."""
-    import providers.youtube as yt
-    from providers.base import raise_alert, get_alerts
-    _clear_all_alerts()
-    try:
-        raise_alert('youtube_cookies_invalid', 'stale', 'should be cleared')
-
-        class FakeYDL:
-            def __init__(self, opts): pass
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
-            def extract_info(self, url, download=False):
-                return {'entries': [{'id': 'VidA'}]}
-
-        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
-        monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
-
-        ids = list(yt.iter_playlist_video_ids('PLTest123'))
-        assert ids == ['VidA']
-        assert all(a['id'] != 'youtube_cookies_invalid' for a in get_alerts())
-    finally:
-        _clear_all_alerts()
-
-
 def test_download_attempt_cookie_invalid_raises_alert(monkeypatch):
     """_download_attempt raises the alert when yt-dlp reports invalid cookies."""
     import providers.youtube as yt
@@ -2358,38 +2188,6 @@ def test_download_attempt_cookie_invalid_raises_alert(monkeypatch):
             raised = True
         assert raised, "DownloadError should still propagate after raising the alert"
 
-        alerts = {a['id']: a for a in get_alerts()}
-        assert 'youtube_cookies_invalid' in alerts
-    finally:
-        _clear_all_alerts()
-
-
-def test_iter_playlist_video_ids_cookie_warning_raises_alert(monkeypatch):
-    """yt-dlp emits the cookie-invalid message as a WARNING (not an exception)
-    and the download often succeeds via a fallback extractor. The warning
-    must still raise a sticky alert so the user knows the cookies are bad."""
-    import logging
-    import providers.youtube as yt
-    from providers.base import get_alerts
-    _clear_all_alerts()
-    try:
-        class FakeYDL:
-            def __init__(self, opts):
-                self._logger = opts.get('logger')
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
-            def extract_info(self, url, download=False):
-                # yt-dlp's report_warning routes through params['logger'].warning()
-                if self._logger:
-                    self._logger.warning("The provided YouTube account cookies are "
-                                         "no longer valid. They have likely been rotated.")
-                return {'entries': [{'id': 'WarnVid1'}, {'id': 'WarnVid2'}]}
-
-        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
-        monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
-
-        ids = list(yt.iter_playlist_video_ids('PLTest123'))
-        assert ids == ['WarnVid1', 'WarnVid2']  # extraction still succeeded
         alerts = {a['id']: a for a in get_alerts()}
         assert 'youtube_cookies_invalid' in alerts
     finally:
@@ -2435,41 +2233,6 @@ def test_base_page_includes_alerts_container(client):
     """Every page carries the #vt-alerts container for the banner."""
     response = client.get('/')
     assert b'id="vt-alerts"' in response.data
-
-
-def test_iter_playlist_video_ids_warning_then_exception_raises_alert(monkeypatch):
-    """Production bug: yt-dlp emits the cookie-invalid WARNING, THEN raises a
-    'Sign in to confirm you're not a bot' exception. The exception message
-    does NOT contain 'cookies are no longer valid', so an exception-only
-    check misses it. The warning capture must be checked in finally so the
-    alert fires even when a different exception is raised after the warning."""
-    import providers.youtube as yt
-    from providers.base import get_alerts
-    _clear_all_alerts()
-    try:
-        class FakeYDL:
-            def __init__(self, opts):
-                self._logger = opts.get('logger')
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
-            def extract_info(self, url, download=False):
-                # Emit the cookie warning first (as yt-dlp does in production)...
-                if self._logger:
-                    self._logger.warning("The provided YouTube account cookies are "
-                                         "no longer valid. They have likely been rotated.")
-                # ...then raise an unrelated-looking exception
-                raise RuntimeError("Sign in to confirm you're not a bot.")
-
-        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
-        monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
-
-        ids = list(yt.iter_playlist_video_ids('PLTest123'))
-        assert ids == []
-        alerts = {a['id']: a for a in get_alerts()}
-        assert 'youtube_cookies_invalid' in alerts, \
-            "alert must fire from the WARNING even when a different exception follows"
-    finally:
-        _clear_all_alerts()
 
 
 def test_download_attempt_warning_then_exception_raises_alert(monkeypatch):

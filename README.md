@@ -56,7 +56,7 @@ Required:
 |----------|---------|
 | `VAULTTUBE_VAULTDIR` | Video storage path (generally `/videos`) |
 | `VAULTTUBE_DBHOST` / `DBUSER` / `DBPASS` / `DBNAME` / `DBPORT` | MariaDB connection |
-| `VAULTTUBE_YTKEY` | YouTube Data API key (used by `deleted_check` and playlist-info lookup; subscription scanning uses yt-dlp and consumes no quota) |
+| `VAULTTUBE_YTKEY` | YouTube Data API key (used by `deleted_check`, playlist-info lookup, and subscription scanning) |
 
 Optional:
 

@@ -2,13 +2,14 @@ import os
 import logging
 from io import StringIO
 from urllib.parse import urlparse, parse_qs
+import requests
 import yt_dlp
 from yt_dlp.utils import DownloadError
 from flask import current_app
 
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info, insert_not_found
 from backend import save_video_from_ytdlp
-from providers.base import set_status, update_status, del_status, raise_alert, clear_alert
+from providers.base import set_status, update_status, del_status, raise_alert
 from QueueObject import QueueObject
 from queue_utils import enqueue
 
@@ -72,104 +73,35 @@ def dl_progress_hook(d):
     except Exception as e:
         logger.error("dl_progress_hook Failed: %s" % e)
 
-def _flat_playlist_opts():
-    """yt-dlp options for flat (no-download) playlist enumeration.
-
-    Uses the same proxy/deno configuration as downloads. Cookies are read
-    into an in-memory StringIO (matching _download_attempt) rather than
-    passing cookiefile directly: yt-dlp rewrites/normalizes Netscape
-    cookies.txt on load, which fails on a read-only mount (the Docker
-    image mounts cookies :ro). The caller is responsible for closing the
-    StringIO via the returned cleanup handle.
-
-    Returns (opts, cookie_file_handle_or_None, cookie_warning_capture_or_None)."""
-    opts = {
-        'extract_flat_playlist': True,
-        'skip_download': True,
-        'quiet': True,
-        'noplaylist': False,
-        'socket_timeout': 30,
-        'retries': 5,
-    }
-    deno = os.environ.get('VAULTTUBE_DENOPATH')
-    if deno:
-        opts['js_runtimes'] = {'deno': {'path': deno}}
-    cookie_file = None
-    cookie_path = os.environ.get('VAULTTUBE_YTCOOKIE')
-    if cookie_path:
-        try:
-            with open(cookie_path) as f:
-                cookie_file = StringIO(f.read())
-            opts['cookiefile'] = cookie_file
-        except OSError as e:
-            logger.warning("Could not read YouTube cookies at %s: %s" % (cookie_path, e))
-    proxy = os.environ.get('VAULTTUBE_PROXY')
-    if proxy:
-        opts['proxy'] = proxy
-    # Install a warning-capture logger so yt-dlp's "cookies are no longer
-    # valid" warning is observable (the download often succeeds via a
-    # fallback extractor, so an exception-only check would miss it).
-    capture = _CookieWarningCapture()
-    cookie_logger = logging.getLogger('yt_dlp')
-    cookie_logger.addHandler(capture)
-    opts['logger'] = cookie_logger
-    return opts, cookie_file, capture
-
-
-def iter_playlist_video_ids(playlist_id):
-    """Yield video IDs from a YouTube playlist via yt-dlp flat extraction.
-
-    Replaces the YouTube Data API playlistItems call so subscriptions no
-    longer burn quota. yt-dlp returns entries newest-first for YouTube
-    playlists, matching the API's ordering, so callers' "stop when caught
-    up" logic continues to work. On any extraction error the generator
-    logs and stops (yields nothing further) — callers treat that as an
-    empty scan this cycle and retry next hour."""
-    url = "https://www.youtube.com/playlist?list=%s" % playlist_id
-    opts, cookie_file, capture = _flat_playlist_opts()
-    cookie_logger = opts.get('logger')
-    info = None
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as e:
-        logger.error("yt-dlp playlist extraction failed for %s: %s" % (playlist_id, e))
-        if _is_cookie_invalid_error(e):
-            raise_alert(
-                'youtube_cookies_invalid',
-                'YouTube cookies are invalid',
-                'yt-dlp reports the YouTube account cookies in VAULTTUBE_YTCOOKIE '
-                'are no longer valid. Re-export a fresh cookies.txt from a logged-in '
-                'browser session and restart VaultTube.',
-            )
-    finally:
-        # The warning capture must be checked in finally so it runs even when
-        # an exception (e.g. "Sign in to confirm you're not a bot") is raised
-        # AFTER yt-dlp already emitted the cookie-invalid warning.
-        _check_cookie_warnings(capture)
-        if cookie_file is not None:
-            cookie_file.close()
-        if cookie_logger is not None and capture is not None:
-            cookie_logger.removeHandler(capture)
-    if not info or 'entries' not in info:
-        logger.error("No entries returned for playlist %s" % playlist_id)
-        return
-    # A successful extraction with no cookie warning means the cookies are
-    # working — clear any stale cookie-invalid alert from a previous cycle.
-    # (If the warning fired, _check_cookie_warnings already raised the alert
-    # and we must NOT clear it here.)
-    if capture is None or not capture.cookie_invalid:
-        clear_alert('youtube_cookies_invalid')
-    for entry in info['entries']:
-        if entry is None:
-            continue
-        vid = entry.get('id')
-        if vid:
-            yield vid
-
-
 def provider_domains():
     return ['youtube.com','youtu.be']
+
+
+def iter_playlist_pages(playlist_id):
+    """Yield video-ID lists one playlistItems page (50 items, newest first)
+    at a time via the YouTube Data API. Stops on API errors after logging them.
+
+    Shared by scanner (channel/playlist subscriptions) and download_playlist
+    (manual playlist expansion). Callers that only need "everything newer
+    than what I have" break early; callers that need the whole list drain it."""
+    page_token = None
+    while True:
+        url = ("https://www.googleapis.com/youtube/v3/playlistItems"
+               "?part=contentDetails&playlistId=%s&maxResults=50&key=%s"
+               % (playlist_id, os.environ['VAULTTUBE_YTKEY']))
+        if page_token:
+            url += "&pageToken=%s" % page_token
+        r = requests.get(url, timeout=30)
+        retj = r.json()
+        r.close()
+        if 'items' not in retj:
+            logger.error("Invalid playlistItems response for %s: %s" % (playlist_id, retj.get('error', retj)))
+            return
+        yield [v['contentDetails']['videoId'] for v in retj['items']
+               if v.get('contentDetails', {}).get('videoId')]
+        page_token = retj.get('nextPageToken')
+        if not page_token:
+            return
 
 def parse_youtube_url(url):
     if not url:
@@ -334,7 +266,10 @@ def download_playlist(qo):
             logger.error("Could not extract playlist ID from URL: %s" % playlist_url)
             return False
 
-        all_video_ids = list(iter_playlist_video_ids(playlist_id))
+        all_video_ids = []
+        for page in iter_playlist_pages(playlist_id):
+            all_video_ids.extend(page)
+
         logger.info("Playlist %s contains %d videos, adding to queue" % (playlist_id, len(all_video_ids)))
 
         for vid_id in all_video_ids:

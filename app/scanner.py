@@ -44,47 +44,53 @@ def uploads_playlist_id(channel_id):
 
 
 def iter_playlist_pages(playlist_id):
-    """Yield video IDs from a YouTube playlist via yt-dlp flat extraction,
-    newest-first. Stops on extraction errors after logging them.
+    """Yield video-ID lists one playlistItems page (50 items, newest first)
+    at a time. Stops on API errors after logging them.
 
-    Direct passthrough to providers.youtube.iter_playlist_video_ids — kept
-    as a thin seam so tests can monkeypatch the scanner-facing surface
-    without reaching into the provider module."""
-    from providers.youtube import iter_playlist_video_ids
-    for vid in iter_playlist_video_ids(playlist_id):
-        yield vid
+    Thin seam over providers.youtube.iter_playlist_pages so tests can
+    monkeypatch the scanner-facing surface without reaching into the
+    provider module."""
+    from providers.youtube import iter_playlist_pages as _iter
+    for page in _iter(playlist_id):
+        yield page
 
 
 def get_channel_video_list(channelid):
-    """Enqueue new uploads from a subscribed channel. Walks newest-first and
-    stops at the first video already in the DB: a subscription means
+    """Enqueue new uploads from a subscribed channel. Pages are newest-first,
+    so paging continues only while pages are entirely new: a subscription means
     "everything newer than what I have", not a deep-history backfill. Steady
-    state is one yt-dlp flat-playlist extraction per channel per scan."""
+    state is one API call per channel per scan."""
     try:
         playlist_id = uploads_playlist_id(channelid[0])
-        for vid in iter_playlist_pages(playlist_id):
-            if check_db_video(vid):
+        for page in iter_playlist_pages(playlist_id):
+            known_hit = False
+            for vid in page:
+                if check_db_video(vid):
+                    known_hit = True
+                else:
+                    logger.info("Processing: %s" % vid)
+                    qo = QueueObject("https://www.youtube.com/watch?v=%s" % vid, "", "youtube", 0, "")
+                    enqueue(qo, current_app.config['queue'])
+            if known_hit:
                 break
-            logger.info("Processing: %s" % vid)
-            qo = QueueObject("https://www.youtube.com/watch?v=%s" % vid, "", "youtube", 0, "")
-            enqueue(qo, current_app.config['queue'])
     except Exception as e:
         logger.error("Scanning Channel Failed on ChannelID: %s: %s" % (channelid[0], e))
 
 
 def get_playlist_video_list(playlistid):
     """Enqueue new videos from a subscribed playlist and keep pl2vid mappings
-    current. Playlists are bounded and curated, so every video is walked (a
+    current. Playlists are bounded and curated, so every page is walked (a
     playlist subscription means "archive this whole list")."""
     try:
-        for vid in iter_playlist_pages(playlistid[0]):
-            if check_db_video(vid):
-                if not check_pl2vid_info(playlistid[0], vid):
+        for page in iter_playlist_pages(playlistid[0]):
+            for vid in page:
+                if check_db_video(vid):
+                    if not check_pl2vid_info(playlistid[0], vid):
+                        insert_pl2vid_info(playlistid[0], vid)
+                else:
+                    logger.info("Processing: %s" % vid)
+                    qo = QueueObject("https://www.youtube.com/watch?v=%s" % vid, "", "youtube", 0, "")
+                    enqueue(qo, current_app.config['queue'])
                     insert_pl2vid_info(playlistid[0], vid)
-            else:
-                logger.info("Processing: %s" % vid)
-                qo = QueueObject("https://www.youtube.com/watch?v=%s" % vid, "", "youtube", 0, "")
-                enqueue(qo, current_app.config['queue'])
-                insert_pl2vid_info(playlistid[0], vid)
     except Exception as e:
         logger.error("get_playlist_video_list failed: %s" % e)
