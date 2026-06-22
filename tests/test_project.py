@@ -2437,3 +2437,75 @@ def test_base_page_includes_alerts_container(client):
     assert b'id="vt-alerts"' in response.data
 
 
+def test_iter_playlist_video_ids_warning_then_exception_raises_alert(monkeypatch):
+    """Production bug: yt-dlp emits the cookie-invalid WARNING, THEN raises a
+    'Sign in to confirm you're not a bot' exception. The exception message
+    does NOT contain 'cookies are no longer valid', so an exception-only
+    check misses it. The warning capture must be checked in finally so the
+    alert fires even when a different exception is raised after the warning."""
+    import providers.youtube as yt
+    from providers.base import get_alerts
+    _clear_all_alerts()
+    try:
+        class FakeYDL:
+            def __init__(self, opts):
+                self._logger = opts.get('logger')
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def extract_info(self, url, download=False):
+                # Emit the cookie warning first (as yt-dlp does in production)...
+                if self._logger:
+                    self._logger.warning("The provided YouTube account cookies are "
+                                         "no longer valid. They have likely been rotated.")
+                # ...then raise an unrelated-looking exception
+                raise RuntimeError("Sign in to confirm you're not a bot.")
+
+        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
+        monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
+
+        ids = list(yt.iter_playlist_video_ids('PLTest123'))
+        assert ids == []
+        alerts = {a['id']: a for a in get_alerts()}
+        assert 'youtube_cookies_invalid' in alerts, \
+            "alert must fire from the WARNING even when a different exception follows"
+    finally:
+        _clear_all_alerts()
+
+
+def test_download_attempt_warning_then_exception_raises_alert(monkeypatch):
+    """Same production bug for the download path: warning emitted, then a
+    different DownloadError raised. The warning capture in finally must
+    still fire the alert."""
+    import providers.youtube as yt
+    from yt_dlp.utils import DownloadError
+    from providers.base import get_alerts
+    _clear_all_alerts()
+    try:
+        class FakeYDL:
+            def __init__(self, opts):
+                self._logger = opts.get('logger')
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def extract_info(self, url, download=False):
+                if self._logger:
+                    self._logger.warning("The provided YouTube account cookies are "
+                                         "no longer valid.")
+                raise DownloadError("Sign in to confirm you're not a bot.")
+            def download(self, url): pass
+
+        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
+        monkeypatch.setenv('VAULTTUBE_VAULTDIR', '/tmp/vt_test_vault')
+
+        raised = False
+        try:
+            yt._download_attempt('https://www.youtube.com/watch?v=abcdefghijk', {}, None)
+        except DownloadError:
+            raised = True
+        assert raised, "DownloadError should still propagate"
+        alerts = {a['id']: a for a in get_alerts()}
+        assert 'youtube_cookies_invalid' in alerts, \
+            "alert must fire from the WARNING even when a different DownloadError follows"
+    finally:
+        _clear_all_alerts()
+
+

@@ -128,6 +128,7 @@ def iter_playlist_video_ids(playlist_id):
     url = "https://www.youtube.com/playlist?list=%s" % playlist_id
     opts, cookie_file, capture = _flat_playlist_opts()
     cookie_logger = opts.get('logger')
+    info = None
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -141,13 +142,15 @@ def iter_playlist_video_ids(playlist_id):
                 'are no longer valid. Re-export a fresh cookies.txt from a logged-in '
                 'browser session and restart VaultTube.',
             )
-        return
     finally:
+        # The warning capture must be checked in finally so it runs even when
+        # an exception (e.g. "Sign in to confirm you're not a bot") is raised
+        # AFTER yt-dlp already emitted the cookie-invalid warning.
+        _check_cookie_warnings(capture)
         if cookie_file is not None:
             cookie_file.close()
         if cookie_logger is not None and capture is not None:
             cookie_logger.removeHandler(capture)
-    _check_cookie_warnings(capture)
     if not info or 'entries' not in info:
         logger.error("No entries returned for playlist %s" % playlist_id)
         return
@@ -224,7 +227,6 @@ def _download_attempt(url, ydl_opts, cookies_contents, label=''):
             ydl.download(url)
         fpath = os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4"
         save_video_from_ytdlp(videoID, data, fpath)
-        _check_cookie_warnings(capture)
         return True
     except DownloadError as e:
         if _is_cookie_invalid_error(e):
@@ -247,6 +249,10 @@ def _download_attempt(url, ydl_opts, cookies_contents, label=''):
             )
         raise
     finally:
+        # Check the warning capture in finally so the alert fires even when
+        # an exception (e.g. "Sign in to confirm you're not a bot") is raised
+        # AFTER yt-dlp already emitted the cookie-invalid warning.
+        _check_cookie_warnings(capture)
         if videoID is not None:
             del_status(videoID)
         cookiefile = opts.get('cookiefile')
