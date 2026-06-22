@@ -807,12 +807,15 @@ def test_flat_playlist_opts_cookies_use_stringio(monkeypatch, tmp_path):
     cookie_file.write_text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tFALSE\t0\ttest\t1\n")
 
     monkeypatch.setenv('VAULTTUBE_YTCOOKIE', str(cookie_file))
-    opts, handle = yt._flat_playlist_opts()
+    opts, handle, capture = yt._flat_playlist_opts()
     try:
         assert isinstance(opts.get('cookiefile'), StringIO)
         assert opts['cookiefile'].getvalue().startswith('# Netscape')
+        assert 'logger' in opts  # warning-capture logger installed
     finally:
         handle.close()
+        if capture is not None:
+            opts['logger'].removeHandler(capture)
 
 
 def test_flat_playlist_opts_no_cookies_when_unset(monkeypatch):
@@ -821,9 +824,13 @@ def test_flat_playlist_opts_no_cookies_when_unset(monkeypatch):
     import providers.youtube as yt
 
     monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
-    opts, handle = yt._flat_playlist_opts()
-    assert 'cookiefile' not in opts
-    assert handle is None
+    opts, handle, capture = yt._flat_playlist_opts()
+    try:
+        assert 'cookiefile' not in opts
+        assert handle is None
+    finally:
+        if capture is not None:
+            opts['logger'].removeHandler(capture)
 
 
 def test_channel_source_url(client):
@@ -2210,7 +2217,223 @@ def test_no_logger_argument_in_function_signatures():
             "%s still takes a 'logger' parameter: %r" % (fn.__qualname__, actual)
         if expected_args:
             assert actual == expected_args, \
-                "%s signature %r != expected %r" % (fn.__qualname__, actual, expected_args)
+                "%s signature %r != expected %r" % (fn.__qualname__, actual)
 
+
+# ---------------------------------------------------------------------------
+# Sticky alerts (issue: cookies-expired banner)
+# ---------------------------------------------------------------------------
+
+def _clear_all_alerts():
+    from providers.base import _alerts, _alerts_lock
+    with _alerts_lock:
+        _alerts.clear()
+
+
+def test_alerts_raise_clear_get():
+    """raise_alert registers, get_alerts returns a snapshot, clear_alert removes."""
+    from providers.base import raise_alert, clear_alert, get_alerts
+    _clear_all_alerts()
+    try:
+        raise_alert('test_1', 'Title One', 'message one')
+        raise_alert('test_2', 'Title Two', 'message two', kind='warning')
+        alerts = {a['id']: a for a in get_alerts()}
+        assert set(alerts) == {'test_1', 'test_2'}
+        assert alerts['test_1']['title'] == 'Title One'
+        assert alerts['test_1']['message'] == 'message one'
+        assert alerts['test_1']['kind'] == 'error'
+        assert alerts['test_2']['kind'] == 'warning'
+
+        clear_alert('test_1')
+        ids = {a['id'] for a in get_alerts()}
+        assert ids == {'test_2'}
+    finally:
+        _clear_all_alerts()
+
+
+def test_alerts_get_returns_copy():
+    """Mutating the returned list/dicts must not affect the registry."""
+    from providers.base import raise_alert, get_alerts
+    _clear_all_alerts()
+    try:
+        raise_alert('test_copy', 'T', 'm')
+        snapshot = get_alerts()
+        snapshot.clear()
+        assert any(a['id'] == 'test_copy' for a in get_alerts())
+    finally:
+        _clear_all_alerts()
+
+
+def test_status_alerts_endpoint(client):
+    """/api/status/alerts returns the current alerts as {success, data}."""
+    from providers.base import raise_alert
+    _clear_all_alerts()
+    try:
+        raise_alert('endpoint_test', 'Cookies Bad', 're-export cookies.txt')
+        response = client.get('/api/status/alerts')
+        assert response.status_code == 200
+        body = json.loads(response.get_data(as_text=True))
+        assert body['success'] is True
+        ids = {a['id'] for a in body['data']}
+        assert 'endpoint_test' in ids
+    finally:
+        _clear_all_alerts()
+
+
+def test_iter_playlist_video_ids_cookie_invalid_raises_alert(monkeypatch):
+    """When yt-dlp reports the cookies are no longer valid, a sticky alert
+    is raised so the frontend can surface a banner instead of failing silently."""
+    import providers.youtube as yt
+    from providers.base import get_alerts
+    _clear_all_alerts()
+    try:
+        class FakeYDL:
+            def __init__(self, opts): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def extract_info(self, url, download=False):
+                raise RuntimeError("The provided YouTube account cookies are no longer valid. "
+                                    "They have likely been rotated in the browser as a security measure.")
+
+        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
+        monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
+
+        ids = list(yt.iter_playlist_video_ids('PLTest123'))
+        assert ids == []
+
+        alerts = {a['id']: a for a in get_alerts()}
+        assert 'youtube_cookies_invalid' in alerts
+        assert 'cookies' in alerts['youtube_cookies_invalid']['message'].lower()
+    finally:
+        _clear_all_alerts()
+
+
+def test_iter_playlist_video_ids_clears_alert_on_success(monkeypatch):
+    """A successful extraction clears any stale cookie-invalid alert."""
+    import providers.youtube as yt
+    from providers.base import raise_alert, get_alerts
+    _clear_all_alerts()
+    try:
+        raise_alert('youtube_cookies_invalid', 'stale', 'should be cleared')
+
+        class FakeYDL:
+            def __init__(self, opts): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def extract_info(self, url, download=False):
+                return {'entries': [{'id': 'VidA'}]}
+
+        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
+        monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
+
+        ids = list(yt.iter_playlist_video_ids('PLTest123'))
+        assert ids == ['VidA']
+        assert all(a['id'] != 'youtube_cookies_invalid' for a in get_alerts())
+    finally:
+        _clear_all_alerts()
+
+
+def test_download_attempt_cookie_invalid_raises_alert(monkeypatch):
+    """_download_attempt raises the alert when yt-dlp reports invalid cookies."""
+    import providers.youtube as yt
+    from yt_dlp.utils import DownloadError
+    from providers.base import get_alerts
+    _clear_all_alerts()
+    try:
+        class FakeYDL:
+            def __init__(self, opts): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def extract_info(self, url, download=False):
+                raise DownloadError("The provided YouTube account cookies are no longer valid.")
+            def download(self, url): pass
+
+        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
+        monkeypatch.setenv('VAULTTUBE_VAULTDIR', '/tmp/vt_test_vault')
+
+        raised = False
+        try:
+            yt._download_attempt('https://www.youtube.com/watch?v=abcdefghijk', {}, None)
+        except DownloadError:
+            raised = True
+        assert raised, "DownloadError should still propagate after raising the alert"
+
+        alerts = {a['id']: a for a in get_alerts()}
+        assert 'youtube_cookies_invalid' in alerts
+    finally:
+        _clear_all_alerts()
+
+
+def test_iter_playlist_video_ids_cookie_warning_raises_alert(monkeypatch):
+    """yt-dlp emits the cookie-invalid message as a WARNING (not an exception)
+    and the download often succeeds via a fallback extractor. The warning
+    must still raise a sticky alert so the user knows the cookies are bad."""
+    import logging
+    import providers.youtube as yt
+    from providers.base import get_alerts
+    _clear_all_alerts()
+    try:
+        class FakeYDL:
+            def __init__(self, opts):
+                self._logger = opts.get('logger')
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def extract_info(self, url, download=False):
+                # yt-dlp's report_warning routes through params['logger'].warning()
+                if self._logger:
+                    self._logger.warning("The provided YouTube account cookies are "
+                                         "no longer valid. They have likely been rotated.")
+                return {'entries': [{'id': 'WarnVid1'}, {'id': 'WarnVid2'}]}
+
+        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
+        monkeypatch.delenv('VAULTTUBE_YTCOOKIE', raising=False)
+
+        ids = list(yt.iter_playlist_video_ids('PLTest123'))
+        assert ids == ['WarnVid1', 'WarnVid2']  # extraction still succeeded
+        alerts = {a['id']: a for a in get_alerts()}
+        assert 'youtube_cookies_invalid' in alerts
+    finally:
+        _clear_all_alerts()
+
+
+def test_download_attempt_cookie_warning_raises_alert(monkeypatch):
+    """A successful download that still emitted the cookie-invalid WARNING
+    raises the alert (the common case: yt-dlp falls back to android player)."""
+    import logging
+    import providers.youtube as yt
+    from providers.base import get_alerts
+    _clear_all_alerts()
+    try:
+        class FakeYDL:
+            def __init__(self, opts):
+                self._logger = opts.get('logger')
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def extract_info(self, url, download=False):
+                if self._logger:
+                    self._logger.warning("The provided YouTube account cookies are "
+                                         "no longer valid.")
+                return {
+                    'channel_id': 'FakeCh1', 'id': 'WarnDlVid1', 'title': 'T',
+                }
+            def download(self, url): pass
+
+        monkeypatch.setattr(yt.yt_dlp, 'YoutubeDL', lambda opts: FakeYDL(opts))
+        monkeypatch.setenv('VAULTTUBE_VAULTDIR', '/tmp/vt_test_vault')
+        # save_video_from_ytdlp would hit the DB; stub it out
+        monkeypatch.setattr(yt, 'save_video_from_ytdlp', lambda *a, **k: None)
+
+        result = yt._download_attempt('https://www.youtube.com/watch?v=WarnDlVid1', {}, None)
+        assert result is True
+        alerts = {a['id']: a for a in get_alerts()}
+        assert 'youtube_cookies_invalid' in alerts
+    finally:
+        _clear_all_alerts()
+
+
+def test_base_page_includes_alerts_container(client):
+    """Every page carries the #vt-alerts container for the banner."""
+    response = client.get('/')
+    assert b'id="vt-alerts"' in response.data
 
 

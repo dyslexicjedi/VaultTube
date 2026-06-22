@@ -30,8 +30,64 @@ function do_search() {
     refreshQueueBadge();
     if (typeof EventSource !== 'undefined') {
         var es = new EventSource('/api/status/stream');
-        es.onmessage = scheduleRefresh;
+        es.onmessage = function (ev) {
+            try {
+                var data = JSON.parse(ev.data);
+                if (data && data.type === 'alert') {
+                    renderAlert(data);
+                } else if (data && data.type === 'alert_clear') {
+                    clearAlert(data.id);
+                }
+            } catch (_) { /* not JSON — keepalive comment or progress tick */ }
+            scheduleRefresh();
+        };
     }
+
+    // ---- Sticky alerts banner (e.g. expired YouTube cookies) ----
+    var alertsContainer = document.getElementById('vt-alerts');
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    function renderAlert(a) {
+        if (!alertsContainer || !a || !a.id) return;
+        var existing = alertsContainer.querySelector('[data-alert-id="' + cssEscape(a.id) + '"]');
+        if (existing) existing.remove();
+        var div = document.createElement('div');
+        div.className = 'vt-alert' + (a.kind === 'warning' ? ' vt-alert-warn' : '');
+        div.setAttribute('data-alert-id', a.id);
+        div.innerHTML = '<div class="vt-alert-body"><strong>' + esc(a.title) + '</strong>'
+            + '<span>' + esc(a.message) + '</span></div>'
+            + '<button type="button" class="vt-alert-close" aria-label="Dismiss">×</button>';
+        div.querySelector('.vt-alert-close').addEventListener('click', function () {
+            clearAlert(a.id);
+        });
+        alertsContainer.appendChild(div);
+        alertsContainer.hidden = false;
+    }
+
+    function clearAlert(id) {
+        if (!alertsContainer || !id) return;
+        var el = alertsContainer.querySelector('[data-alert-id="' + cssEscape(id) + '"]');
+        if (el) el.remove();
+        if (!alertsContainer.children.length) alertsContainer.hidden = true;
+    }
+
+    function cssEscape(s) {
+        if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(s);
+        return String(s).replace(/[^a-zA-Z0-9_-]/g, function (c) { return '\\' + c; });
+    }
+
+    // Fetch any alerts that fired before this tab opened
+    fetch('/api/status/alerts')
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+            (res && res.data || []).forEach(renderAlert);
+        })
+        .catch(function () {});
 
     // "/" or Ctrl/Cmd+K focuses the search box
     document.addEventListener('keydown', function (e) {

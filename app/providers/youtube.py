@@ -8,11 +8,54 @@ from flask import current_app
 
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info, insert_not_found
 from backend import save_video_from_ytdlp
-from providers.base import set_status, update_status, del_status
+from providers.base import set_status, update_status, del_status, raise_alert, clear_alert
 from QueueObject import QueueObject
 from queue_utils import enqueue
 
 logger = logging.getLogger('youtube')
+
+# yt-dlp emits this exact phrase (case-insensitive) when the supplied
+# YouTube cookies have been rotated/expired by Google's security measures.
+_COOKIE_INVALID_MARKER = 'cookies are no longer valid'
+
+
+def _is_cookie_invalid_error(err_msg):
+    return _COOKIE_INVALID_MARKER in str(err_msg).lower()
+
+
+class _CookieWarningCapture(logging.Handler):
+    """yt-dlp logger that captures the "cookies are no longer valid" warning.
+
+    yt-dlp emits this as a WARNING (not an exception): the download often
+    succeeds anyway via a fallback extractor (android vr player), so an
+    error-based check would miss it. When yt-dlp's ``params['logger']`` is
+    set, every ``report_warning()`` call routes through this handler's
+    ``handle()`` so we can inspect the message and raise the alert.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.cookie_invalid = False
+
+    def emit(self, record):
+        try:
+            msg = record.getMessage()
+        except Exception:
+            msg = str(record.msg)
+        if _COOKIE_INVALID_MARKER in msg.lower():
+            self.cookie_invalid = True
+
+
+def _check_cookie_warnings(capture):
+    """Raise the youtube_cookies_invalid alert if the capture saw the warning."""
+    if capture is not None and getattr(capture, 'cookie_invalid', False):
+        raise_alert(
+            'youtube_cookies_invalid',
+            'YouTube cookies are invalid',
+            'yt-dlp reports the YouTube account cookies in VAULTTUBE_YTCOOKIE '
+            'are no longer valid. Re-export a fresh cookies.txt from a logged-in '
+            'browser session and restart VaultTube.',
+        )
 
 
 def dl_progress_hook(d):
@@ -39,7 +82,7 @@ def _flat_playlist_opts():
     image mounts cookies :ro). The caller is responsible for closing the
     StringIO via the returned cleanup handle.
 
-    Returns (opts, cookie_file_handle_or_None)."""
+    Returns (opts, cookie_file_handle_or_None, cookie_warning_capture_or_None)."""
     opts = {
         'extract_flat_playlist': True,
         'skip_download': True,
@@ -63,7 +106,14 @@ def _flat_playlist_opts():
     proxy = os.environ.get('VAULTTUBE_PROXY')
     if proxy:
         opts['proxy'] = proxy
-    return opts, cookie_file
+    # Install a warning-capture logger so yt-dlp's "cookies are no longer
+    # valid" warning is observable (the download often succeeds via a
+    # fallback extractor, so an exception-only check would miss it).
+    capture = _CookieWarningCapture()
+    cookie_logger = logging.getLogger('yt_dlp')
+    cookie_logger.addHandler(capture)
+    opts['logger'] = cookie_logger
+    return opts, cookie_file, capture
 
 
 def iter_playlist_video_ids(playlist_id):
@@ -76,19 +126,37 @@ def iter_playlist_video_ids(playlist_id):
     logs and stops (yields nothing further) — callers treat that as an
     empty scan this cycle and retry next hour."""
     url = "https://www.youtube.com/playlist?list=%s" % playlist_id
-    opts, cookie_file = _flat_playlist_opts()
+    opts, cookie_file, capture = _flat_playlist_opts()
+    cookie_logger = opts.get('logger')
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
         logger.error("yt-dlp playlist extraction failed for %s: %s" % (playlist_id, e))
+        if _is_cookie_invalid_error(e):
+            raise_alert(
+                'youtube_cookies_invalid',
+                'YouTube cookies are invalid',
+                'yt-dlp reports the YouTube account cookies in VAULTTUBE_YTCOOKIE '
+                'are no longer valid. Re-export a fresh cookies.txt from a logged-in '
+                'browser session and restart VaultTube.',
+            )
         return
     finally:
         if cookie_file is not None:
             cookie_file.close()
+        if cookie_logger is not None and capture is not None:
+            cookie_logger.removeHandler(capture)
+    _check_cookie_warnings(capture)
     if not info or 'entries' not in info:
         logger.error("No entries returned for playlist %s" % playlist_id)
         return
+    # A successful extraction with no cookie warning means the cookies are
+    # working — clear any stale cookie-invalid alert from a previous cycle.
+    # (If the warning fired, _check_cookie_warnings already raised the alert
+    # and we must NOT clear it here.)
+    if capture is None or not capture.cookie_invalid:
+        clear_alert('youtube_cookies_invalid')
     for entry in info['entries']:
         if entry is None:
             continue
@@ -137,6 +205,12 @@ def _download_attempt(url, ydl_opts, cookies_contents, label=''):
     opts = dict(ydl_opts)
     if cookies_contents is not None:
         opts['cookiefile'] = StringIO(cookies_contents)
+    # Install a warning-capture logger so the "cookies are no longer valid"
+    # warning is observable even when the download succeeds via a fallback.
+    capture = _CookieWarningCapture()
+    cookie_logger = logging.getLogger('yt_dlp')
+    cookie_logger.addHandler(capture)
+    opts['logger'] = cookie_logger
     videoID = None
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -150,13 +224,35 @@ def _download_attempt(url, ydl_opts, cookies_contents, label=''):
             ydl.download(url)
         fpath = os.environ['VAULTTUBE_VAULTDIR'] + "/" + channel_id + "/" + videoID + ".mp4"
         save_video_from_ytdlp(videoID, data, fpath)
+        _check_cookie_warnings(capture)
         return True
+    except DownloadError as e:
+        if _is_cookie_invalid_error(e):
+            raise_alert(
+                'youtube_cookies_invalid',
+                'YouTube cookies are invalid',
+                'yt-dlp reports the YouTube account cookies in VAULTTUBE_YTCOOKIE '
+                'are no longer valid. Re-export a fresh cookies.txt from a logged-in '
+                'browser session and restart VaultTube.',
+            )
+        raise
+    except Exception as e:
+        if _is_cookie_invalid_error(e):
+            raise_alert(
+                'youtube_cookies_invalid',
+                'YouTube cookies are invalid',
+                'yt-dlp reports the YouTube account cookies in VAULTTUBE_YTCOOKIE '
+                'are no longer valid. Re-export a fresh cookies.txt from a logged-in '
+                'browser session and restart VaultTube.',
+            )
+        raise
     finally:
         if videoID is not None:
             del_status(videoID)
         cookiefile = opts.get('cookiefile')
         if cookiefile is not None and hasattr(cookiefile, 'close'):
             cookiefile.close()
+        cookie_logger.removeHandler(capture)
 
 
 def download_video(url, cookies=None):

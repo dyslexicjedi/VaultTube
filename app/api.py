@@ -1,7 +1,7 @@
 from flask import Blueprint,current_app,send_file,Response,abort,stream_with_context
 import mariadb,json,io,csv,math,os,queue as _queue,threading,tempfile,logging
 import subprocess
-from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse
+from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse, get_alerts
 from backend import process_channel,save_uploaded_video_metadata
 from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors,delete_download_error, update_video_codec_info, export_video_rows, export_subscribed_channels, export_subscribed_playlists, export_pl2vid, export_tombstones, export_row_counts
 from flask import request,jsonify,abort
@@ -731,6 +731,14 @@ def queue_status():
     ]
 
     return json.dumps(data, indent=4, sort_keys=True, default=str)
+
+@api_bp.route('/status/alerts')
+def status_alerts():
+    """Current sticky alerts (e.g. expired YouTube cookies). Polled on page
+    load so a freshly opened tab sees problems that occurred before it
+    connected to the SSE stream. Live updates also arrive via /status/stream
+    as ``{"type": "alert", ...}`` / ``{"type": "alert_clear", "id": ...}``."""
+    return jsonify({'success': True, 'data': get_alerts()})
 
 @api_bp.route('/status/stream')
 def status_stream():

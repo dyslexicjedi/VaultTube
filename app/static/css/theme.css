@@ -287,6 +287,60 @@ a {
   opacity: 1;
 }
 
+/* ---------- Sticky alerts banner ---------- */
+.vt-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.vt-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--vt-radius);
+  background: rgba(248, 81, 73, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  color: var(--vt-text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.vt-alert-warn {
+  background: var(--vt-accent-soft);
+  border-color: var(--vt-accent);
+}
+.vt-alert-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.vt-alert-body strong {
+  color: var(--vt-danger);
+  font-weight: 700;
+}
+.vt-alert-warn .vt-alert-body strong {
+  color: var(--vt-accent);
+}
+.vt-alert-body span {
+  color: var(--vt-text-dim);
+}
+.vt-alert-close {
+  background: none;
+  border: none;
+  color: var(--vt-text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.vt-alert-close:hover {
+  color: var(--vt-text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 /* =============================================================
    Shared components (used by pages as they are converted)
    ============================================================= */
