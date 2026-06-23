@@ -19,8 +19,17 @@ logging.getLogger('werkzeug').setLevel(logging.WARN)
 logger = logging.getLogger('main')           # app-level/startup messages
 formatter = logging.Formatter("%(asctime)s.%(msecs)03d %(name)-14s %(levelname)-12s msg=%(message)s","%Y-%m-%d %H:%M:%S")
 
+class ResilientStreamHandler(logging.StreamHandler):
+    #The stderr pipe can break under docker (e.g. a `docker logs -f` detaches),
+    #which makes flush() raise OSError and logging spew half-tracebacks. The
+    #file handler still has the line, so just drop it instead of being noisy.
+    def handleError(self, record):
+        if isinstance(sys.exc_info()[1], OSError):
+            return
+        super().handleError(record)
+
 #StreamHandler
-streamHandler = logging.StreamHandler()
+streamHandler = ResilientStreamHandler()
 streamHandler.setFormatter(formatter)
 streamHandler.setLevel(logging.INFO)
 
