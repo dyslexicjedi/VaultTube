@@ -13,7 +13,7 @@ MAX_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 60
 # Pause between consecutive downloads so a long queue drain doesn't look like
 # bot traffic to the source (which throttles or soft-blocks the cookie)
-DOWNLOAD_DELAY_SECONDS = int(os.environ.get('VAULTTUBE_DL_DELAY', 10))
+DOWNLOAD_DELAY_SECONDS = int(os.environ.get('VAULTTUBE_DL_DELAY', 30))
 
 def get_error_type(error_msg):
     msg_lower = error_msg.lower()

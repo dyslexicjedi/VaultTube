@@ -1354,7 +1354,7 @@ def _build_export_config():
     return {
         'vault_dir': env.get('VAULTTUBE_VAULTDIR'),
         'port': env.get('VAULTTUBE_PORT', '5000'),
-        'dl_delay': env.get('VAULTTUBE_DL_DELAY', '10'),
+        'dl_delay': env.get('VAULTTUBE_DL_DELAY', '30'),
         'dbpool': env.get('VAULTTUBE_DBPOOL', '8'),
         'transcode_cache_dir': env.get('VAULTTUBE_TRANSCODE_CACHE_DIR'),
         'transcode_ttl': env.get('VAULTTUBE_TRANSCODE_TTL', '86400'),

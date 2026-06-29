@@ -339,5 +339,5 @@ def download(qo):
         else:
             raise ValueError("Unknown URL type: %s" % url_type)
     except Exception as e:
-        logger.error("YT Single Download Failed: %s" % e)
+        logger.error("YT Single Download Failed: %s | url=%s", e, url, exc_info=True)
         return False

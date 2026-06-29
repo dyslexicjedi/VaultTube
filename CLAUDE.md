@@ -84,7 +84,7 @@ YouTube returns a "blocked in your country" error),
 `/root/.deno/bin/deno` in the image), `VAULTTUBE_REDDIT_CLIENT_ID/
 CLIENT_SECRET/USERNAME/PASSWORD/USER_AGENT` (all five needed for the Reddit
 provider), `VAULTTUBE_PORT`, `VAULTTUBE_DEBUG`, `VAULTTUBE_DISABLEBACK`,
-`VAULTTUBE_DL_DELAY` (seconds between queued downloads, default 10; single
+`VAULTTUBE_DL_DELAY` (seconds between queued downloads, default 30; single
 adds unaffected), `VAULTTUBE_DBPOOL` (DB connection pool size, default 8),
 `VAULTTUBE_TRANSCODE_CACHE_DIR` (HLS cache directory, default
 `<VAULTTUBE_VAULTDIR>/.transcode_cache`), `VAULTTUBE_TRANSCODE_TTL` (idle

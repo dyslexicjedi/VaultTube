@@ -69,7 +69,7 @@ Optional:
 | `VAULTTUBE_PORT` | Listen port (default 5000) |
 | `VAULTTUBE_DEBUG` | Enable Flask debug mode |
 | `VAULTTUBE_DISABLEBACK` | Set to anything but `False` to disable background scan/download threads |
-| `VAULTTUBE_DL_DELAY` | Seconds between queued downloads (default 10) |
+| `VAULTTUBE_DL_DELAY` | Seconds between queued downloads (default 30) |
 | `VAULTTUBE_DBPOOL` | Database connection pool size (default 8) |
 
 ## Contributing / Architecture

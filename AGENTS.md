@@ -109,7 +109,7 @@ Optional:
 - `VAULTTUBE_PORT` - Flask listen port (default 5000)
 - `VAULTTUBE_DEBUG` - Enable Flask debug mode
 - `VAULTTUBE_DISABLEBACK` - Set to anything but "False" to skip starting background threads
-- `VAULTTUBE_DL_DELAY` - Seconds to wait between queued downloads (default 10; single adds skip the delay)
+- `VAULTTUBE_DL_DELAY` - Seconds to wait between queued downloads (default 30; single adds skip the delay)
 - `VAULTTUBE_DBPOOL` - DB connection pool size (default 8; overflow falls back to direct connections)
 - `VAULTTUBE_TRANSCODE_CACHE_DIR` - HLS segment cache directory (default `<VAULTTUBE_VAULTDIR>/.transcode_cache`)
 - `VAULTTUBE_TRANSCODE_TTL` - Idle cache lifetime in seconds before pruning (default 86400)
