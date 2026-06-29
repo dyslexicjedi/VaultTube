@@ -20,6 +20,7 @@ COPY . /app/
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -fsS "http://localhost:${VAULTTUBE_PORT:-5000}/api/health" || exit 1
 
-# Exec form: python runs as PID 1 and receives docker stop's SIGTERM directly
-# (shell form wraps it in /bin/sh, which swallows the signal as PID 1)
-CMD ["python", "/app/app/main.py"]
+# Entrypoint upgrades yt-dlp to the latest release, then execs python so it
+# runs as PID 1 and receives docker stop's SIGTERM directly (the shell replaces
+# itself via exec, so no /bin/sh wrapper is left to swallow the signal)
+ENTRYPOINT ["sh", "/app/entrypoint.sh"]
