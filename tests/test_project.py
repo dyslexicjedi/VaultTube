@@ -189,6 +189,44 @@ def test_get_video_mp4_suffix(client):
     assert data[0]['id'] == 'GetVidMp4'
 
 
+@pytest.mark.parametrize(
+    ("video_id", "stored_path"),
+    [
+        ("PathRelative", "PathChannel/video.mp4"),
+        ("PathLeadingSlash", "/PathChannel/video.mp4"),
+        ("PathPublicPrefix", "/videos/PathChannel/video.mp4"),
+    ],
+)
+def test_get_video_normalizes_public_filepath(client, video_id, stored_path):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title) "
+        "VALUES(%s, 'Path Test', 'PathChannel', '{}', %s, '2024-01-01 10:00:00', 'Path Test')",
+        (video_id, stored_path),
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/video/" + video_id)
+    assert response.status_code == 200
+    data = json.loads(response.get_data(as_text=True))
+    assert data[0]["filepath"] == "/videos/PathChannel/video.mp4"
+
+
+def test_vault_paths_normalize_and_reject_traversal():
+    from vault_paths import public_video_path, resolve_vault_path, vault_relative_path
+
+    vault = os.environ["VAULTTUBE_VAULTDIR"]
+    absolute = os.path.join(vault, "Channel", "video.mp4")
+    assert vault_relative_path(absolute) == os.path.join("Channel", "video.mp4")
+    assert vault_relative_path("/Channel/video.mp4") == os.path.join("Channel", "video.mp4")
+    assert public_video_path("/videos/Channel/video.mp4") == "/videos/Channel/video.mp4"
+    assert resolve_vault_path("/Channel/video.mp4") == os.path.realpath(absolute)
+    with pytest.raises(ValueError):
+        resolve_vault_path("../outside.mp4")
+
+
 def test_mark_watched(client):
     response = client.get("/api/checkdb")
     assert response.text == "True"
@@ -958,6 +996,14 @@ def test_health(client):
     assert response.status_code == 200
     data = json.loads(response.get_data(as_text=True))
     assert data['success'] is True
+    assert 'revision' in data['data']
+
+
+def test_health_reports_deployed_revision(client, monkeypatch):
+    monkeypatch.setenv("VAULTTUBE_REVISION", "test-commit-sha")
+    response = client.get("/api/health")
+    data = response.get_json()
+    assert data["data"]["revision"] == "test-commit-sha"
 
 
 def test_video_getvids_unwatched(client):
@@ -1381,6 +1427,33 @@ def test_video_codec_fields_and_hls(client):
         _delete_test_file(source_path)
         cache_dir = get_transcode_cache_dir('HlsVid1')
         shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
+
+
+def test_hls_playlist_route_is_registered_and_returns_vod(client, monkeypatch, tmp_path):
+    """Route contract must not depend on FFmpeg startup timing."""
+    import api
+
+    source = tmp_path / "source.webm"
+    source.write_bytes(b"test source")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    monkeypatch.setattr(api, "source_path_for", lambda video_id: str(source))
+    monkeypatch.setattr(
+        api, "generate_hls",
+        lambda video_id, source_path=None: str(cache_dir),
+    )
+    monkeypatch.setattr(api, "touch_cache_access", lambda video_id: None)
+    monkeypatch.setattr(api, "get_duration", lambda source_path: 12.0)
+
+    response = client.get("/api/transcode/RouteContract/playlist.m3u8")
+
+    assert response.status_code == 200
+    assert response.content_type == "application/vnd.apple.mpegurl"
+    body = response.get_data(as_text=True)
+    assert body.startswith("#EXTM3U")
+    assert "#EXT-X-PLAYLIST-TYPE:VOD" in body
+    assert "#EXT-X-ENDLIST" in body
 
 
 def test_build_vod_playlist_is_stable_vod():
@@ -2270,5 +2343,3 @@ def test_download_attempt_warning_then_exception_raises_alert(monkeypatch):
             "alert must fire from the WARNING even when a different DownloadError follows"
     finally:
         _clear_all_alerts()
-
-

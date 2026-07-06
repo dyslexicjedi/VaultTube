@@ -14,6 +14,7 @@ from providers.base import set_status, update_status, del_status
 from database import check_db_video, check_db_channel, save_channel, get_connection
 from QueueObject import QueueObject
 from queue_utils import enqueue
+from vault_paths import vault_relative_path
 
 logger = logging.getLogger('patreon')
 
@@ -273,7 +274,9 @@ def patreon_db_info(videoid,channelid,PublishedAt,title):
             sql = "Update videos set channel_name=%s,channelId=%s,filepath=%s,PublishedAt=%s,json=%s,source=%s,title=%s  where id=%s"
         else:
             sql = "Insert into videos(channel_name,channelId,filepath,PublishedAt,json,source,title,id) values(%s,%s,%s,%s,%s,%s,%s,%s)"
-        cur.execute(sql,("",channelid,"/"+channelid+"/"+str(videoid)+".mp4",PublishedAt.strftime('%Y-%m-%d %H:%M:%S.%f'),json.dumps(t),source,title,videoid))
+        db_filepath = vault_relative_path(
+            os.path.join(channelid, str(videoid) + ".mp4"))
+        cur.execute(sql,("",channelid,db_filepath,PublishedAt.strftime('%Y-%m-%d %H:%M:%S.%f'),json.dumps(t),source,title,videoid))
         con.commit()
         logger.debug("Metadata saved")
         return True

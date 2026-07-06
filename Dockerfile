@@ -1,5 +1,8 @@
 FROM python:3.12-slim
 
+ARG VAULTTUBE_REVISION=unknown
+ENV VAULTTUBE_REVISION=${VAULTTUBE_REVISION}
+
 # Expensive layers first so code changes don't invalidate them
 RUN apt update && apt install -y --no-install-recommends \
       libmariadb-dev gcc ffmpeg curl unzip \

@@ -1,5 +1,6 @@
 import mariadb,requests,json,os,threading,logging
 from difflib import SequenceMatcher
+from vault_paths import vault_relative_path
 
 logger = logging.getLogger('database')
 
@@ -223,7 +224,7 @@ def save_video(id,ret,img,source='youtube'):
         cur = con.cursor()
         #Save Video Data
         sql = "Insert Ignore into videos(id,channel_name,json,filepath,PublishedAt,channelId,length,source,title,description,vcodec,acodec,container,filesize) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
-        cur.execute(sql,(id,ret["channel_name"],json.dumps(ret["Json"]),ret["Filepath"].replace(os.environ['VAULTTUBE_VAULTDIR'],""),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title'],ret.get('description',''),ret.get('vcodec'),ret.get('acodec'),ret.get('container'),ret.get('filesize')))
+        cur.execute(sql,(id,ret["channel_name"],json.dumps(ret["Json"]),vault_relative_path(ret["Filepath"]),ret['PublishedAt'],ret['channelId'],ret['length'],source,ret['title'],ret.get('description',''),ret.get('vcodec'),ret.get('acodec'),ret.get('container'),ret.get('filesize')))
         #Save Thumbnail
         sql = "Insert Ignore into images(id,image) values(%s,%s)"
         cur.execute(sql,(id,img))

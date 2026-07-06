@@ -13,6 +13,7 @@ from QueueObject import QueueObject
 from queue_utils import enqueue
 from chapters import parse_chapters
 from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for, cache_stats
+from vault_paths import public_video_path, resolve_vault_path
 from werkzeug.exceptions import HTTPException
 
 logger = logging.getLogger('api')
@@ -325,14 +326,12 @@ def getVideo(id):
             json_data.append(dict(zip(row_headers,result)))
         if not json_data:
             return api_error("Video not found", 404)
-        json_data[0]['filepath'] = '/videos/'+json_data[0]['filepath']
+        json_data[0]['filepath'] = public_video_path(json_data[0]['filepath'])
         # Lazy backfill codec info if any field is missing
         v = json_data[0]
         if v.get('vcodec') is None or v.get('acodec') is None or v.get('container') is None:
             try:
-                # filepath in response is /videos/<rel>; DB stores <rel>
-                rel = (v['filepath'][len('/videos/'):] if v['filepath'].startswith('/videos/') else v['filepath']).lstrip('/')
-                source_path = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], rel)
+                source_path = resolve_vault_path(v['filepath'])
                 if os.path.isfile(source_path):
                     info = get_codec_info(source_path)
                     if not info['container']:
@@ -707,7 +706,9 @@ def api_health():
         cur.fetchone()
         cur.close()
         con.close()
-        return api_success()
+        return api_success({
+            "revision": os.environ.get("VAULTTUBE_REVISION", "unknown"),
+        })
     except Exception as e:
         logger.error("Health check failed: %s" % e)
         return api_error("unhealthy: %s" % e, 503)

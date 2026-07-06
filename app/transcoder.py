@@ -1,5 +1,6 @@
 import json, math, os, re, subprocess, threading, time, shutil, glob, hashlib, logging
 from pathlib import Path
+from vault_paths import resolve_vault_path
 
 logger = logging.getLogger('transcoder')
 
@@ -176,8 +177,11 @@ def _source_path_for(video_id):
     con.close()
     if not row or not row[0]:
         return None
-    rel = row[0].lstrip('/')
-    return os.path.join(os.environ['VAULTTUBE_VAULTDIR'], rel)
+    try:
+        return resolve_vault_path(row[0])
+    except ValueError as e:
+        logger.error("Invalid filepath for video %s: %s", video_id, e)
+        return None
 
 
 def _is_running(key):

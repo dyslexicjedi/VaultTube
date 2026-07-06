@@ -44,5 +44,7 @@ jobs:
               context: .
               push: true
               tags: dyslexicjedi/vaulttube:${{ github.ref_name == 'main' && 'latest' || 'dev' }}
+              build-args: |
+                VAULTTUBE_REVISION=${{ github.sha }}
               cache-from: type=gha
               cache-to: type=gha,mode=max
