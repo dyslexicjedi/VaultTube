@@ -623,22 +623,20 @@ def api_search(searchtxt,page):
             offset = int(page)
         except (ValueError, TypeError):
             offset = 0
-        if len(searchtxt) >= 3:
-            # Full-text search with relevance ranking
-            cur.execute(
-                "SELECT *, MATCH(title, description) AGAINST(%s IN BOOLEAN MODE) AS relevance "
-                "FROM videos "
-                "WHERE MATCH(title, description) AGAINST(%s IN BOOLEAN MODE) "
-                "ORDER BY relevance DESC "
-                "LIMIT 40 OFFSET %s;",
-                (searchtxt, searchtxt, offset)
-            )
-        else:
-            # Fall back to LIKE on title for short queries below the FULLTEXT minimum token size
-            cur.execute(
-                "SELECT * FROM videos WHERE title LIKE %s ORDER BY PublishedAt DESC LIMIT 40 OFFSET %s;",
-                ("%" + searchtxt + "%", offset)
-            )
+        # Case-insensitive substring search over title + description. The
+        # videos table is utf8mb4_bin (needed for case-sensitive YouTube IDs),
+        # which makes both LIKE and FULLTEXT case-sensitive on these columns —
+        # so "masters" never matched "Masters of the Air". Lowercasing both the
+        # columns and the term sidesteps the binary collation. Escape LIKE
+        # wildcards in the user input so % and _ are treated literally.
+        term = searchtxt.lower().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        like = "%" + term + "%"
+        cur.execute(
+            "SELECT * FROM videos "
+            "WHERE LOWER(title) LIKE %s OR LOWER(description) LIKE %s "
+            "ORDER BY PublishedAt DESC LIMIT 40 OFFSET %s;",
+            (like, like, offset)
+        )
         return parse_response(cur,con)
     except Exception as e:
         logger.error("API Search Failed: %s"%e)
