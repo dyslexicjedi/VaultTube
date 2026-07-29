@@ -449,8 +449,9 @@ def test_up_next_unknown_video(client):
 
 
 class _FakeResp:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
 
     def json(self):
         return self._payload
@@ -459,10 +460,12 @@ class _FakeResp:
         pass
 
 
-def _playlist_page(video_ids, next_token=None):
+def _playlist_page(video_ids, next_token=None, total_results=None):
     page = {'items': [{'contentDetails': {'videoId': v}} for v in video_ids]}
     if next_token:
         page['nextPageToken'] = next_token
+    if total_results is not None:
+        page['pageInfo'] = {'totalResults': total_results}
     return page
 
 
@@ -667,15 +670,21 @@ def test_channel_scan_paginates(client, monkeypatch):
         _playlist_page(['VtScanVid3']),
     ]
     calls = []
-    monkeypatch.setattr(requests, 'get', lambda url, **kw: (calls.append(url), _FakeResp(pages[len(calls) - 1]))[1])
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return _FakeResp(pages[len(calls) - 1])
+
+    monkeypatch.setattr(requests, 'get', fake_get)
 
     with client.application.app_context():
         scanner.get_channel_video_list(('UCVtTestChannel1',))
 
     assert len(calls) == 2
-    assert 'UUVtTestChannel1' in calls[0]          # uploads playlist derived, no channels.list call
-    assert 'maxResults=50' in calls[0]
-    assert 'pageToken=p2' in calls[1]
+    assert calls[0][0] == 'https://www.googleapis.com/youtube/v3/playlistItems'
+    assert calls[0][1]['params']['playlistId'] == 'UUVtTestChannel1'
+    assert calls[0][1]['params']['maxResults'] == 50
+    assert calls[1][1]['params']['pageToken'] == 'p2'
     assert q.qsize() == 3
     urls = sorted(qo.url for qo in list(q.queue))
     assert urls == [
@@ -725,6 +734,646 @@ def test_channel_scan_mixed_page_takes_new_only(client, monkeypatch):
     assert len(calls) == 1
     assert q.qsize() == 1
     assert list(q.queue)[0].url == 'https://www.youtube.com/watch?v=VtScanVid3'
+
+
+def test_youtube_playlist_pager_normal_multipage_and_params(monkeypatch):
+    import requests
+    import providers.youtube as yt
+
+    pages = [
+        _playlist_page(['PagerVid1', 'PagerVid2'], next_token='p2'),
+        _playlist_page(['PagerVid3']),
+    ]
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return _FakeResp(pages[len(calls) - 1])
+
+    monkeypatch.setattr(requests, 'get', fake_get)
+
+    assert list(yt.iter_playlist_pages('PLPagerTest')) == [
+        ['PagerVid1', 'PagerVid2'],
+        ['PagerVid3'],
+    ]
+    assert len(calls) == 2
+    assert calls[0][0] == yt._PLAYLIST_ITEMS_ENDPOINT
+    assert '?' not in calls[0][0]
+    assert calls[0][1]['params'] == {
+        'part': 'contentDetails',
+        'playlistId': 'PLPagerTest',
+        'maxResults': 50,
+        'key': os.environ['VAULTTUBE_YTKEY'],
+    }
+    assert calls[1][1]['params']['pageToken'] == 'p2'
+    assert calls[0][1]['timeout'] == 30
+
+
+def test_youtube_playlist_pager_stops_on_repeated_token(monkeypatch):
+    import requests
+    import providers.youtube as yt
+
+    pages = [
+        _playlist_page(['TokenVid1'], next_token='same'),
+        _playlist_page(['TokenVid2'], next_token='same'),
+    ]
+    calls = []
+    monkeypatch.setattr(
+        requests, 'get',
+        lambda url, **kwargs: (
+            calls.append(kwargs['params'].get('pageToken')),
+            _FakeResp(pages[len(calls) - 1]),
+        )[1],
+    )
+
+    with pytest.raises(yt.YouTubePlaylistTruncated):
+        list(yt.iter_playlist_pages('PLRepeatedToken'))
+    assert calls == [None, 'same']
+
+
+def test_youtube_playlist_pager_stops_on_token_cycle(monkeypatch):
+    import requests
+    import providers.youtube as yt
+
+    pages = [
+        _playlist_page(['CycleVid1'], next_token='A'),
+        _playlist_page(['CycleVid2'], next_token='B'),
+        _playlist_page(['CycleVid3'], next_token='A'),
+    ]
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs['params'].get('pageToken'))
+        return _FakeResp(pages[len(calls) - 1])
+
+    monkeypatch.setattr(requests, 'get', fake_get)
+
+    with pytest.raises(yt.YouTubePlaylistTruncated):
+        list(yt.iter_playlist_pages('PLTokenCycle'))
+    assert calls == [None, 'A', 'B']
+
+
+def test_youtube_playlist_pager_allows_identical_pages(monkeypatch):
+    import requests
+    import providers.youtube as yt
+
+    pages = [
+        _playlist_page(['RepeatedVid1'], next_token='A'),
+        _playlist_page(['RepeatedVid1']),
+    ]
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs['params'].get('pageToken'))
+        return _FakeResp(pages[len(calls) - 1])
+
+    monkeypatch.setattr(requests, 'get', fake_get)
+
+    assert list(yt.iter_playlist_pages('PLRepeatedData')) == [
+        ['RepeatedVid1'],
+        ['RepeatedVid1'],
+    ]
+    assert calls == [None, 'A']
+
+
+def test_youtube_playlist_pager_honors_total_results(monkeypatch):
+    import requests
+    import providers.youtube as yt
+
+    pages = [
+        _playlist_page(
+            ['TotalVid1', 'TotalVid2', 'TotalVid3', 'TotalVid4', 'TotalVid5'],
+            next_token='p2', total_results=7,
+        ),
+        _playlist_page(
+            ['TotalVid6', 'TotalVid7'], next_token='misleading',
+            total_results=7,
+        ),
+    ]
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs['params'].get('pageToken'))
+        return _FakeResp(pages[len(calls) - 1])
+
+    monkeypatch.setattr(requests, 'get', fake_get)
+
+    assert [vid for page in yt.iter_playlist_pages('PLTotalBoundary')
+            for vid in page] == [
+        'TotalVid1', 'TotalVid2', 'TotalVid3', 'TotalVid4',
+        'TotalVid5', 'TotalVid6', 'TotalVid7',
+    ]
+    assert calls == [None, 'p2']
+
+
+def test_youtube_playlist_pager_hard_page_cap(monkeypatch):
+    import requests
+    import providers.youtube as yt
+
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs['params'].get('pageToken'))
+        number = len(calls)
+        return _FakeResp(
+            _playlist_page(
+                ['CapVid%d' % number], next_token='p%d' % number
+            )
+        )
+
+    monkeypatch.setattr(requests, 'get', fake_get)
+
+    with pytest.raises(yt.YouTubePlaylistTruncated):
+        list(yt.iter_playlist_pages('PLPageCap', max_pages=2))
+    assert calls == [None, 'p1']
+
+
+def test_youtube_playlist_pager_raises_quota_reason(monkeypatch):
+    import requests
+    import providers.youtube as yt
+
+    payload = {
+        'error': {
+            'code': 403,
+            'errors': [
+                {'domain': 'youtube.quota', 'reason': 'quotaExceeded'},
+            ],
+            'message': 'The request cannot be completed because quota is gone.',
+        },
+    }
+    monkeypatch.setattr(
+        requests, 'get', lambda url, **kwargs: _FakeResp(payload)
+    )
+
+    with pytest.raises(yt.YouTubeQuotaExceeded):
+        list(yt.iter_playlist_pages('PLQuotaReason'))
+
+
+@pytest.mark.parametrize('error_payload', [
+    {
+        'code': 403,
+        'errors': [{'reason': 'dailyLimitExceeded'}],
+        'message': 'Daily limit exhausted.',
+    },
+    {
+        'code': 403,
+        'status': 'RESOURCE_EXHAUSTED',
+        'message': 'Resource exhausted.',
+    },
+])
+def test_youtube_playlist_pager_raises_alternate_quota_values(
+        monkeypatch, error_payload):
+    import requests
+    import providers.youtube as yt
+
+    monkeypatch.setattr(
+        requests, 'get',
+        lambda url, **kwargs: _FakeResp({'error': error_payload}),
+    )
+
+    with pytest.raises(yt.YouTubeQuotaExceeded):
+        list(yt.iter_playlist_pages('PLResourceExhausted'))
+
+
+def test_youtube_playlist_pager_treats_http_429_as_quota(monkeypatch):
+    import requests
+    import providers.youtube as yt
+
+    monkeypatch.setattr(
+        requests, 'get',
+        lambda url, **kwargs: _FakeResp(
+            {'error': {'message': 'Too many requests'}}, status_code=429
+        ),
+    )
+
+    with pytest.raises(yt.YouTubeQuotaExceeded):
+        list(yt.iter_playlist_pages('PLHttp429'))
+
+
+def test_youtube_playlist_pager_normal_api_error_is_truncation(monkeypatch):
+    import requests
+    import providers.youtube as yt
+
+    monkeypatch.setattr(
+        requests, 'get',
+        lambda url, **kwargs: _FakeResp({
+            'error': {
+                'code': 404,
+                'errors': [{'reason': 'playlistNotFound'}],
+            },
+        }),
+    )
+
+    with pytest.raises(yt.YouTubePlaylistTruncated):
+        list(yt.iter_playlist_pages('PLNotFound'))
+
+
+def test_youtube_playlist_pager_logs_consumer_stopped_early(
+        monkeypatch, caplog):
+    import logging
+    import requests
+    import providers.youtube as yt
+
+    monkeypatch.setattr(
+        requests, 'get',
+        lambda url, **kwargs: _FakeResp(
+            _playlist_page(['EarlyStopVid'], next_token='p2')
+        ),
+    )
+    caplog.set_level(logging.INFO, logger='youtube')
+
+    pages = yt.iter_playlist_pages('PLEarlyStop')
+    assert next(pages) == ['EarlyStopVid']
+    pages.close()
+
+    assert any(
+        'playlistItems scan PLEarlyStop' in record.getMessage()
+        and 'stop=consumer stopped early' in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_youtube_quota_exception_propagates_from_scanner(monkeypatch):
+    import scanner
+    import providers.youtube as yt
+
+    def quota_pages(playlist_id):
+        raise yt.YouTubeQuotaExceeded('quota exhausted')
+        yield
+
+    monkeypatch.setattr(scanner, 'iter_playlist_pages', quota_pages)
+
+    with pytest.raises(yt.YouTubeQuotaExceeded):
+        scanner.get_channel_video_list(('UCQuotaPropagation',))
+
+
+def test_scanner_truncation_logs_and_continues_to_next_subscription(
+        client, monkeypatch, caplog):
+    import logging
+    import scanner
+    import providers.youtube as yt
+
+    _ensure_queue(client)
+    monkeypatch.setattr(
+        scanner, 'get_active_subscriptions',
+        lambda: [('UCTruncatedFirst',), ('UCServicedSecond',)],
+    )
+    monkeypatch.setattr(scanner, 'get_active_playlist_subs', lambda: [])
+    processed = []
+
+    def fake_pages(playlist_id, request_budget=None):
+        if playlist_id == scanner.uploads_playlist_id('UCTruncatedFirst'):
+            raise yt.YouTubePlaylistTruncated('test truncation')
+        yield ['AfterTruncationVid']
+
+    monkeypatch.setattr(scanner, 'iter_playlist_pages', fake_pages)
+    monkeypatch.setattr(scanner, 'check_db_video', lambda video_id: False)
+    monkeypatch.setattr(
+        scanner, 'enqueue',
+        lambda queue_object, queue: processed.append(queue_object.url),
+    )
+    monkeypatch.setattr(scanner, 'cleanup_old_errors', lambda days: None)
+    monkeypatch.setattr(scanner, 'cleanup_old_queue_rows', lambda days: None)
+    client.application.config[scanner._YOUTUBE_SCAN_CURSOR_CONFIG] = 0
+    client.application.config[
+        scanner._YOUTUBE_SCAN_CONTINUATIONS_CONFIG
+    ] = {}
+    caplog.set_level(logging.ERROR, logger='scanner')
+
+    scanner.scan_once(client.application)
+
+    assert processed == [
+        'https://www.youtube.com/watch?v=AfterTruncationVid',
+    ]
+    assert any(
+        'Scanning Channel truncated on ChannelID UCTruncatedFirst'
+        in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_scanner_quota_circuit_breaker_keeps_patreon_work(client, monkeypatch):
+    import scanner
+    import providers.youtube as yt
+
+    youtube_calls = []
+    patreon_calls = []
+    playlist_calls = []
+    monkeypatch.setattr(
+        scanner, 'get_active_subscriptions',
+        lambda: [('UCQuotaFirst',), ('12345',), ('UCQuotaSkipped',)],
+    )
+    monkeypatch.setattr(
+        scanner, 'get_active_playlist_subs', lambda: [('PLQuotaSkipped',)]
+    )
+
+    def fake_channel(channel_id, request_budget):
+        youtube_calls.append(channel_id[0])
+        raise yt.YouTubeQuotaExceeded('quota exhausted')
+
+    monkeypatch.setattr(scanner, 'get_channel_video_list', fake_channel)
+    monkeypatch.setattr(
+        scanner, 'get_playlist_video_list',
+        lambda playlist_id, request_budget: playlist_calls.append(playlist_id[0]),
+    )
+    monkeypatch.setattr(
+        scanner, 'scan_campaign',
+        lambda campaign_id: patreon_calls.append(campaign_id),
+    )
+    monkeypatch.setattr(scanner, 'cleanup_old_errors', lambda days: None)
+    monkeypatch.setattr(scanner, 'cleanup_old_queue_rows', lambda days: None)
+    client.application.config[scanner._YOUTUBE_SCAN_CURSOR_CONFIG] = 0
+    client.application.config[
+        scanner._YOUTUBE_SCAN_CONTINUATIONS_CONFIG
+    ] = {}
+
+    scanner.scan_once(client.application)
+
+    assert youtube_calls == ['UCQuotaFirst']
+    assert playlist_calls == []
+    assert patreon_calls == ['12345']
+
+
+def test_scanner_pass_uses_one_shared_request_budget(client, monkeypatch):
+    import scanner
+
+    monkeypatch.setenv('VAULTTUBE_YT_SCAN_BUDGET', '2')
+    monkeypatch.setattr(
+        scanner, 'get_active_subscriptions',
+        lambda: [('UCBudget1',), ('UCBudget2',)],
+    )
+    monkeypatch.setattr(
+        scanner, 'get_active_playlist_subs',
+        lambda: [('PLBudget3',), ('PLBudgetSkipped',)],
+    )
+    seen_budgets = []
+    calls = []
+
+    def consume(kind, item_id, request_budget):
+        seen_budgets.append(request_budget)
+        calls.append((kind, item_id))
+        request_budget.consume()
+
+    monkeypatch.setattr(
+        scanner, 'get_channel_video_list',
+        lambda item, budget: consume('channel', item[0], budget),
+    )
+    monkeypatch.setattr(
+        scanner, 'get_playlist_video_list',
+        lambda item, budget: consume('playlist', item[0], budget),
+    )
+    monkeypatch.setattr(scanner, 'cleanup_old_errors', lambda days: None)
+    monkeypatch.setattr(scanner, 'cleanup_old_queue_rows', lambda days: None)
+    client.application.config[scanner._YOUTUBE_SCAN_CURSOR_CONFIG] = 0
+    client.application.config[
+        scanner._YOUTUBE_SCAN_CONTINUATIONS_CONFIG
+    ] = {}
+
+    scanner.scan_once(client.application)
+
+    assert calls == [
+        ('channel', 'UCBudget1'),
+        ('channel', 'UCBudget2'),
+        ('playlist', 'PLBudget3'),
+    ]
+    assert len({id(budget) for budget in seen_budgets}) == 1
+    assert seen_budgets[0].used == 2
+
+
+def test_scanner_budget_rotates_work_across_passes(client, monkeypatch):
+    import scanner
+
+    monkeypatch.setenv('VAULTTUBE_YT_SCAN_BUDGET', '1')
+    monkeypatch.setattr(
+        scanner, 'get_active_subscriptions',
+        lambda: [('UCFair1',), ('24680',), ('UCFair2',)],
+    )
+    monkeypatch.setattr(
+        scanner, 'get_active_playlist_subs',
+        lambda: [('PLFair3',), ('PLFair4',)],
+    )
+    serviced = []
+    patreon_calls = []
+
+    def service(kind, item, budget):
+        budget.consume()
+        serviced.append((kind, item[0]))
+
+    monkeypatch.setattr(
+        scanner, 'get_channel_video_list',
+        lambda item, budget: service('channel', item, budget),
+    )
+    monkeypatch.setattr(
+        scanner, 'get_playlist_video_list',
+        lambda item, budget: service('playlist', item, budget),
+    )
+    monkeypatch.setattr(
+        scanner, 'scan_campaign',
+        lambda campaign_id: patreon_calls.append(campaign_id),
+    )
+    monkeypatch.setattr(scanner, 'cleanup_old_errors', lambda days: None)
+    monkeypatch.setattr(scanner, 'cleanup_old_queue_rows', lambda days: None)
+    client.application.config[scanner._YOUTUBE_SCAN_CURSOR_CONFIG] = 0
+    client.application.config[
+        scanner._YOUTUBE_SCAN_CONTINUATIONS_CONFIG
+    ] = {}
+
+    for _ in range(4):
+        scanner.scan_once(client.application)
+
+    assert serviced == [
+        ('channel', 'UCFair1'),
+        ('channel', 'UCFair2'),
+        ('playlist', 'PLFair3'),
+        ('playlist', 'PLFair4'),
+    ]
+    assert patreon_calls == ['24680'] * 4
+
+
+def test_scanner_budget_resumes_playlist_page_and_services_other_work(
+        client, monkeypatch):
+    import requests
+    import scanner
+
+    monkeypatch.setenv('VAULTTUBE_YT_SCAN_BUDGET', '1')
+    monkeypatch.setattr(scanner, 'get_active_subscriptions', lambda: [])
+    monkeypatch.setattr(
+        scanner, 'get_active_playlist_subs',
+        lambda: [('PLResumeMulti',), ('PLResumeOther',)],
+    )
+    calls = []
+    processed = []
+
+    def fake_get(url, **kwargs):
+        params = kwargs['params']
+        playlist_id = params['playlistId']
+        page_token = params.get('pageToken')
+        calls.append((playlist_id, page_token))
+        if playlist_id == 'PLResumeMulti' and page_token is None:
+            return _FakeResp(
+                _playlist_page(['ResumeVid1'], next_token='page-two')
+            )
+        if playlist_id == 'PLResumeMulti' and page_token == 'page-two':
+            return _FakeResp(_playlist_page(['ResumeVid2']))
+        if playlist_id == 'PLResumeOther' and page_token is None:
+            return _FakeResp(_playlist_page(['OtherVid1']))
+        raise AssertionError(
+            "Unexpected playlist request: %s %s" %
+            (playlist_id, page_token)
+        )
+
+    _ensure_queue(client)
+    monkeypatch.setattr(requests, 'get', fake_get)
+    monkeypatch.setattr(scanner, 'check_db_video', lambda video_id: False)
+    monkeypatch.setattr(
+        scanner, 'enqueue',
+        lambda queue_object, queue: processed.append(queue_object.url),
+    )
+    monkeypatch.setattr(
+        scanner, 'insert_pl2vid_info',
+        lambda playlist_id, video_id: None,
+    )
+    monkeypatch.setattr(scanner, 'cleanup_old_errors', lambda days: None)
+    monkeypatch.setattr(scanner, 'cleanup_old_queue_rows', lambda days: None)
+    client.application.config[scanner._YOUTUBE_SCAN_CURSOR_CONFIG] = 0
+    client.application.config[
+        scanner._YOUTUBE_SCAN_CONTINUATIONS_CONFIG
+    ] = {}
+
+    for _ in range(3):
+        scanner.scan_once(client.application)
+
+    assert calls == [
+        ('PLResumeMulti', None),
+        ('PLResumeOther', None),
+        ('PLResumeMulti', 'page-two'),
+    ]
+    assert processed == [
+        'https://www.youtube.com/watch?v=ResumeVid1',
+        'https://www.youtube.com/watch?v=OtherVid1',
+        'https://www.youtube.com/watch?v=ResumeVid2',
+    ]
+    assert client.application.config[
+        scanner._YOUTUBE_SCAN_CONTINUATIONS_CONFIG
+    ] == {}
+
+
+def test_scanner_quota_resumes_failed_page_without_refetching_page_one(
+        client, monkeypatch):
+    import requests
+    import scanner
+
+    monkeypatch.setattr(scanner, 'get_active_subscriptions', lambda: [])
+    monkeypatch.setattr(
+        scanner, 'get_active_playlist_subs',
+        lambda: [('PLQuotaResume',)],
+    )
+    calls = []
+    processed = []
+    page_two_attempts = 0
+
+    def fake_get(url, **kwargs):
+        nonlocal page_two_attempts
+        params = kwargs['params']
+        page_token = params.get('pageToken')
+        calls.append(page_token)
+        if page_token is None:
+            return _FakeResp(
+                _playlist_page(['QuotaResumeVid1'], next_token='page-two')
+            )
+        if page_token == 'page-two':
+            page_two_attempts += 1
+            if page_two_attempts == 1:
+                return _FakeResp(
+                    {'error': {'message': 'Too many requests'}},
+                    status_code=429,
+                )
+            return _FakeResp(_playlist_page(['QuotaResumeVid2']))
+        raise AssertionError("Unexpected page token: %s" % page_token)
+
+    _ensure_queue(client)
+    monkeypatch.setattr(requests, 'get', fake_get)
+    monkeypatch.setattr(scanner, 'check_db_video', lambda video_id: False)
+    monkeypatch.setattr(
+        scanner, 'enqueue',
+        lambda queue_object, queue: processed.append(queue_object.url),
+    )
+    monkeypatch.setattr(
+        scanner, 'insert_pl2vid_info',
+        lambda playlist_id, video_id: None,
+    )
+    monkeypatch.setattr(scanner, 'cleanup_old_errors', lambda days: None)
+    monkeypatch.setattr(scanner, 'cleanup_old_queue_rows', lambda days: None)
+    client.application.config[scanner._YOUTUBE_SCAN_CURSOR_CONFIG] = 0
+    client.application.config[
+        scanner._YOUTUBE_SCAN_CONTINUATIONS_CONFIG
+    ] = {}
+
+    scanner.scan_once(client.application)
+    scanner.scan_once(client.application)
+
+    assert calls == [None, 'page-two', 'page-two']
+    assert processed == [
+        'https://www.youtube.com/watch?v=QuotaResumeVid1',
+        'https://www.youtube.com/watch?v=QuotaResumeVid2',
+    ]
+    assert client.application.config[
+        scanner._YOUTUBE_SCAN_CONTINUATIONS_CONFIG
+    ] == {}
+
+
+def test_download_playlist_fails_on_token_cycle_without_partial_queue(
+        client, monkeypatch):
+    import requests
+    import providers.youtube as yt
+    from QueueObject import QueueObject
+
+    q = _ensure_queue(client)
+    pages = [
+        _playlist_page(['PartialVid1'], next_token='same'),
+        _playlist_page(['PartialVid2'], next_token='same'),
+    ]
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs['params'].get('pageToken'))
+        return _FakeResp(pages[len(calls) - 1])
+
+    monkeypatch.setattr(requests, 'get', fake_get)
+
+    with client.application.app_context():
+        result = yt.download_playlist(
+            QueueObject('PLPartialCycle', '', 'youtube', 0, '')
+        )
+
+    assert result is False
+    assert q.qsize() == 0
+    assert calls == [None, 'same']
+
+
+def test_download_playlist_fails_on_invalid_api_response(client, monkeypatch):
+    import requests
+    import providers.youtube as yt
+    from QueueObject import QueueObject
+
+    q = _ensure_queue(client)
+    monkeypatch.setattr(
+        requests, 'get',
+        lambda url, **kwargs: _FakeResp({
+            'error': {
+                'code': 404,
+                'errors': [{'reason': 'playlistNotFound'}],
+            },
+        }),
+    )
+
+    with client.application.app_context():
+        result = yt.download_playlist(
+            QueueObject('PLInvalidExpansion', '', 'youtube', 0, '')
+        )
+
+    assert result is False
+    assert q.qsize() == 0
 
 
 def test_download_playlist_writes_queue_rows(client, monkeypatch):

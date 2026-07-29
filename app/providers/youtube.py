@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 from io import StringIO
 from urllib.parse import urlparse, parse_qs
 import requests
@@ -18,6 +19,50 @@ logger = logging.getLogger('youtube')
 # yt-dlp emits this exact phrase (case-insensitive) when the supplied
 # YouTube cookies have been rotated/expired by Google's security measures.
 _COOKIE_INVALID_MARKER = 'cookies are no longer valid'
+_PLAYLIST_ITEMS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/playlistItems'
+_DEFAULT_PLAYLIST_MAX_PAGES = 100
+
+
+class YouTubeQuotaExceeded(RuntimeError):
+    """The YouTube Data API refused a request because its quota is exhausted."""
+
+    page_token = None
+    pages_fetched = 0
+    items_seen = 0
+    requested_page_tokens = ()
+
+
+class YouTubeScanBudgetExceeded(RuntimeError):
+    """A local scanner pass used all of its allowed YouTube API requests."""
+
+    page_token = None
+    requests_made = 0
+    pages_fetched = 0
+    items_seen = 0
+    requested_page_tokens = ()
+
+
+class YouTubePlaylistTruncated(RuntimeError):
+    """Playlist enumeration stopped before a trustworthy completion signal."""
+
+
+class YouTubeRequestBudget:
+    """Simple shared request counter for one subscription-scan pass."""
+
+    def __init__(self, limit):
+        self.limit = max(0, int(limit))
+        self.used = 0
+
+    @property
+    def remaining(self):
+        return max(0, self.limit - self.used)
+
+    def consume(self):
+        if self.used >= self.limit:
+            raise YouTubeScanBudgetExceeded(
+                "YouTube scan request budget exhausted (%d requests)" % self.limit
+            )
+        self.used += 1
 
 
 def _is_cookie_invalid_error(err_msg):
@@ -77,31 +122,237 @@ def provider_domains():
     return ['youtube.com','youtu.be']
 
 
-def iter_playlist_pages(playlist_id):
+def _youtube_api_error_values(payload):
+    error = payload.get('error', {}) if isinstance(payload, dict) else {}
+    values = []
+    if isinstance(payload, dict):
+        for key in ('reason', 'status'):
+            if payload.get(key):
+                values.append(payload[key])
+    if isinstance(error, dict):
+        for key in ('reason', 'status'):
+            if error.get(key):
+                values.append(error[key])
+        for item in error.get('errors', []) or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ('reason', 'status'):
+                if item.get(key):
+                    values.append(item[key])
+        for detail in error.get('details', []) or []:
+            if not isinstance(detail, dict):
+                continue
+            for key in ('reason', 'status'):
+                if detail.get(key):
+                    values.append(detail[key])
+            error_info = detail.get('errorInfo', {})
+            if isinstance(error_info, dict):
+                for key in ('reason', 'status'):
+                    if error_info.get(key):
+                        values.append(error_info[key])
+    return values
+
+
+def _is_youtube_quota_error(payload, http_status=None):
+    if http_status == 429:
+        return True
+    quota_values = {
+        'quotaexceeded',
+        'dailylimitexceeded',
+        'ratelimitexceeded',
+        'userratelimitexceeded',
+        'resourceexhausted',
+    }
+    normalized = {
+        re.sub(r'[^a-z0-9]', '', str(value).lower())
+        for value in _youtube_api_error_values(payload)
+    }
+    return bool(normalized & quota_values)
+
+
+def _attach_quota_resume_metadata(exc, page_token, requested_tokens,
+                                  pages_fetched, items_seen):
+    """Attach a safe retry point without marking the failed token successful."""
+    exc.page_token = page_token
+    exc.pages_fetched = pages_fetched
+    exc.items_seen = items_seen
+    exc.requested_page_tokens = tuple(
+        token for token in requested_tokens
+        if token is not None and token != page_token
+    )
+    return exc
+
+
+def iter_playlist_pages(playlist_id, request_budget=None,
+                        max_pages=_DEFAULT_PLAYLIST_MAX_PAGES,
+                        start_page_token=None, pages_already_fetched=0,
+                        items_already_seen=0, requested_page_tokens=None):
     """Yield video-ID lists one playlistItems page (50 items, newest first)
-    at a time via the YouTube Data API. Stops on API errors after logging them.
+    at a time via the YouTube Data API.
 
     Shared by scanner (channel/playlist subscriptions) and download_playlist
     (manual playlist expansion). Callers that only need "everything newer
-    than what I have" break early; callers that need the whole list drain it."""
-    page_token = None
-    while True:
-        url = ("https://www.googleapis.com/youtube/v3/playlistItems"
-               "?part=contentDetails&playlistId=%s&maxResults=50&key=%s"
-               % (playlist_id, os.environ['VAULTTUBE_YTKEY']))
-        if page_token:
-            url += "&pageToken=%s" % page_token
-        r = requests.get(url, timeout=30)
-        retj = r.json()
-        r.close()
-        if 'items' not in retj:
-            logger.error("Invalid playlistItems response for %s: %s" % (playlist_id, retj.get('error', retj)))
-            return
-        yield [v['contentDetails']['videoId'] for v in retj['items']
-               if v.get('contentDetails', {}).get('videoId')]
-        page_token = retj.get('nextPageToken')
-        if not page_token:
-            return
+    than what I have" break early; callers that need the whole list drain it.
+    Paging is bounded and rejects token cycles so malformed API
+    responses cannot make a scan run forever."""
+    if max_pages < 1:
+        raise ValueError("max_pages must be at least 1")
+
+    page_token = start_page_token
+    requested_tokens = set(requested_page_tokens or ())
+    requests_made = 0
+    pages_yielded = 0
+    items_seen = max(0, int(items_already_seen))
+    pages_already_fetched = max(0, int(pages_already_fetched))
+    stop_reason = 'complete'
+    abnormal = False
+    suspended_at_yield = False
+
+    try:
+        while pages_already_fetched + pages_yielded < max_pages:
+            if page_token in requested_tokens:
+                abnormal = True
+                stop_reason = "repeated page token %r" % page_token
+                raise YouTubePlaylistTruncated(
+                    "Playlist %s returned repeated page token %r" %
+                    (playlist_id, page_token)
+                )
+            if request_budget is not None:
+                try:
+                    request_budget.consume()
+                except YouTubeScanBudgetExceeded as exc:
+                    exc.page_token = page_token
+                    exc.requests_made = requests_made
+                    exc.pages_fetched = (
+                        pages_already_fetched + pages_yielded
+                    )
+                    exc.items_seen = items_seen
+                    exc.requested_page_tokens = tuple(
+                        token for token in requested_tokens
+                        if token is not None
+                    )
+                    abnormal = True
+                    stop_reason = 'local request budget exhausted'
+                    raise
+            requested_tokens.add(page_token)
+
+            params = {
+                'part': 'contentDetails',
+                'playlistId': playlist_id,
+                'maxResults': 50,
+                'key': os.environ['VAULTTUBE_YTKEY'],
+            }
+            if page_token:
+                params['pageToken'] = page_token
+
+            try:
+                r = requests.get(
+                    _PLAYLIST_ITEMS_ENDPOINT, params=params, timeout=30
+                )
+                requests_made += 1
+            except Exception:
+                abnormal = True
+                stop_reason = 'request failed'
+                raise
+            http_status = getattr(r, 'status_code', None)
+            if http_status == 429:
+                r.close()
+                abnormal = True
+                stop_reason = 'YouTube API quota exceeded (HTTP 429)'
+                exc = YouTubeQuotaExceeded(
+                    "YouTube API quota exceeded while scanning playlist %s "
+                    "(HTTP 429)" % playlist_id
+                )
+                raise _attach_quota_resume_metadata(
+                    exc, page_token, requested_tokens,
+                    pages_already_fetched + pages_yielded, items_seen,
+                )
+            try:
+                retj = r.json()
+            except Exception:
+                abnormal = True
+                stop_reason = 'invalid JSON response'
+                raise YouTubePlaylistTruncated(
+                    "Playlist %s returned invalid JSON" % playlist_id
+                )
+            finally:
+                r.close()
+
+            if _is_youtube_quota_error(retj, http_status):
+                abnormal = True
+                stop_reason = 'YouTube API quota exceeded'
+                exc = YouTubeQuotaExceeded(
+                    "YouTube API quota exceeded while scanning playlist %s" %
+                    playlist_id
+                )
+                raise _attach_quota_resume_metadata(
+                    exc, page_token, requested_tokens,
+                    pages_already_fetched + pages_yielded, items_seen,
+                )
+            if (not isinstance(retj, dict)
+                    or not isinstance(retj.get('items'), list)):
+                abnormal = True
+                stop_reason = 'invalid API response'
+                logger.error(
+                    "Invalid playlistItems response for %s: %s",
+                    playlist_id,
+                    retj.get('error', retj)
+                    if isinstance(retj, dict) else retj,
+                )
+                raise YouTubePlaylistTruncated(
+                    "Playlist %s returned an invalid API response" % playlist_id
+                )
+
+            raw_items = retj['items']
+            video_ids = [
+                v['contentDetails']['videoId'] for v in raw_items
+                if isinstance(v, dict)
+                and v.get('contentDetails', {}).get('videoId')
+            ]
+            items_seen += len(raw_items)
+
+            pages_yielded += 1
+            suspended_at_yield = True
+            yield video_ids
+            suspended_at_yield = False
+
+            page_info = retj.get('pageInfo', {})
+            total_results = (
+                page_info.get('totalResults')
+                if isinstance(page_info, dict) else None
+            )
+            if isinstance(total_results, int) and items_seen >= total_results:
+                stop_reason = 'pageInfo.totalResults reached'
+                return
+
+            next_token = retj.get('nextPageToken')
+            if not next_token:
+                return
+            if next_token in requested_tokens:
+                abnormal = True
+                stop_reason = "cyclic nextPageToken %r" % next_token
+                raise YouTubePlaylistTruncated(
+                    "Playlist %s returned cyclic nextPageToken %r" %
+                    (playlist_id, next_token)
+                )
+            page_token = next_token
+
+        abnormal = True
+        stop_reason = 'hard page cap reached (%d)' % max_pages
+        raise YouTubePlaylistTruncated(
+            "Playlist %s reached the hard page cap (%d)" %
+            (playlist_id, max_pages)
+        )
+    finally:
+        if suspended_at_yield and not abnormal:
+            stop_reason = 'consumer stopped early'
+        log = logger.warning if abnormal else logger.info
+        log(
+            "playlistItems scan %s: requests=%d pages=%d items=%d stop=%s",
+            playlist_id, requests_made,
+            pages_already_fetched + pages_yielded,
+            items_seen, stop_reason,
+        )
 
 def parse_youtube_url(url):
     if not url:
@@ -286,6 +537,11 @@ def download_playlist(qo):
                 insert_pl2vid_info(playlist_id, vid_id)
 
         return True
+    except (YouTubeQuotaExceeded, YouTubeScanBudgetExceeded):
+        raise
+    except YouTubePlaylistTruncated as e:
+        logger.error("download_playlist failed: %s" % e)
+        return False
     except Exception as e:
         logger.error("download_playlist failed: %s" % e)
         return False
@@ -312,6 +568,8 @@ def download_channel(qo):
         logger.info("Using uploads playlist %s for channel %s" % (uploads_id, channel_id))
         qo_playlist = QueueObject(uploads_id, "", "youtube", 0, "")
         return download_playlist(qo_playlist)
+    except (YouTubeQuotaExceeded, YouTubeScanBudgetExceeded):
+        raise
     except Exception as e:
         logger.error("download_channel failed: %s" % e)
         return False
@@ -338,6 +596,8 @@ def download(qo):
             return False
         else:
             raise ValueError("Unknown URL type: %s" % url_type)
+    except (YouTubeQuotaExceeded, YouTubeScanBudgetExceeded):
+        raise
     except Exception as e:
         logger.error("YT Single Download Failed: %s | url=%s", e, url, exc_info=True)
         return False
