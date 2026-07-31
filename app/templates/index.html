@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
 
+<fieldset class="vt-home-content-filter">
+    <legend>Home content</legend>
+    <div class="vt-home-content-toggle">
+        <input type="radio" name="home-content" id="home-content-sfw" value="sfw" checked>
+        <label for="home-content-sfw">SFW</label>
+        <input type="radio" name="home-content" id="home-content-nsfw" value="nsfw">
+        <label for="home-content-nsfw">NSFW</label>
+    </div>
+</fieldset>
+
 <!-- Hero: most recently added unwatched video -->
 <section class="vt-hero" id="hero" hidden>
     <div class="vt-hero-backdrop"><img id="hero-img" src="" alt=""></div>
@@ -37,88 +47,180 @@
 
 <div id="channel-rails"></div>
 
-<div class="vt-empty" id="home-empty" hidden>
-    Nothing unwatched right now — you're all caught up.
+<div class="vt-empty" id="home-empty" aria-live="polite" hidden>
+    <span id="home-empty-copy">No SFW videos are available on Home right now.</span>
     <div style="margin-top:16px"><a class="vt-btn-ghost" href="/browse.html">Browse the vault</a></div>
+</div>
+
+<div class="vt-empty vt-home-error" id="home-error" role="alert" hidden>
+    Home could not be fully loaded.
+    <div><button class="vt-btn-ghost" id="home-retry" type="button">Retry</button></div>
 </div>
 
 <script src="/static/js/cards.js"></script>
 <script>
 (function () {
-    var sectionsWithContent = 0;
+    var loadSequence = 0;
+    var activeController = null;
+    var currentMode = 'sfw';
 
-    function show(id) {
+    function show(id, state) {
+        if (state.sequence !== loadSequence) return;
         document.getElementById(id).hidden = false;
-        sectionsWithContent++;
+        state.sectionsWithContent++;
     }
 
-    function getJSON(url) {
-        return fetch(url).then(function (r) { return r.json(); });
+    function getJSON(url, signal) {
+        return fetch(url, { signal: signal }).then(function (r) {
+            if (!r.ok) throw new Error('Request failed: ' + r.status);
+            return r.json();
+        });
     }
 
-    // Hero + "New this week" share nothing; fire everything in parallel
-    var heroDone = getJSON('/api/getvids/unwatched/AddedAt/desc/0').then(function (vids) {
-        if (!vids.length) return;
-        var v = vids[0];
-        document.getElementById('hero-img').src = '/api/images/' + encodeURIComponent(v.id);
-        document.getElementById('hero-title').textContent = v.title;
-        var meta = [];
-        if (v.channel_name) meta.push('<a href="/creator.html?creator=' + encodeURIComponent(v.channelId) + '">' + VT.esc(v.channel_name) + '</a>');
-        if (v.PublishedAt) meta.push(VT.esc(VT.fmtDate(v.PublishedAt)));
-        if (v.length) meta.push(VT.esc(VT.fmtDur(v.length)));
-        document.getElementById('hero-meta').innerHTML = meta.join(' &nbsp;·&nbsp; ');
-        document.getElementById('hero-play').href = '/player.html?id=' + encodeURIComponent(v.id);
-        var ch = document.getElementById('hero-channel');
-        if (v.channelId) ch.href = '/creator.html?creator=' + encodeURIComponent(v.channelId);
-        else ch.hidden = true;
-        show('hero');
-    });
+    function withContent(url, mode) {
+        return url + (url.indexOf('?') === -1 ? '?' : '&')
+            + 'content=' + encodeURIComponent(mode);
+    }
 
-    var resumeDone = getJSON('/api/list/resume/').then(function (vids) {
-        if (!vids.length) return;
-        VT.render(document.getElementById('resume-rail'), vids, { progress: true });
-        show('resume-section');
-    });
+    function resetHome(mode) {
+        ['hero', 'resume-section', 'new-section', 'home-empty', 'home-error'].forEach(function (id) {
+            document.getElementById(id).hidden = true;
+        });
+        document.getElementById('hero-img').removeAttribute('src');
+        document.getElementById('hero-title').textContent = '';
+        document.getElementById('hero-meta').textContent = '';
+        document.getElementById('hero-play').href = '#';
+        document.getElementById('hero-channel').href = '#';
+        document.getElementById('hero-channel').hidden = false;
+        document.getElementById('resume-rail').replaceChildren();
+        document.getElementById('new-rail').replaceChildren();
+        document.getElementById('new-sub').textContent = '';
+        document.getElementById('channel-rails').replaceChildren();
+        document.getElementById('home-empty-copy').textContent = mode === 'nsfw'
+            ? 'No videos matching the NSFW filter are available on Home.'
+            : 'No SFW videos are available on Home right now.';
+    }
+
+    function appendChannelRail(channel, vids, state) {
+        if (state.sequence !== loadSequence || !vids.length) return;
+        var filteredCount = parseInt(channel.unwatched, 10);
+        var count = isNaN(filteredCount) ? String(vids.length) : String(filteredCount);
+        var section = document.createElement('section');
+        section.className = 'vt-section';
+        section.innerHTML =
+            '<div class="vt-rail-header"><h2>' + VT.esc(channel.channelname) + '</h2>'
+            + '<span class="vt-sub">' + count + ' unwatched</span>'
+            + '<a class="vt-all" href="/creator.html?creator=' + encodeURIComponent(channel.channelid) + '">View all</a></div>'
+            + '<div class="vt-rail-track"></div>';
+        VT.render(section.querySelector('.vt-rail-track'), vids.slice(0, 12), {});
+        document.getElementById('channel-rails').appendChild(section);
+        state.sectionsWithContent++;
+    }
+
+    function loadChannelRails(mode, state, signal) {
+        return getJSON(
+            withContent('/api/channels/0?order=activity', mode),
+            signal
+        ).then(function (channels) {
+            if (state.sequence !== loadSequence) return;
+            var top = channels.slice(0, 4);
+            return Promise.all(top.map(function (channel) {
+                var url = '/api/getvids/unwatched/PublishedAt/desc/0?channel_ids[]='
+                    + encodeURIComponent(channel.channelid);
+                return getJSON(withContent(url, mode), signal);
+            })).then(function (lists) {
+                if (state.sequence !== loadSequence) return;
+                top.forEach(function (channel, index) {
+                    if (!lists[index].length) return;
+                    appendChannelRail(channel, lists[index], state);
+                });
+            });
+        });
+    }
 
     var weekAgo = new Date(Date.now() - 7 * 86400 * 1000);
     var fromDate = weekAgo.getFullYear() + '-'
         + String(weekAgo.getMonth() + 1).padStart(2, '0') + '-'
         + String(weekAgo.getDate()).padStart(2, '0');
     document.getElementById('new-browse-all').href = '/browse.html?from_date=' + fromDate;
-    var newDone = getJSON('/api/getvids/unwatched/PublishedAt/desc/0?from_date=' + fromDate).then(function (vids) {
-        if (!vids.length) return;
-        document.getElementById('new-sub').textContent = vids.length >= 40 ? '40+ videos' : vids.length + (vids.length === 1 ? ' video' : ' videos');
-        VT.render(document.getElementById('new-rail'), vids, { dot: true });
-        show('new-section');
-    });
 
-    // One rail per active channel that still has something unwatched
-    var railsDone = getJSON('/api/channels/0?order=activity').then(function (channels) {
-        var top = channels.filter(function (c) { return parseInt(c.unwatched, 10) > 0; }).slice(0, 4);
-        if (!top.length) return;
-        return Promise.all(top.map(function (c) {
-            return getJSON('/api/getvids/unwatched/PublishedAt/desc/0?channel_ids[]=' + encodeURIComponent(c.channelid));
-        })).then(function (lists) {
-            var host = document.getElementById('channel-rails');
-            top.forEach(function (c, i) {
-                if (!lists[i].length) return;
-                var section = document.createElement('section');
-                section.className = 'vt-section';
-                section.innerHTML =
-                    '<div class="vt-rail-header"><h2>' + VT.esc(c.channelname) + '</h2>'
-                    + '<span class="vt-sub">' + VT.esc(c.unwatched) + ' unwatched</span>'
-                    + '<a class="vt-all" href="/creator.html?creator=' + encodeURIComponent(c.channelid) + '">View all</a></div>'
-                    + '<div class="vt-rail-track"></div>';
-                VT.render(section.querySelector('.vt-rail-track'), lists[i].slice(0, 12), {});
-                host.appendChild(section);
-                sectionsWithContent++;
+    function loadHome(mode) {
+        loadSequence++;
+        currentMode = mode;
+        var state = { sequence: loadSequence, sectionsWithContent: 0 };
+        if (activeController) activeController.abort();
+        activeController = new AbortController();
+        var signal = activeController.signal;
+        resetHome(mode);
+
+        // Hero + rails do not depend on each other, so load them in parallel.
+        var heroDone = getJSON(
+            withContent('/api/getvids/unwatched/AddedAt/desc/0', mode),
+            signal
+        ).then(function (vids) {
+            if (state.sequence !== loadSequence || !vids.length) return;
+            var v = vids[0];
+            document.getElementById('hero-img').src = '/api/images/' + encodeURIComponent(v.id);
+            document.getElementById('hero-title').textContent = v.title || '';
+            var meta = [];
+            if (v.channel_name) meta.push('<a href="/creator.html?creator=' + encodeURIComponent(v.channelId) + '">' + VT.esc(v.channel_name) + '</a>');
+            if (v.PublishedAt) meta.push(VT.esc(VT.fmtDate(v.PublishedAt)));
+            if (v.length) meta.push(VT.esc(VT.fmtDur(v.length)));
+            document.getElementById('hero-meta').innerHTML = meta.join(' &nbsp;·&nbsp; ');
+            document.getElementById('hero-play').href = '/player.html?id=' + encodeURIComponent(v.id);
+            var ch = document.getElementById('hero-channel');
+            if (v.channelId) ch.href = '/creator.html?creator=' + encodeURIComponent(v.channelId);
+            else ch.hidden = true;
+            show('hero', state);
+        });
+
+        var resumeDone = getJSON(
+            withContent('/api/list/resume/', mode),
+            signal
+        ).then(function (vids) {
+            if (state.sequence !== loadSequence || !vids.length) return;
+            VT.render(document.getElementById('resume-rail'), vids, { progress: true });
+            show('resume-section', state);
+        });
+
+        var newDone = getJSON(
+            withContent('/api/getvids/unwatched/PublishedAt/desc/0?from_date=' + fromDate, mode),
+            signal
+        ).then(function (vids) {
+            if (state.sequence !== loadSequence || !vids.length) return;
+            document.getElementById('new-sub').textContent = vids.length >= 40 ? '40+ videos' : vids.length + (vids.length === 1 ? ' video' : ' videos');
+            VT.render(document.getElementById('new-rail'), vids, { dot: true });
+            show('new-section', state);
+        });
+
+        var railsDone = loadChannelRails(mode, state, signal);
+
+        Promise.allSettled([heroDone, resumeDone, newDone, railsDone]).then(function (results) {
+            if (state.sequence !== loadSequence) return;
+            var failed = results.some(function (result) {
+                return result.status === 'rejected'
+                    && (!result.reason || result.reason.name !== 'AbortError');
             });
+            if (failed) {
+                document.getElementById('home-empty').hidden = true;
+                document.getElementById('home-error').hidden = false;
+                return;
+            }
+            document.getElementById('home-empty').hidden = state.sectionsWithContent !== 0;
+        });
+    }
+
+    document.querySelectorAll('input[name="home-content"]').forEach(function (input) {
+        input.addEventListener('change', function () {
+            if (input.checked) loadHome(input.value);
         });
     });
 
-    Promise.allSettled([heroDone, resumeDone, newDone, railsDone]).then(function () {
-        if (sectionsWithContent === 0) document.getElementById('home-empty').hidden = false;
+    document.getElementById('home-retry').addEventListener('click', function () {
+        loadHome(currentMode);
     });
+
+    loadHome('sfw');
 })();
 </script>
 {% endblock %}

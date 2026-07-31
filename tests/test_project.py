@@ -34,6 +34,402 @@ def test_home(client):
     assert response.status_code == 200
 
 
+def _insert_home_content_filter_videos():
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("DELETE FROM videos WHERE channelId = %s", ("HomeContentFilter",))
+    cur.execute(
+        "REPLACE INTO channels(channelid, channelname, json, subscribed) "
+        "VALUES('HomeContentFilter', 'Home Content Filter', '{}', 0)"
+    )
+    rows = [
+        (
+            "HomeFilterSafe",
+            "Classic woodworking workshop",
+            None,
+            "2099-01-01 10:00:00",
+            120,
+        ),
+        (
+            "HomeFilterTitleAdult",
+            "A PORN documentary",
+            "Archive overview",
+            "2099-01-02 10:00:00",
+            121,
+        ),
+        (
+            "HomeFilterDescriptionAdult",
+            "Behind the scenes",
+            "Marked nSfW for adults",
+            "2099-01-03 10:00:00",
+            122,
+        ),
+        (
+            "HomeFilterBoundary",
+            "How to choose an XXXLarge shirt",
+            "Sizing advice",
+            "2099-01-04 10:00:00",
+            123,
+        ),
+        (
+            "HomeFilterClassBoundary",
+            "A classic passage about class design",
+            "Boundary matching example",
+            "2099-01-05 10:00:00",
+            124,
+        ),
+        (
+            "HomeFilterStandaloneAss",
+            "Standalone ASS collection",
+            "Boundary matching example",
+            "2099-01-06 10:00:00",
+            125,
+        ),
+        (
+            "HomeFilterSexScenes",
+            "Movie sex scenes explained",
+            "Explicit scene catalog",
+            "2099-01-07 10:00:00",
+            126,
+        ),
+        (
+            "HomeFilterErotica",
+            "Archive showcase",
+            "An EROTICA collection",
+            "2099-01-08 10:00:00",
+            127,
+        ),
+        (
+            "HomeFilterPornhub",
+            "Pornhub archive",
+            "Creator history",
+            "2099-01-09 10:00:00",
+            128,
+        ),
+        (
+            "HomeFilterPornstar",
+            "Meet the pornstars",
+            "Creator profiles",
+            "2099-01-10 10:00:00",
+            129,
+        ),
+        (
+            "HomeFilterOnlyFansModel",
+            "OnlyFansModel interview",
+            "Creator profile",
+            "2099-01-11 10:00:00",
+            130,
+        ),
+        (
+            "HomeFilterSexEducation",
+            "Sex education policy",
+            "A classroom discussion",
+            "2099-01-12 10:00:00",
+            131,
+        ),
+        (
+            "HomeFilterSexDifferences",
+            "Research roundup",
+            "Research into sex differences",
+            "2099-01-13 10:00:00",
+            132,
+        ),
+    ]
+    for video_id, title, description, published_at, timestamp in rows:
+        cur.execute(
+            "REPLACE INTO videos("
+            "id, channel_name, channelId, json, filepath, PublishedAt, title, "
+            "description, watched, timestamp"
+            ") VALUES(%s, 'Home Content Filter', 'HomeContentFilter', '{}', "
+            "%s, %s, %s, %s, 0, %s)",
+            (
+                video_id,
+                "/videos/HomeContentFilter/%s.mp4" % video_id,
+                published_at,
+                title,
+                description,
+                timestamp,
+            ),
+        )
+    con.commit()
+    con.close()
+
+
+def test_home_content_selector_markup_and_api_wiring(client):
+    body = client.get("/").get_data(as_text=True)
+
+    assert 'id="home-content-sfw" value="sfw" checked' in body
+    assert 'id="home-content-nsfw" value="nsfw"' in body
+    assert '<fieldset class="vt-home-content-filter">' in body
+    assert "<legend>Home content</legend>" in body
+    assert "loadHome('sfw')" in body
+    assert "withContent('/api/list/resume/', mode)" in body
+    assert "withContent('/api/getvids/unwatched/AddedAt/desc/0', mode)" in body
+    assert "withContent('/api/channels/0?order=activity', mode)" in body
+    assert "loadSequence" in body
+    assert "activeController.abort()" in body
+    assert "channels.slice(0, 4)" in body
+    assert "CHANNEL_BATCH_SIZE" not in body
+    assert "processCandidates" not in body
+    assert "channelOffset" not in body
+    assert 'id="home-retry"' in body
+    assert "result.reason.name !== 'AbortError'" in body
+    assert "loadHome(currentMode)" in body
+
+
+def test_getvids_home_content_modes_and_boundaries(client):
+    _insert_home_content_filter_videos()
+    base = (
+        "/api/getvids/unwatched/PublishedAt/desc/0"
+        "?channel_ids[]=HomeContentFilter"
+    )
+
+    unfiltered = {
+        row["id"] for row in json.loads(client.get(base).get_data(as_text=True))
+    }
+    invalid = {
+        row["id"] for row in json.loads(client.get(base + "&content=unknown").get_data(as_text=True))
+    }
+    sfw = {
+        row["id"] for row in json.loads(client.get(base + "&content=sfw").get_data(as_text=True))
+    }
+    nsfw = {
+        row["id"] for row in json.loads(client.get(base + "&content=nsfw").get_data(as_text=True))
+    }
+
+    expected_all = {
+        "HomeFilterSafe",
+        "HomeFilterTitleAdult",
+        "HomeFilterDescriptionAdult",
+        "HomeFilterBoundary",
+        "HomeFilterClassBoundary",
+        "HomeFilterStandaloneAss",
+        "HomeFilterSexScenes",
+        "HomeFilterErotica",
+        "HomeFilterPornhub",
+        "HomeFilterPornstar",
+        "HomeFilterOnlyFansModel",
+        "HomeFilterSexEducation",
+        "HomeFilterSexDifferences",
+    }
+    assert unfiltered == expected_all
+    assert invalid == expected_all
+    assert sfw == {
+        "HomeFilterSafe",
+        "HomeFilterBoundary",
+        "HomeFilterClassBoundary",
+        "HomeFilterSexEducation",
+        "HomeFilterSexDifferences",
+    }
+    assert nsfw == {
+        "HomeFilterTitleAdult",
+        "HomeFilterDescriptionAdult",
+        "HomeFilterStandaloneAss",
+        "HomeFilterSexScenes",
+        "HomeFilterErotica",
+        "HomeFilterPornhub",
+        "HomeFilterPornstar",
+        "HomeFilterOnlyFansModel",
+    }
+
+
+def test_resume_home_content_modes(client):
+    _insert_home_content_filter_videos()
+
+    sfw = {
+        row["id"] for row in json.loads(client.get("/api/list/resume/?content=sfw").get_data(as_text=True))
+    }
+    nsfw = {
+        row["id"] for row in json.loads(client.get("/api/list/resume/?content=nsfw").get_data(as_text=True))
+    }
+    unfiltered = {
+        row["id"] for row in json.loads(client.get("/api/list/resume/").get_data(as_text=True))
+    }
+
+    assert {
+        "HomeFilterSafe",
+        "HomeFilterBoundary",
+        "HomeFilterClassBoundary",
+        "HomeFilterSexEducation",
+        "HomeFilterSexDifferences",
+    } <= sfw
+    assert "HomeFilterTitleAdult" not in sfw
+    assert "HomeFilterDescriptionAdult" not in sfw
+    assert "HomeFilterStandaloneAss" not in sfw
+    assert "HomeFilterSexScenes" not in sfw
+    assert "HomeFilterErotica" not in sfw
+    assert "HomeFilterPornhub" not in sfw
+    assert "HomeFilterPornstar" not in sfw
+    assert "HomeFilterOnlyFansModel" not in sfw
+    assert {
+        "HomeFilterTitleAdult",
+        "HomeFilterDescriptionAdult",
+        "HomeFilterStandaloneAss",
+        "HomeFilterSexScenes",
+        "HomeFilterErotica",
+        "HomeFilterPornhub",
+        "HomeFilterPornstar",
+        "HomeFilterOnlyFansModel",
+    } <= nsfw
+    assert "HomeFilterSafe" not in nsfw
+    assert "HomeFilterBoundary" not in nsfw
+    assert "HomeFilterClassBoundary" not in nsfw
+    assert "HomeFilterSexEducation" not in nsfw
+    assert "HomeFilterSexDifferences" not in nsfw
+    assert {
+        "HomeFilterSafe",
+        "HomeFilterTitleAdult",
+        "HomeFilterDescriptionAdult",
+        "HomeFilterBoundary",
+        "HomeFilterClassBoundary",
+        "HomeFilterStandaloneAss",
+        "HomeFilterSexScenes",
+        "HomeFilterErotica",
+        "HomeFilterPornhub",
+        "HomeFilterPornstar",
+        "HomeFilterOnlyFansModel",
+        "HomeFilterSexEducation",
+        "HomeFilterSexDifferences",
+    } <= unfiltered
+
+
+def test_channels_home_content_filter_aggregates_and_composes(client):
+    con = _db_connect()
+    cur = con.cursor()
+    channels = [
+        ("UCCFAdult", "Adult Channel"),
+        ("UCCFSafe", "Safe Channel"),
+        ("ContentMixed", "Mixed Channel"),
+        ("ContentTieA", "Tie A"),
+        ("ContentTieB", "Tie B"),
+        ("ContentEmpty", "Empty Channel"),
+    ]
+    for channel_id, channel_name in channels:
+        cur.execute(
+            "REPLACE INTO channels(channelid, channelname, json, subscribed) "
+            "VALUES(%s, %s, '{}', 0)",
+            (channel_id, channel_name),
+        )
+
+    videos = [
+        ("CFAdult1", "UCCFAdult", "NSFW archive", "2099-04-06 10:00:00", 0, "youtube"),
+        ("CFAdult2", "UCCFAdult", "Pornstar profile", "2099-04-02 10:00:00", 0, "youtube"),
+        ("CFAdultSafeWatched", "UCCFAdult", "Safe documentary", "2099-04-11 10:00:00", 1, "youtube"),
+        ("CFSafe1", "UCCFSafe", "Safe workshop", "2099-04-05 10:00:00", 0, "youtube"),
+        ("CFSafe2", "UCCFSafe", "Sex education", "2099-04-03 10:00:00", 0, "youtube"),
+        ("CFSafeAdultWatched", "UCCFSafe", "Erotica archive", "2099-04-10 10:00:00", 1, "youtube"),
+        ("CFMixedSafe", "ContentMixed", "Travel guide", "2099-04-04 10:00:00", 0, "reddit"),
+        ("CFMixedAdult", "ContentMixed", "OnlyFansModel profile", "2099-04-07 10:00:00", 0, "reddit"),
+        ("CFTieA", "ContentTieA", "Safe tie A", "2099-04-01 10:00:00", 0, "reddit"),
+        ("CFTieB", "ContentTieB", "Safe tie B", "2099-04-01 10:00:00", 0, "reddit"),
+    ]
+    for video_id, channel_id, title, published_at, watched, source in videos:
+        cur.execute(
+            "REPLACE INTO videos("
+            "id, channel_name, channelId, json, filepath, PublishedAt, title, "
+            "watched, source"
+            ") VALUES(%s, %s, %s, '{}', %s, %s, %s, %s, %s)",
+            (
+                video_id,
+                channel_id,
+                channel_id,
+                "/videos/%s/%s.mp4" % (channel_id, video_id),
+                published_at,
+                title,
+                watched,
+                source,
+            ),
+        )
+    con.commit()
+    con.close()
+
+    def channel_id(row):
+        return row.get("channelid") or row.get("channelId")
+
+    sfw_rows = json.loads(
+        client.get("/api/channels/0?order=activity&content=sfw").get_data(as_text=True)
+    )
+    nsfw_rows = json.loads(
+        client.get("/api/channels/0?order=activity&content=nsfw").get_data(as_text=True)
+    )
+    absent_rows = json.loads(
+        client.get("/api/channels/0?order=activity").get_data(as_text=True)
+    )
+    invalid_rows = json.loads(
+        client.get("/api/channels/0?order=activity&content=unknown").get_data(as_text=True)
+    )
+
+    sfw = {channel_id(row): row for row in sfw_rows}
+    nsfw = {channel_id(row): row for row in nsfw_rows}
+    assert "UCCFAdult" not in sfw
+    assert "ContentEmpty" not in sfw
+    assert int(sfw["UCCFSafe"]["unwatched"]) == 2
+    assert int(sfw["UCCFSafe"]["vidcount"]) == 2
+    assert sfw["UCCFSafe"]["lastvidtime"] == "2099-04-05 10:00:00"
+    assert "UCCFSafe" not in nsfw
+    assert "ContentEmpty" not in nsfw
+    assert int(nsfw["UCCFAdult"]["unwatched"]) == 2
+    assert int(nsfw["UCCFAdult"]["vidcount"]) == 2
+    assert nsfw["UCCFAdult"]["lastvidtime"] == "2099-04-06 10:00:00"
+
+    sfw_ids = [channel_id(row) for row in sfw_rows]
+    assert sfw_ids.index("ContentTieA") < sfw_ids.index("ContentTieB")
+
+    absent_ids = {channel_id(row) for row in absent_rows}
+    invalid_ids = {channel_id(row) for row in invalid_rows}
+    assert absent_ids == invalid_ids
+    assert {channel_id for channel_id, _ in channels} <= absent_ids
+
+    youtube_nsfw = json.loads(
+        client.get(
+            "/api/channels/0?order=activity&content=nsfw&source=youtube"
+        ).get_data(as_text=True)
+    )
+    youtube_nsfw_ids = {channel_id(row) for row in youtube_nsfw}
+    assert "UCCFAdult" in youtube_nsfw_ids
+    assert "ContentMixed" not in youtube_nsfw_ids
+    assert "UCCFSafe" not in youtube_nsfw_ids
+
+
+def test_getvids_content_filter_is_applied_before_limit(client):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("DELETE FROM videos WHERE channelId = %s", ("HomeFilterLimit",))
+    cur.execute(
+        "REPLACE INTO channels(channelid, channelname, json, subscribed) "
+        "VALUES('HomeFilterLimit', 'Home Filter Limit', '{}', 0)"
+    )
+    cur.execute(
+        "REPLACE INTO videos("
+        "id, channel_name, channelId, json, filepath, PublishedAt, title, watched"
+        ") VALUES('HomeFilterLimitSafe', 'Home Filter Limit', "
+        "'HomeFilterLimit', '{}', '/videos/HomeFilterLimit/safe.mp4', "
+        "'2090-01-01 10:00:00', 'A safe older video', 0)"
+    )
+    for index in range(40):
+        video_id = "HomeFilterLimitAdult%02d" % index
+        cur.execute(
+            "REPLACE INTO videos("
+            "id, channel_name, channelId, json, filepath, PublishedAt, title, watched"
+            ") VALUES(%s, 'Home Filter Limit', 'HomeFilterLimit', '{}', %s, %s, "
+            "'NSFW newer video', 0)",
+            (
+                video_id,
+                "/videos/HomeFilterLimit/%s.mp4" % video_id,
+                "2090-01-02 10:%02d:00" % index,
+            ),
+        )
+    con.commit()
+    con.close()
+
+    response = client.get(
+        "/api/getvids/unwatched/PublishedAt/desc/0"
+        "?channel_ids[]=HomeFilterLimit&content=sfw"
+    )
+    data = json.loads(response.get_data(as_text=True))
+    assert [row["id"] for row in data] == ["HomeFilterLimitSafe"]
+
+
 def test_populate_db(client):
     try:
         response = client.get("/api/checkdb")

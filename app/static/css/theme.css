@@ -481,6 +481,71 @@ a {
   color: var(--vt-accent);
 }
 
+/* ---------- Home content selector ---------- */
+.vt-home-content-filter {
+  border: 0;
+  padding: 0;
+  margin: 0 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+.vt-home-content-filter legend {
+  float: left;
+  width: auto;
+  padding: 0;
+  color: var(--vt-text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.vt-home-content-toggle {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(48px, 1fr));
+  padding: 2px;
+  background: var(--vt-surface-2);
+  border: 1px solid var(--vt-line-strong);
+  border-radius: 999px;
+}
+.vt-home-content-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.vt-home-content-toggle label {
+  position: relative;
+  z-index: 1;
+  border-radius: 999px;
+  color: var(--vt-text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 24px;
+  text-align: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.vt-home-content-toggle label:hover {
+  color: var(--vt-text);
+}
+.vt-home-content-toggle input:checked + label {
+  background: var(--vt-accent);
+  color: var(--vt-bg);
+}
+.vt-home-content-toggle input:focus-visible + label {
+  outline: 2px solid var(--vt-accent);
+  outline-offset: 3px;
+}
+.vt-home-error {
+  color: var(--vt-danger);
+}
+.vt-home-error .vt-btn-ghost {
+  margin-top: 16px;
+}
+
 /* ---------- Hero banner ---------- */
 .vt-hero {
   position: relative;

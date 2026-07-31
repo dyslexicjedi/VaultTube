@@ -48,6 +48,64 @@ ALLOWED_SORT_COLUMNS = {
 }
 ALLOWED_DIRECTIONS = {'asc', 'desc'}
 
+# Conservative, unmistakable adult-content terms used by Home's content
+# selector.  Each fragment is wrapped in a non-word boundary by
+# build_content_condition(), so (for example) "xxx" does not match
+# "xxxlarge".
+NSFW_TERM_PATTERNS = (
+    r"nsfw",
+    r"xxx",
+    r"porn[[:alnum:]_]*",
+    r"erotic[[:alnum:]_]*",
+    r"hentai",
+    r"onlyfans[[:alnum:]_]*",
+    r"nude(s)?",
+    r"nudity",
+    r"naked",
+    r"boobs?",
+    r"tits?",
+    r"puss(y|ies)",
+    r"cocks?",
+    r"dicks?",
+    r"ass",
+    r"bdsm",
+    r"rule[[:space:]]*34",
+    r"sex[[:space:]-]+(scene(s)?|tape|video)",
+    r"(hardcore|explicit|oral|anal)[[:space:]]+sex",
+    r"sexual[[:space:]]+content",
+    r"blow[[:space:]-]*job",
+    r"hand[[:space:]-]*job",
+    r"deep[[:space:]-]*throat",
+    r"cum[[:space:]-]*shot",
+    r"gang[[:space:]-]*bang",
+    r"masturbat(e|ed|es|ing|ion)",
+    r"orgasm(s|ic)?",
+)
+NSFW_CONTENT_REGEX = (
+    r"(^|[^[:alnum:]_])("
+    + "|".join(NSFW_TERM_PATTERNS)
+    + r")([^[:alnum:]_]|$)"
+)
+
+
+def build_content_condition(mode, table_alias="v"):
+    """Return a parameterized SQL predicate for a Home content mode.
+
+    Unknown or absent modes deliberately return no predicate so existing API
+    callers retain their historical unfiltered behavior.
+    """
+    if mode not in {"sfw", "nsfw"}:
+        return "", ()
+
+    match = (
+        f"(LOWER(COALESCE({table_alias}.title, '')) REGEXP %s "
+        f"OR LOWER(COALESCE({table_alias}.description, '')) REGEXP %s)"
+    )
+    if mode == "sfw":
+        match = f"NOT {match}"
+    return match, (NSFW_CONTENT_REGEX, NSFW_CONTENT_REGEX)
+
+
 def parse_duration_to_seconds(duration_str):
     if not duration_str or duration_str == '0':
         return None
@@ -116,6 +174,12 @@ def getvids(status,opt,direction,page):
         max_dur_sec = int(max_duration) if max_duration and max_duration.isdigit() else None
         duration_conditions = build_duration_condition(min_dur_sec, max_dur_sec)
         where_clauses.extend(duration_conditions)
+
+        content_condition, content_params = build_content_condition(
+            request.args.get('content', '').lower()
+        )
+        if content_condition:
+            where_clauses.append(content_condition)
         
         where_clause = "where " + " AND ".join(where_clauses) if where_clauses else ""
         
@@ -128,6 +192,7 @@ def getvids(status,opt,direction,page):
             params.append(from_date)
         if to_date:
             params.append(to_date)
+        params.extend(content_params)
         params.append(page_num)
         
         logger.debug("SQL: %s, Params: %s", sql, params)
@@ -404,7 +469,17 @@ def list_resume():
         logger.debug("Called List Resume")
         con = get_connection(logger)
         cur = con.cursor()
-        cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where not timestamp = 0 order by PublishedAt desc limit 40;")
+        content_condition, content_params = build_content_condition(
+            request.args.get('content', '').lower()
+        )
+        where_clauses = ["not v.timestamp = 0"]
+        if content_condition:
+            where_clauses.append(content_condition)
+        where_clause = " AND ".join(where_clauses)
+        cur.execute(
+            f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where {where_clause} order by PublishedAt desc limit 40;",
+            content_params,
+        )
         return parse_response(cur,con)
     except Exception as e:
         logger.error("API List Resume Failed: %s"%e)
@@ -455,16 +530,51 @@ def channels(page):
         cur = con.cursor()
         page_num = int(page) if page.isdigit() else 0
         # order=activity sorts by most recent video (used by the home page rails)
-        order_by = "lastvidtime desc" if request.args.get('order') == 'activity' else "channelname"
-        having = ""
-        params = []
+        order_by = (
+            "lastvidtime desc, channels.channelId"
+            if request.args.get('order') == 'activity'
+            else "channelname"
+        )
+        content_condition, content_params = build_content_condition(
+            request.args.get('content', '').lower()
+        )
+        if content_condition:
+            videos_join = (
+                f"left outer join (select v.* from {os.environ['VAULTTUBE_DBNAME']}.videos v "
+                f"where {content_condition}) videos "
+                "on channels.channelId = videos.channelId"
+            )
+            having_clauses = ["coalesce(sum(videos.watched = 0),0) > 0"]
+            params = list(content_params)
+        else:
+            # Keep the historical unfiltered join and aggregates for existing
+            # callers when content is absent or invalid.
+            videos_join = (
+                "left outer join videos "
+                "on channels.channelId = videos.channelId"
+            )
+            having_clauses = []
+            params = []
+
         src = request.args.get('source')
         if src in ('youtube', 'patreon', 'reddit'):
             # Empty channels have no videos.source; classify by ID shape, same
             # heuristic as channels.html / /api/channel
-            having = " having coalesce(source, case when left(channels.channelId, 2) = 'UC' then 'youtube' when channels.channelId regexp '^[0-9]+$' then 'patreon' else 'reddit' end) = %s"
+            having_clauses.append(
+                "coalesce(source, case when left(channels.channelId, 2) = 'UC' "
+                "then 'youtube' when channels.channelId regexp '^[0-9]+$' "
+                "then 'patreon' else 'reddit' end) = %s"
+            )
             params.append(src)
-        cur.execute(f"select channels.*,count(videos.id) as vidcount,max(PublishedAt) as lastvidtime,coalesce(sum(videos.watched = 0),0) as unwatched,max(videos.source) as source from channels left outer join videos on channels.channelId = videos.channelId group by channels.channelId{having} order by {order_by} limit 40 offset %s;",(*params, page_num))
+        having = (
+            " having " + " AND ".join(having_clauses)
+            if having_clauses
+            else ""
+        )
+        cur.execute(
+            f"select channels.*,count(videos.id) as vidcount,max(PublishedAt) as lastvidtime,coalesce(sum(videos.watched = 0),0) as unwatched,max(videos.source) as source from channels {videos_join} group by channels.channelId{having} order by {order_by} limit 40 offset %s;",
+            (*params, page_num),
+        )
         return parse_response(cur,con)
     except Exception as e:
         logger.error("API Channel Failed: %s"%e)
