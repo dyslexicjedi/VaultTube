@@ -1,8 +1,7 @@
 {% extends "base.html" %}
-{% block content %}
-
+{% block topbar_tools %}
 <fieldset class="vt-home-content-filter">
-    <legend>Home content</legend>
+    <legend class="vt-sr-only">Home content filter</legend>
     <div class="vt-home-content-toggle">
         <input type="radio" name="home-content" id="home-content-sfw" value="sfw" checked>
         <label for="home-content-sfw">SFW</label>
@@ -10,6 +9,8 @@
         <label for="home-content-nsfw">NSFW</label>
     </div>
 </fieldset>
+{% endblock %}
+{% block content %}
 
 <!-- Hero: most recently added unwatched video -->
 <section class="vt-hero" id="hero" hidden>

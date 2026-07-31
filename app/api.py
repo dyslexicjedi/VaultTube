@@ -81,10 +81,15 @@ NSFW_TERM_PATTERNS = (
     r"masturbat(e|ed|es|ing|ion)",
     r"orgasm(s|ic)?",
 )
+NSFW_HASHTAG_PATTERNS = (
+    r"#[[:alnum:]_]*nude[[:alnum:]_]*",
+)
 NSFW_CONTENT_REGEX = (
-    r"(^|[^[:alnum:]_])("
+    r"((^|[^[:alnum:]_])("
     + "|".join(NSFW_TERM_PATTERNS)
-    + r")([^[:alnum:]_]|$)"
+    + r")([^[:alnum:]_]|$)|("
+    + "|".join(NSFW_HASHTAG_PATTERNS)
+    + r")([^[:alnum:]_]|$))"
 )
 
 

@@ -134,6 +134,41 @@ def _insert_home_content_filter_videos():
             "2099-01-13 10:00:00",
             132,
         ),
+        (
+            "HomeFilterNudeShootHashtag",
+            "Studio notes #nudeshoot",
+            "New portfolio work",
+            "2099-01-14 10:00:00",
+            133,
+        ),
+        (
+            "HomeFilterArtNudeHashtag",
+            "Gallery notes",
+            "Tags: #artnude",
+            "2099-01-15 10:00:00",
+            134,
+        ),
+        (
+            "HomeFilterDenudedBoundary",
+            "Denuded landscape",
+            "A denudement study",
+            "2099-01-16 10:00:00",
+            135,
+        ),
+        (
+            "HomeFilterNudeHashtagExtended",
+            "Follow #nudeshooter updates",
+            "An extended nude hashtag",
+            "2099-01-17 10:00:00",
+            136,
+        ),
+        (
+            "HomeFilterPhotoArtNudeHashtag",
+            "Portfolio tags",
+            "Includes #photoartnude",
+            "2099-01-18 10:00:00",
+            137,
+        ),
     ]
     for video_id, title, description, published_at, timestamp in rows:
         cur.execute(
@@ -157,11 +192,19 @@ def _insert_home_content_filter_videos():
 
 def test_home_content_selector_markup_and_api_wiring(client):
     body = client.get("/").get_data(as_text=True)
+    topbar_start = body.index('<header class="vt-topbar">')
+    topbar_end = body.index("</header>", topbar_start)
+    topbar = body[topbar_start:topbar_end]
+    content = body[body.index('<main class="vt-content">'):]
 
     assert 'id="home-content-sfw" value="sfw" checked' in body
     assert 'id="home-content-nsfw" value="nsfw"' in body
-    assert '<fieldset class="vt-home-content-filter">' in body
-    assert "<legend>Home content</legend>" in body
+    assert '<fieldset class="vt-home-content-filter">' in topbar
+    assert '<legend class="vt-sr-only">Home content filter</legend>' in topbar
+    assert topbar.index('class="vt-search"') < topbar.index("vt-home-content-filter")
+    assert topbar.index("vt-home-content-filter") < topbar.index('id="add-open"')
+    assert "vt-home-content-filter" not in content
+    assert 'id="home-content-sfw"' not in client.get("/browse.html").get_data(as_text=True)
     assert "loadHome('sfw')" in body
     assert "withContent('/api/list/resume/', mode)" in body
     assert "withContent('/api/getvids/unwatched/AddedAt/desc/0', mode)" in body
@@ -211,6 +254,11 @@ def test_getvids_home_content_modes_and_boundaries(client):
         "HomeFilterOnlyFansModel",
         "HomeFilterSexEducation",
         "HomeFilterSexDifferences",
+        "HomeFilterNudeShootHashtag",
+        "HomeFilterArtNudeHashtag",
+        "HomeFilterDenudedBoundary",
+        "HomeFilterNudeHashtagExtended",
+        "HomeFilterPhotoArtNudeHashtag",
     }
     assert unfiltered == expected_all
     assert invalid == expected_all
@@ -220,6 +268,7 @@ def test_getvids_home_content_modes_and_boundaries(client):
         "HomeFilterClassBoundary",
         "HomeFilterSexEducation",
         "HomeFilterSexDifferences",
+        "HomeFilterDenudedBoundary",
     }
     assert nsfw == {
         "HomeFilterTitleAdult",
@@ -230,6 +279,10 @@ def test_getvids_home_content_modes_and_boundaries(client):
         "HomeFilterPornhub",
         "HomeFilterPornstar",
         "HomeFilterOnlyFansModel",
+        "HomeFilterNudeShootHashtag",
+        "HomeFilterArtNudeHashtag",
+        "HomeFilterNudeHashtagExtended",
+        "HomeFilterPhotoArtNudeHashtag",
     }
 
 
@@ -252,6 +305,7 @@ def test_resume_home_content_modes(client):
         "HomeFilterClassBoundary",
         "HomeFilterSexEducation",
         "HomeFilterSexDifferences",
+        "HomeFilterDenudedBoundary",
     } <= sfw
     assert "HomeFilterTitleAdult" not in sfw
     assert "HomeFilterDescriptionAdult" not in sfw
@@ -261,6 +315,10 @@ def test_resume_home_content_modes(client):
     assert "HomeFilterPornhub" not in sfw
     assert "HomeFilterPornstar" not in sfw
     assert "HomeFilterOnlyFansModel" not in sfw
+    assert "HomeFilterNudeShootHashtag" not in sfw
+    assert "HomeFilterArtNudeHashtag" not in sfw
+    assert "HomeFilterNudeHashtagExtended" not in sfw
+    assert "HomeFilterPhotoArtNudeHashtag" not in sfw
     assert {
         "HomeFilterTitleAdult",
         "HomeFilterDescriptionAdult",
@@ -270,12 +328,17 @@ def test_resume_home_content_modes(client):
         "HomeFilterPornhub",
         "HomeFilterPornstar",
         "HomeFilterOnlyFansModel",
+        "HomeFilterNudeShootHashtag",
+        "HomeFilterArtNudeHashtag",
+        "HomeFilterNudeHashtagExtended",
+        "HomeFilterPhotoArtNudeHashtag",
     } <= nsfw
     assert "HomeFilterSafe" not in nsfw
     assert "HomeFilterBoundary" not in nsfw
     assert "HomeFilterClassBoundary" not in nsfw
     assert "HomeFilterSexEducation" not in nsfw
     assert "HomeFilterSexDifferences" not in nsfw
+    assert "HomeFilterDenudedBoundary" not in nsfw
     assert {
         "HomeFilterSafe",
         "HomeFilterTitleAdult",
@@ -290,6 +353,11 @@ def test_resume_home_content_modes(client):
         "HomeFilterOnlyFansModel",
         "HomeFilterSexEducation",
         "HomeFilterSexDifferences",
+        "HomeFilterNudeShootHashtag",
+        "HomeFilterArtNudeHashtag",
+        "HomeFilterDenudedBoundary",
+        "HomeFilterNudeHashtagExtended",
+        "HomeFilterPhotoArtNudeHashtag",
     } <= unfiltered
 
 
