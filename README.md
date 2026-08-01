@@ -71,6 +71,9 @@ Optional:
 | `VAULTTUBE_DISABLEBACK` | Set to anything but `False` to disable background scan/download threads |
 | `VAULTTUBE_DL_DELAY` | Seconds between queued downloads (default 30) |
 | `VAULTTUBE_DBPOOL` | Database connection pool size (default 8) |
+| `VAULTTUBE_SENTINEL_CENSUS_INTERVAL` | Seconds between complete remote inventory censuses (default 604800 / 7 days) |
+| `VAULTTUBE_SENTINEL_CENSUS_BUDGET` | YouTube API requests reserved for each Sentinel census pass (default 500) |
+| `VAULTTUBE_SENTINEL_CENSUS_MAX_PAGES` | Safety cap per remote inventory snapshot (default 2000 pages) |
 
 ## Contributing / Architecture
 

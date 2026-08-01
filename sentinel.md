@@ -13,7 +13,10 @@ bounded rescue plan.
 - Phase 2 complete: Observatory read APIs and interface, creator context, and
   Sentinel data in JSON exports. The interface deliberately reports observed
   state rather than a risk score; risk scoring begins in Phase 4.
-- Phase 3 next: durable remote inventories and archive-coverage reporting.
+- Phase 3 complete: low-frequency complete remote inventories, durable
+  pagination continuations, archive-coverage reporting, and inventory
+  removal/restoration events kept separate from source availability.
+- Phase 4 next: deterministic, explainable source risk in observation mode.
 
 ## Design principles
 
@@ -166,6 +169,13 @@ using the old flat “Gone from source” filter.
 
 Exit criterion: VaultTube can accurately report channel coverage without
 queueing the channel's full history.
+
+The inventory worker runs independently of the hourly catch-up scanner. Its
+defaults are a seven-day interval, a 500-request pass budget, and a 2,000-page
+per-source safety cap; configure these with
+`VAULTTUBE_SENTINEL_CENSUS_INTERVAL`, `VAULTTUBE_SENTINEL_CENSUS_BUDGET`, and
+`VAULTTUBE_SENTINEL_CENSUS_MAX_PAGES`. Interrupted runs retry hourly from their
+persisted continuation token.
 
 ### Phase 4 - Explainable risk
 

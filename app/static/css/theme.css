@@ -1819,6 +1819,17 @@ a:focus-visible {
 .vt-sentinel-facts span { display: block; }
 .vt-sentinel-facts strong { font-size: 17px; }
 .vt-sentinel-facts span { margin-top: 2px; color: var(--vt-text-dim); font-size: 10px; }
+.vt-sentinel-local-state { margin-top: 18px; }
+.vt-sentinel-census-note {
+  margin-bottom: 16px; padding: 11px 12px; border: 1px dashed var(--vt-border);
+  border-radius: 8px; color: var(--vt-text-dim); font-size: 12px;
+}
+.vt-sentinel-unarchived { margin-top: 14px; }
+.vt-sentinel-unarchived > strong { display: block; margin-bottom: 7px; font-size: 11px; color: var(--vt-text-dim); text-transform: uppercase; letter-spacing: .06em; }
+.vt-sentinel-unarchived > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.vt-sentinel-unarchived a { padding: 4px 7px; border: 1px solid var(--vt-border); border-radius: 6px; color: var(--vt-text); font-family: ui-monospace, monospace; font-size: 10px; text-decoration: none; }
+.vt-sentinel-unarchived a:hover { border-color: var(--vt-accent); color: var(--vt-accent); }
+.vt-sentinel-event-dot.removed { background: var(--vt-warning, #e4a853); box-shadow: 0 0 0 4px rgba(228,168,83,.12); }
 .vt-sentinel-affected-list { display: flex; flex-direction: column; gap: 1px; }
 .vt-sentinel-affected {
   display: flex;

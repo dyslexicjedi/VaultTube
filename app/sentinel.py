@@ -74,8 +74,9 @@ def _insert_event(cur, video_id, event_type, from_state, to_state,
     cur.execute(
         "INSERT IGNORE INTO sentinel_events "
         "(provider, entity_type, entity_id, event_type, from_state, to_state, "
-        "scan_run_id, evidence_json, dedupe_key) "
-        "VALUES('youtube', 'video', %s, %s, %s, %s, %s, %s, %s)",
+        "scan_run_id, evidence_json, dedupe_key, source_type, source_id) "
+        "VALUES('youtube', 'video', %s, %s, %s, %s, %s, %s, %s, "
+        "'channel', (SELECT channelId FROM videos WHERE id=%s))",
         (
             video_id,
             event_type,
@@ -84,6 +85,7 @@ def _insert_event(cur, video_id, event_type, from_state, to_state,
             scan_id,
             json.dumps(evidence or {}, sort_keys=True),
             _event_dedupe_key(event_type, video_id, scan_id),
+            video_id,
         ),
     )
 
@@ -275,6 +277,19 @@ def get_summary():
             "ORDER BY id DESC LIMIT 1"
         )
         scan = cur.fetchone()
+        cur.execute(
+            "SELECT COUNT(DISTINCT i.entity_id), "
+            "COUNT(DISTINCT CASE WHEN v.id IS NOT NULL THEN i.entity_id END), "
+            "MAX(r.completed_at) FROM sentinel_inventory_runs r "
+            "LEFT JOIN sentinel_inventory i ON i.scan_run_id=r.id "
+            "LEFT JOIN videos v ON v.id=i.entity_id "
+            "WHERE r.status='complete' AND NOT EXISTS ("
+            " SELECT 1 FROM sentinel_inventory_runs newer "
+            " WHERE newer.provider=r.provider AND newer.source_type=r.source_type "
+            " AND newer.source_id=r.source_id AND newer.status='complete' "
+            " AND newer.id>r.id)"
+        )
+        known_remote, preserved_remote, latest_inventory_at = cur.fetchone()
         cur.close()
         return {
             'monitored_videos': int(monitored),
@@ -284,6 +299,14 @@ def get_summary():
             'restored_30d': int(restored_30d),
             'imported_existing_state': int(imported),
             'total_events': int(total_events),
+            'known_remote_videos': int(known_remote),
+            'preserved_remote_videos': int(preserved_remote),
+            'remote_unarchived_videos': int(known_remote - preserved_remote),
+            'archive_coverage_percent': (
+                round((int(preserved_remote) / int(known_remote)) * 100, 1)
+                if known_remote else None
+            ),
+            'latest_inventory_at': _iso(latest_inventory_at),
             'last_scan': None if scan is None else {
                 'id': int(scan[0]),
                 'status': scan[1],
@@ -300,6 +323,7 @@ def get_summary():
 
 EVENT_TYPES = {
     'source_unavailable', 'source_restored', 'imported_existing_state',
+    'inventory_removed', 'inventory_restored',
 }
 
 
@@ -315,7 +339,7 @@ def get_events(limit=50, offset=0, event_type=None, channel_id=None):
         conditions.append('e.event_type=%s')
         params.append(event_type)
     if channel_id:
-        conditions.append('v.channelId=%s')
+        conditions.append('COALESCE(v.channelId,e.source_id)=%s')
         params.append(channel_id)
     where = ' AND '.join(conditions)
 
@@ -333,9 +357,9 @@ def get_events(limit=50, offset=0, event_type=None, channel_id=None):
         cur.execute(
             "SELECT e.id, e.entity_id, e.event_type, e.from_state, e.to_state, "
             "e.observed_at, e.scan_run_id, e.evidence_json, v.title, "
-            "v.channelId, c.channelname FROM sentinel_events e "
+            "COALESCE(v.channelId,e.source_id), c.channelname FROM sentinel_events e "
             "LEFT JOIN videos v ON v.id=e.entity_id "
-            "LEFT JOIN channels c ON c.channelid=v.channelId WHERE " + where +
+            "LEFT JOIN channels c ON c.channelid=COALESCE(v.channelId,e.source_id) WHERE " + where +
             " ORDER BY e.observed_at DESC, e.id DESC LIMIT %s OFFSET %s",
             tuple(params + [limit, offset]),
         )
@@ -368,32 +392,63 @@ def get_sources(limit=50, offset=0):
         raise RuntimeError('Unable to get database connection for Sentinel sources')
     try:
         cur = con.cursor()
-        cur.execute("SELECT COUNT(DISTINCT channelId) FROM videos WHERE channelId IS NOT NULL")
+        cur.execute(
+            "SELECT COUNT(*) FROM ("
+            " SELECT channelId source_id FROM videos WHERE channelId IS NOT NULL GROUP BY channelId "
+            " UNION SELECT source_id FROM sentinel_inventory_runs "
+            " WHERE provider='youtube' AND source_type='channel' AND status='complete' "
+            " GROUP BY source_id) sources"
+        )
         total = int(cur.fetchone()[0])
         cur.execute(
-            "SELECT v.channelId, COALESCE(c.channelname, v.channelId), "
-            "COUNT(DISTINCT v.id), "
-            "COALESCE(SUM(s.state='unavailable'),0), "
-            "COALESCE(SUM(s.state='suspected_unavailable'),0), "
+            "SELECT base.source_id, COALESCE(c.channelname, base.source_id), "
+            "COALESCE(local.video_count,0), "
+            "COALESCE(local.unavailable,0), COALESCE(local.suspected,0), "
             "COALESCE(ev.event_count,0), ev.latest_event_at, "
             "COALESCE(ev.newly_unavailable_30d,0), "
-            "COALESCE(ev.restored_30d,0), MAX(s.last_checked_at) "
-            "FROM videos v LEFT JOIN channels c ON c.channelid=v.channelId "
-            "LEFT JOIN sentinel_video_state s ON s.video_id=v.id "
+            "COALESCE(ev.restored_30d,0), local.last_checked_at, "
+            "COALESCE(inv.known_remote,0), COALESCE(inv.preserved_remote,0), "
+            "inv.completed_at "
+            "FROM ("
+            " SELECT channelId source_id FROM videos WHERE channelId IS NOT NULL GROUP BY channelId "
+            " UNION SELECT source_id FROM sentinel_inventory_runs "
+            " WHERE provider='youtube' AND source_type='channel' AND status='complete' "
+            " GROUP BY source_id"
+            ") base LEFT JOIN channels c ON c.channelid=base.source_id "
             "LEFT JOIN ("
-            "  SELECT v2.channelId, COUNT(*) event_count, MAX(e.observed_at) latest_event_at, "
+            " SELECT v.channelId, COUNT(DISTINCT v.id) video_count, "
+            " COALESCE(SUM(s.state='unavailable'),0) unavailable, "
+            " COALESCE(SUM(s.state='suspected_unavailable'),0) suspected, "
+            " MAX(s.last_checked_at) last_checked_at "
+            " FROM videos v LEFT JOIN sentinel_video_state s ON s.video_id=v.id "
+            " WHERE v.channelId IS NOT NULL GROUP BY v.channelId"
+            ") local ON local.channelId=base.source_id "
+            "LEFT JOIN ("
+            "  SELECT COALESCE(v2.channelId,e.source_id) channelId, COUNT(*) event_count, MAX(e.observed_at) latest_event_at, "
             "  SUM(e.event_type='source_unavailable' AND e.observed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) newly_unavailable_30d, "
             "  SUM(e.event_type='source_restored' AND e.observed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) restored_30d "
-            "  FROM sentinel_events e JOIN videos v2 ON v2.id=e.entity_id "
-            "  GROUP BY v2.channelId"
-            ") ev ON ev.channelId=v.channelId "
-            "WHERE v.channelId IS NOT NULL "
-            "GROUP BY v.channelId, c.channelname, ev.event_count, "
-            "ev.latest_event_at, ev.newly_unavailable_30d, ev.restored_30d "
+            "  FROM sentinel_events e LEFT JOIN videos v2 ON v2.id=e.entity_id "
+            "  WHERE COALESCE(v2.channelId,e.source_id) IS NOT NULL "
+            "  GROUP BY COALESCE(v2.channelId,e.source_id)"
+            ") ev ON ev.channelId=base.source_id "
+            "LEFT JOIN ("
+            "  SELECT r.source_id, COUNT(i.entity_id) known_remote, "
+            "  SUM(v3.id IS NOT NULL) preserved_remote, r.completed_at "
+            "  FROM sentinel_inventory_runs r "
+            "  LEFT JOIN sentinel_inventory i ON i.scan_run_id=r.id "
+            "  LEFT JOIN videos v3 ON v3.id=i.entity_id "
+            "  WHERE r.provider='youtube' AND r.source_type='channel' "
+            "  AND r.status='complete' AND NOT EXISTS ("
+            "    SELECT 1 FROM sentinel_inventory_runs newer "
+            "    WHERE newer.provider=r.provider AND newer.source_type=r.source_type "
+            "    AND newer.source_id=r.source_id AND newer.status='complete' "
+            "    AND newer.id>r.id) "
+            "  GROUP BY r.source_id, r.completed_at"
+            ") inv ON inv.source_id=base.source_id "
             "ORDER BY newly_unavailable_30d DESC, "
-            "SUM(s.state='suspected_unavailable') DESC, "
-            "SUM(s.state='unavailable') DESC, ev.latest_event_at DESC, "
-            "COUNT(DISTINCT v.id) DESC LIMIT %s OFFSET %s",
+            "local.suspected DESC, local.unavailable DESC, "
+            "ev.latest_event_at DESC, local.video_count DESC "
+            "LIMIT %s OFFSET %s",
             (limit, offset),
         )
         items = []
@@ -412,6 +467,14 @@ def get_sources(limit=50, offset=0):
                 'newly_unavailable_30d': newly_unavailable,
                 'restored_30d': int(row[8]),
                 'last_checked_at': _iso(row[9]),
+                'known_remote': int(row[10]),
+                'preserved_remote': int(row[11]),
+                'remote_unarchived': int(row[10]) - int(row[11]),
+                'coverage_percent': (
+                    round((int(row[11]) / int(row[10])) * 100, 1)
+                    if row[10] else None
+                ),
+                'inventory_completed_at': _iso(row[12]),
                 'status': _source_status(
                     unavailable, suspected, newly_unavailable,
                 ),
@@ -441,8 +504,23 @@ def get_source_detail(channel_id, event_limit=20):
         )
         row = cur.fetchone()
         if row is None:
-            cur.close()
-            return None
+            cur.execute(
+                "SELECT COALESCE(channelname, %s) FROM channels "
+                "WHERE channelid=%s",
+                (channel_id, channel_id),
+            )
+            channel = cur.fetchone()
+            cur.execute(
+                "SELECT COUNT(*) FROM sentinel_inventory_runs "
+                "WHERE provider='youtube' AND source_type='channel' "
+                "AND source_id=%s AND status='complete'",
+                (channel_id,),
+            )
+            has_inventory = cur.fetchone()[0] > 0
+            if channel is None and not has_inventory:
+                cur.close()
+                return None
+            row = ((channel[0] if channel else channel_id), 0, 0, 0, None)
         cur.execute(
             "SELECT v.id, v.title, v.PublishedAt, s.state, s.last_negative_at "
             "FROM videos v JOIN sentinel_video_state s ON s.video_id=v.id "
@@ -462,11 +540,33 @@ def get_source_detail(channel_id, event_limit=20):
         cur.execute(
             "SELECT COUNT(*), COALESCE(SUM(e.event_type='source_unavailable' "
             "AND e.observed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)),0) "
-            "FROM sentinel_events e JOIN videos v ON v.id=e.entity_id "
-            "WHERE v.channelId=%s",
+            "FROM sentinel_events e LEFT JOIN videos v ON v.id=e.entity_id "
+            "WHERE COALESCE(v.channelId,e.source_id)=%s",
             (channel_id,),
         )
         event_count, newly_unavailable = cur.fetchone()
+        cur.execute(
+            "SELECT r.id, r.completed_at, COUNT(i.entity_id), "
+            "COALESCE(SUM(v.id IS NOT NULL),0) "
+            "FROM sentinel_inventory_runs r "
+            "LEFT JOIN sentinel_inventory i ON i.scan_run_id=r.id "
+            "LEFT JOIN videos v ON v.id=i.entity_id "
+            "WHERE r.provider='youtube' AND r.source_type='channel' "
+            "AND r.source_id=%s AND r.status='complete' "
+            "GROUP BY r.id, r.completed_at ORDER BY r.id DESC LIMIT 1",
+            (channel_id,),
+        )
+        inventory = cur.fetchone()
+        remote_unarchived = []
+        if inventory is not None:
+            cur.execute(
+                "SELECT i.entity_id FROM sentinel_inventory i "
+                "LEFT JOIN videos v ON v.id=i.entity_id "
+                "WHERE i.scan_run_id=%s AND v.id IS NULL "
+                "ORDER BY i.position LIMIT 20",
+                (inventory[0],),
+            )
+            remote_unarchived = [item[0] for item in cur.fetchall()]
         cur.close()
     finally:
         con.close()
@@ -474,6 +574,8 @@ def get_source_detail(channel_id, event_limit=20):
     events = get_events(limit=event_limit, channel_id=channel_id)
     unavailable = int(row[2])
     suspected = int(row[3])
+    known_remote = int(inventory[2]) if inventory else 0
+    preserved_remote = int(inventory[3]) if inventory else 0
     return {
         'channel_id': channel_id,
         'channel_name': row[0],
@@ -487,6 +589,17 @@ def get_source_detail(channel_id, event_limit=20):
         ),
         'affected_videos': affected,
         'events': events['items'],
+        'inventory': None if inventory is None else {
+            'run_id': int(inventory[0]),
+            'completed_at': _iso(inventory[1]),
+            'known_remote': known_remote,
+            'preserved_remote': preserved_remote,
+            'remote_unarchived': known_remote - preserved_remote,
+            'coverage_percent': round(
+                (preserved_remote / known_remote) * 100, 1,
+            ) if known_remote else 0,
+            'unarchived_video_ids': remote_unarchived,
+        },
     }
 
 
@@ -529,11 +642,44 @@ def export_sentinel_data():
         ]
         cur.execute(
             "SELECT id, entity_id, event_type, from_state, to_state, "
-            "observed_at, scan_run_id, evidence_json, NULL, NULL, NULL "
+            "observed_at, scan_run_id, evidence_json, NULL, source_id, NULL "
             "FROM sentinel_events ORDER BY id"
         )
         events = [_event_row(r) for r in cur.fetchall()]
+        cur.execute(
+            "SELECT id, provider, source_type, source_id, remote_collection_id, "
+            "status, continuation_token, pages_fetched, items_seen, "
+            "requests_made, started_at, updated_at, completed_at, error_message "
+            "FROM sentinel_inventory_runs ORDER BY id"
+        )
+        inventory_runs = [
+            {
+                'id': int(r[0]), 'provider': r[1], 'source_type': r[2],
+                'source_id': r[3], 'remote_collection_id': r[4],
+                'status': r[5], 'continuation_token': r[6],
+                'pages_fetched': int(r[7]), 'items_seen': int(r[8]),
+                'requests_made': int(r[9]), 'started_at': _iso(r[10]),
+                'updated_at': _iso(r[11]), 'completed_at': _iso(r[12]),
+                'error_message': r[13],
+            }
+            for r in cur.fetchall()
+        ]
+        cur.execute(
+            "SELECT scan_run_id, provider, source_type, source_id, entity_id, "
+            "position, observed_at FROM sentinel_inventory ORDER BY scan_run_id, position"
+        )
+        inventory = [
+            {
+                'scan_run_id': int(r[0]), 'provider': r[1],
+                'source_type': r[2], 'source_id': r[3], 'entity_id': r[4],
+                'position': r[5], 'observed_at': _iso(r[6]),
+            }
+            for r in cur.fetchall()
+        ]
         cur.close()
-        return {'scan_runs': scans, 'video_states': states, 'events': events}
+        return {
+            'scan_runs': scans, 'video_states': states, 'events': events,
+            'inventory_runs': inventory_runs, 'inventory': inventory,
+        }
     finally:
         con.close()

@@ -35,6 +35,8 @@
     function eventInfo(type) {
         if (type === 'source_unavailable') return { title: 'Unavailable confirmed', cls: 'unavailable' };
         if (type === 'source_restored') return { title: 'Restored at source', cls: 'restored' };
+        if (type === 'inventory_removed') return { title: 'Removed from inventory', cls: 'removed' };
+        if (type === 'inventory_restored') return { title: 'Returned to inventory', cls: 'restored' };
         return { title: 'Existing unavailable state imported', cls: 'imported' };
     }
 
@@ -43,6 +45,11 @@
         $id('sentinel-kpi-new').textContent = data.newly_unavailable_7d.toLocaleString();
         $id('sentinel-kpi-restored').textContent = data.restored_30d.toLocaleString();
         $id('sentinel-kpi-suspected').textContent = data.suspected_unavailable.toLocaleString();
+        if (data.archive_coverage_percent != null) {
+            $id('sentinel-kpi-coverage').textContent = data.archive_coverage_percent.toLocaleString() + '%';
+            $id('sentinel-kpi-coverage-sub').textContent = data.preserved_remote_videos.toLocaleString()
+                + ' of ' + data.known_remote_videos.toLocaleString() + ' known remote videos preserved';
+        }
         if (data.last_scan) {
             var scan = data.last_scan;
             $id('sentinel-last-scan').textContent = 'Last scan ' + scan.status
@@ -58,6 +65,7 @@
         var facts = [];
         if (source.unavailable) facts.push(source.unavailable + ' unavailable');
         if (source.suspected) facts.push(source.suspected + ' suspected');
+        if (source.known_remote) facts.push(source.preserved_remote + ' of ' + source.known_remote + ' preserved');
         if (!facts.length) facts.push(source.video_count + ' archived');
         return '<button type="button" class="vt-sentinel-source" data-channel="' + esc(source.channel_id) + '">'
             + '<span class="vt-sentinel-avatar">' + esc(initials) + '</span>'
@@ -105,22 +113,38 @@
         var available = Math.max(0, data.video_count - data.unavailable - data.suspected);
         var pct = data.video_count ? Math.round((available / data.video_count) * 100) : 0;
         $id('sentinel-detail-name').textContent = data.channel_name;
-        $id('sentinel-detail-status').textContent = statusLabel(data.status) + ' · last checked ' + fmtDate(data.last_checked_at, true);
+        $id('sentinel-detail-status').textContent = statusLabel(data.status)
+            + (data.inventory
+                ? ' · census ' + fmtDate(data.inventory.completed_at, true)
+                : ' · availability checked ' + fmtDate(data.last_checked_at, true));
         var link = $id('sentinel-detail-link');
         link.href = '/creator.html?creator=' + encodeURIComponent(data.channel_id);
         link.hidden = false;
         var affected = data.affected_videos.length
             ? '<div class="vt-sentinel-affected-list">' + data.affected_videos.map(affectedVideo).join('') + '</div>'
             : '<div class="vt-empty vt-sentinel-detail-empty">No archived videos currently need attention.</div>';
-        $id('sentinel-detail').innerHTML = ''
-            + '<div class="vt-sentinel-availability"><span>Still available at source</span><strong>' + available + ' of ' + data.video_count + '</strong></div>'
+        var inventory = data.inventory;
+        var coverage = inventory
+            ? '<div class="vt-sentinel-availability"><span>Archive coverage from complete census</span><strong>'
+                + inventory.preserved_remote + ' of ' + inventory.known_remote + ' (' + inventory.coverage_percent + '%)</strong></div>'
+                + '<div class="vt-meter"><div style="width:' + inventory.coverage_percent + '%"></div></div>'
+                + (inventory.unarchived_video_ids.length
+                    ? '<div class="vt-sentinel-unarchived"><strong>Known remotely, not archived</strong><div>'
+                        + inventory.unarchived_video_ids.map(function (id) {
+                            return '<a href="https://www.youtube.com/watch?v=' + encodeURIComponent(id) + '" target="_blank" rel="noopener noreferrer">' + esc(id) + '</a>';
+                        }).join('') + '</div></div>'
+                    : '')
+            : '<div class="vt-sentinel-census-note">No complete remote census yet. Partial scans are intentionally excluded.</div>';
+        $id('sentinel-detail').innerHTML = coverage
+            + '<div class="vt-sentinel-local-state">'
+            + '<div class="vt-sentinel-availability"><span>Archived without an availability alert</span><strong>' + available + ' of ' + data.video_count + '</strong></div>'
             + '<div class="vt-meter"><div style="width:' + pct + '%"></div></div>'
             + '<div class="vt-sentinel-facts">'
             + '<div><strong>' + data.video_count + '</strong><span>Archived</span></div>'
             + '<div><strong>' + data.unavailable + '</strong><span>Unavailable</span></div>'
             + '<div><strong>' + data.suspected + '</strong><span>Suspected</span></div>'
             + '<div><strong>' + data.event_count + '</strong><span>Events</span></div>'
-            + '</div>' + affected;
+            + '</div>' + affected + '</div>';
     }
 
     function selectSource(channelId, filterActivity) {
@@ -140,7 +164,11 @@
         var info = eventInfo(event.event_type);
         var target = event.title || event.entity_id;
         var creator = event.channel_name || event.channel_id || 'Unknown creator';
-        var note = event.event_type === 'imported_existing_state'
+        var note = event.event_type === 'inventory_removed'
+            ? 'Missing from a newer complete inventory; availability is not inferred.'
+            : event.event_type === 'inventory_restored'
+                ? 'Present again after being absent from the previous complete inventory.'
+                : event.event_type === 'imported_existing_state'
             ? 'Historical state imported; original disappearance time is unknown.'
             : event.event_type === 'source_restored'
                 ? 'A successful source check found this video again.'

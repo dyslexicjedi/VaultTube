@@ -6,6 +6,7 @@ from sentinel_api import sentinel_bp
 from backend import backend_thread,deleted_check_thread
 from database import checkdb,get_resumable_queue_items
 from scanner import start_scanner
+from sentinel_inventory import start_census
 from downloader import start_dl_queue
 from transcoder import start_reaper_thread, start_cleanup_thread, shutdown_transcoder
 from QueueObject import QueueObject
@@ -162,6 +163,8 @@ def start_background_threads():
     be.start()
     sc = threading.Thread(target=start_scanner,args=(app,),daemon=True)
     sc.start()
+    census = threading.Thread(target=start_census,args=(app,),daemon=True)
+    census.start()
     dl = threading.Thread(target=start_dl_queue,args=(app,),daemon=True)
     dl.start()
     #Re-enabled: lookups are batched 50/call now and only changes are logged

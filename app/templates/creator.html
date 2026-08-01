@@ -68,15 +68,16 @@
         link.hidden = false;
     }).catch(function () {});
 
-    // Sentinel context for this creator. Phase 2 reports observed local
-    // availability only; risk and remote archive coverage arrive later.
+    // Sentinel context combines local availability with the latest complete
+    // remote census. Incomplete inventories are never exposed here.
     fetch('/api/sentinel/source/channel/' + encodeURIComponent(creator))
         .then(function (r) { return r.json(); })
         .then(function (body) {
             if (!body.success) return;
             var data = body.data;
-            if (!data.unavailable && !data.suspected && !data.event_count) return;
+            if (!data.unavailable && !data.suspected && !data.event_count && !data.inventory) return;
             var facts = [];
+            if (data.inventory) facts.push(data.inventory.preserved_remote + ' of ' + data.inventory.known_remote + ' known remote videos preserved (' + data.inventory.coverage_percent + '%)');
             if (data.unavailable) facts.push(data.unavailable + ' archived video' + (data.unavailable === 1 ? '' : 's') + ' unavailable at source');
             if (data.suspected) facts.push(data.suspected + ' awaiting confirmation');
             if (data.event_count) facts.push(data.event_count + ' recorded event' + (data.event_count === 1 ? '' : 's'));

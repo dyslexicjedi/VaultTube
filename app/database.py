@@ -230,6 +230,78 @@ def checkdb():
                 CONSTRAINT `fk_sentinel_event_scan` FOREIGN KEY (`scan_run_id`)
                     REFERENCES `sentinel_scan_runs` (`id`) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        # Phase 3 inventory events must retain their source even when the
+        # remote video has never been downloaded into videos.
+        for column, definition in [
+            ('source_type', "varchar(50) DEFAULT NULL"),
+            ('source_id', "varchar(255) DEFAULT NULL"),
+        ]:
+            cur.execute(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema=%s AND table_name='sentinel_events' "
+                "AND column_name=%s",
+                (os.environ['VAULTTUBE_DBNAME'], column),
+            )
+            if cur.fetchone()[0] == 0:
+                cur.execute(
+                    "ALTER TABLE sentinel_events ADD COLUMN `%s` %s" %
+                    (column, definition)
+                )
+        cur.execute(
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema=%s AND table_name='sentinel_events' "
+            "AND index_name='idx_sentinel_event_source'",
+            (os.environ['VAULTTUBE_DBNAME'],),
+        )
+        if cur.fetchone()[0] == 0:
+            cur.execute(
+                "ALTER TABLE sentinel_events ADD INDEX "
+                "`idx_sentinel_event_source` (`provider`,`source_type`,`source_id`)"
+            )
+        cur.execute(
+            "UPDATE sentinel_events e JOIN videos v ON v.id=e.entity_id "
+            "SET e.source_type='channel', e.source_id=v.channelId "
+            "WHERE e.source_id IS NULL AND v.channelId IS NOT NULL"
+        )
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema=%s AND table_name='sentinel_inventory_runs' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Sentinel inventory runs table not created, creating...")
+            cur.execute("""CREATE TABLE `sentinel_inventory_runs` (
+                `id` bigint NOT NULL AUTO_INCREMENT,
+                `provider` varchar(50) NOT NULL DEFAULT 'youtube',
+                `source_type` varchar(50) NOT NULL,
+                `source_id` varchar(255) NOT NULL,
+                `remote_collection_id` varchar(255) NOT NULL,
+                `status` varchar(20) NOT NULL DEFAULT 'running',
+                `continuation_token` varchar(500) DEFAULT NULL,
+                `continuation_history_json` longtext DEFAULT NULL,
+                `pages_fetched` int NOT NULL DEFAULT 0,
+                `items_seen` int NOT NULL DEFAULT 0,
+                `requests_made` int NOT NULL DEFAULT 0,
+                `started_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                `completed_at` timestamp NULL DEFAULT NULL,
+                `error_message` text DEFAULT NULL,
+                PRIMARY KEY (`id`),
+                INDEX `idx_inventory_run_source` (`provider`,`source_type`,`source_id`,`status`),
+                INDEX `idx_inventory_run_completed` (`completed_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema=%s AND table_name='sentinel_inventory' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Sentinel inventory table not created, creating...")
+            cur.execute("""CREATE TABLE `sentinel_inventory` (
+                `scan_run_id` bigint NOT NULL,
+                `provider` varchar(50) NOT NULL DEFAULT 'youtube',
+                `source_type` varchar(50) NOT NULL,
+                `source_id` varchar(255) NOT NULL,
+                `entity_id` varchar(255) COLLATE utf8mb4_bin NOT NULL,
+                `position` int DEFAULT NULL,
+                `observed_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`scan_run_id`,`entity_id`),
+                INDEX `idx_inventory_source_entity` (`provider`,`source_type`,`source_id`,`entity_id`),
+                CONSTRAINT `fk_inventory_run` FOREIGN KEY (`scan_run_id`)
+                    REFERENCES `sentinel_inventory_runs` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
         # Import only legacy unavailable rows. Available rows are initialized
         # lazily on their next successful check. The evidence explicitly says
         # that observed_at is the import time, not the disappearance time.
@@ -240,11 +312,12 @@ def checkdb():
             FROM videos WHERE source='youtube' AND isDeleted=1""")
         cur.execute("""INSERT IGNORE INTO sentinel_events
             (provider, entity_type, entity_id, event_type, from_state, to_state,
-             evidence_json, dedupe_key)
+             evidence_json, dedupe_key, source_type, source_id)
             SELECT 'youtube', 'video', id, 'imported_existing_state', NULL,
                    'unavailable',
                    '{"source":"videos.isDeleted","observed_at_known":false}',
-                   CONCAT('imported:youtube:video:', id, ':unavailable')
+                   CONCAT('imported:youtube:video:', id, ':unavailable'),
+                   'channel', channelId
             FROM videos WHERE source='youtube' AND isDeleted=1""")
         cur.close()
         con.close()
@@ -845,6 +918,8 @@ def export_row_counts():
             ('sentinel_events', "SELECT COUNT(*) FROM sentinel_events"),
             ('sentinel_video_states', "SELECT COUNT(*) FROM sentinel_video_state"),
             ('sentinel_scan_runs', "SELECT COUNT(*) FROM sentinel_scan_runs"),
+            ('sentinel_inventory_runs', "SELECT COUNT(*) FROM sentinel_inventory_runs"),
+            ('sentinel_inventory_items', "SELECT COUNT(*) FROM sentinel_inventory"),
         ]:
             cur.execute(sql)
             counts[name] = cur.fetchone()[0]

@@ -186,7 +186,8 @@ def _attach_quota_resume_metadata(exc, page_token, requested_tokens,
 def iter_playlist_pages(playlist_id, request_budget=None,
                         max_pages=_DEFAULT_PLAYLIST_MAX_PAGES,
                         start_page_token=None, pages_already_fetched=0,
-                        items_already_seen=0, requested_page_tokens=None):
+                        items_already_seen=0, requested_page_tokens=None,
+                        include_page_info=False):
     """Yield video-ID lists one playlistItems page (50 items, newest first)
     at a time via the YouTube Data API.
 
@@ -311,21 +312,35 @@ def iter_playlist_pages(playlist_id, request_budget=None,
             ]
             items_seen += len(raw_items)
 
-            pages_yielded += 1
-            suspended_at_yield = True
-            yield video_ids
-            suspended_at_yield = False
-
             page_info = retj.get('pageInfo', {})
             total_results = (
                 page_info.get('totalResults')
                 if isinstance(page_info, dict) else None
             )
-            if isinstance(total_results, int) and items_seen >= total_results:
+            next_token = retj.get('nextPageToken')
+            reached_total = (
+                isinstance(total_results, int) and items_seen >= total_results
+            )
+            complete = reached_total or not next_token
+
+            pages_yielded += 1
+            suspended_at_yield = True
+            if include_page_info:
+                yield {
+                    'video_ids': video_ids,
+                    'requested_page_token': page_token,
+                    'next_page_token': None if complete else next_token,
+                    'complete': complete,
+                    'items_seen': items_seen,
+                    'pages_fetched': pages_already_fetched + pages_yielded,
+                }
+            else:
+                yield video_ids
+            suspended_at_yield = False
+
+            if reached_total:
                 stop_reason = 'pageInfo.totalResults reached'
                 return
-
-            next_token = retj.get('nextPageToken')
             if not next_token:
                 return
             if next_token in requested_tokens:

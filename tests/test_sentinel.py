@@ -72,6 +72,16 @@ def test_sentinel_tables_exist():
     con.close()
 
 
+def test_sentinel_inventory_tables_exist():
+    con = _db_connect()
+    cur = con.cursor()
+    for table in ('sentinel_inventory_runs', 'sentinel_inventory'):
+        cur.execute("SHOW TABLES LIKE %s", (table,))
+        assert cur.fetchone() is not None
+    cur.close()
+    con.close()
+
+
 def test_two_independent_negative_checks_confirm_once():
     from sentinel import start_scan_run, finish_scan_run, record_video_observation
 
@@ -358,3 +368,268 @@ def test_json_export_includes_sentinel_ledger(client):
     assert payload['sentinel']['events'][0]['entity_id'] == 'SentinelExportGone'
     assert payload['sentinel']['video_states'][0]['state'] == 'unavailable'
     assert len(payload['sentinel']['scan_runs']) == 2
+
+
+def _inventory_page(video_ids, complete=True, token=None, pages=1,
+                    items_seen=None, requested=None):
+    return {
+        'video_ids': video_ids,
+        'requested_page_token': requested,
+        'next_page_token': token,
+        'complete': complete,
+        'items_seen': len(video_ids) if items_seen is None else items_seen,
+        'pages_fetched': pages,
+    }
+
+
+def test_complete_inventory_exposes_coverage_and_unarchived_ids(
+        client, monkeypatch):
+    import sentinel_inventory
+
+    _insert_channel('InventoryCreator', 'Inventory Films')
+    _insert_video('InventorySaved1', channel_id='InventoryCreator')
+    _insert_video('InventorySaved2', channel_id='InventoryCreator')
+    monkeypatch.setattr(
+        sentinel_inventory, 'iter_playlist_pages',
+        lambda *args, **kwargs: iter([_inventory_page([
+            'InventorySaved1', 'InventorySaved2', 'InventoryRemoteOnly',
+        ])]),
+    )
+
+    result = sentinel_inventory.census_source(
+        'channel', 'InventoryCreator', 'UUInventoryCreator',
+    )
+    assert result['status'] == 'complete'
+
+    detail = client.get(
+        '/api/sentinel/source/channel/InventoryCreator'
+    ).get_json()['data']
+    assert detail['inventory']['known_remote'] == 3
+    assert detail['inventory']['preserved_remote'] == 2
+    assert detail['inventory']['remote_unarchived'] == 1
+    assert detail['inventory']['coverage_percent'] == 66.7
+    assert detail['inventory']['unarchived_video_ids'] == [
+        'InventoryRemoteOnly',
+    ]
+    summary = client.get('/api/sentinel/summary').get_json()['data']
+    assert summary['known_remote_videos'] == 3
+    assert summary['preserved_remote_videos'] == 2
+    assert summary['archive_coverage_percent'] == 66.7
+    sources = client.get('/api/sentinel/sources').get_json()['data']
+    source = next(
+        item for item in sources['items']
+        if item['channel_id'] == 'InventoryCreator'
+    )
+    assert source['known_remote'] == 3
+    assert source['remote_unarchived'] == 1
+
+
+def test_inventory_removal_is_not_source_unavailability(client, monkeypatch):
+    import sentinel_inventory
+
+    _insert_channel('InventoryDiffCreator', 'Diff Films')
+    _insert_video('InventoryStillListed', channel_id='InventoryDiffCreator')
+    _insert_video('InventoryRemoved', channel_id='InventoryDiffCreator')
+    snapshots = iter([
+        ['InventoryStillListed', 'InventoryRemoved'],
+        ['InventoryStillListed'],
+        ['InventoryStillListed', 'InventoryRemoved'],
+    ])
+
+    def one_page(*args, **kwargs):
+        return iter([_inventory_page(next(snapshots))])
+
+    monkeypatch.setattr(sentinel_inventory, 'iter_playlist_pages', one_page)
+    for _ in range(2):
+        sentinel_inventory.census_source(
+            'channel', 'InventoryDiffCreator', 'UUDiffCreator',
+        )
+
+    events = client.get(
+        '/api/sentinel/events?channel_id=InventoryDiffCreator'
+        '&event_type=inventory_removed'
+    ).get_json()['data']['items']
+    assert [event['entity_id'] for event in events] == ['InventoryRemoved']
+    assert events[0]['from_state'] == 'present'
+    assert events[0]['to_state'] == 'absent'
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT isDeleted FROM videos WHERE id='InventoryRemoved'")
+    assert cur.fetchone()[0] == 0
+    cur.execute(
+        "SELECT COUNT(*) FROM sentinel_video_state "
+        "WHERE video_id='InventoryRemoved'"
+    )
+    assert cur.fetchone()[0] == 0
+    cur.close()
+    con.close()
+
+    sentinel_inventory.census_source(
+        'channel', 'InventoryDiffCreator', 'UUDiffCreator',
+    )
+    restored = client.get(
+        '/api/sentinel/events?channel_id=InventoryDiffCreator'
+        '&event_type=inventory_restored'
+    ).get_json()['data']['items']
+    assert [event['entity_id'] for event in restored] == ['InventoryRemoved']
+
+
+def test_partial_inventory_is_durable_but_never_published(client, monkeypatch):
+    import sentinel_inventory
+    from providers.youtube import YouTubePlaylistTruncated
+
+    _insert_channel('InventoryPartialCreator', 'Partial Films')
+    _insert_video('InventoryBaseline', channel_id='InventoryPartialCreator')
+    calls = 0
+
+    def pages(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            yield _inventory_page(['InventoryBaseline'])
+            return
+        yield _inventory_page(
+            ['InventoryDifferent'], complete=False, token='next',
+        )
+        raise YouTubePlaylistTruncated('synthetic partial response')
+
+    monkeypatch.setattr(sentinel_inventory, 'iter_playlist_pages', pages)
+    sentinel_inventory.census_source(
+        'channel', 'InventoryPartialCreator', 'UUPartialCreator',
+    )
+    try:
+        sentinel_inventory.census_source(
+            'channel', 'InventoryPartialCreator', 'UUPartialCreator',
+        )
+        assert False, 'partial census should raise'
+    except YouTubePlaylistTruncated:
+        pass
+
+    detail = client.get(
+        '/api/sentinel/source/channel/InventoryPartialCreator'
+    ).get_json()['data']
+    assert detail['inventory']['known_remote'] == 1
+    assert detail['inventory']['unarchived_video_ids'] == []
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT status, continuation_token, items_seen "
+        "FROM sentinel_inventory_runs ORDER BY id"
+    )
+    assert cur.fetchall() == [
+        ('complete', None, 1),
+        ('partial', 'next', 1),
+    ]
+    cur.execute("SELECT COUNT(*) FROM sentinel_events")
+    assert cur.fetchone()[0] == 0
+    cur.close()
+    con.close()
+
+
+def test_inventory_census_resumes_persisted_page_token(client, monkeypatch):
+    import requests
+    import sentinel_inventory
+    from providers.youtube import YouTubeRequestBudget, YouTubeScanBudgetExceeded
+
+    _insert_channel('InventoryResumeCreator', 'Resume Films')
+    calls = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+        def close(self):
+            pass
+
+    def fake_get(url, **kwargs):
+        token = kwargs['params'].get('pageToken')
+        calls.append(token)
+        if token is None:
+            return Response({
+                'items': [{'contentDetails': {'videoId': 'ResumeRemote1'}}],
+                'nextPageToken': 'page-two',
+            })
+        assert token == 'page-two'
+        return Response({
+            'items': [{'contentDetails': {'videoId': 'ResumeRemote2'}}],
+        })
+
+    monkeypatch.setattr(requests, 'get', fake_get)
+    try:
+        sentinel_inventory.census_source(
+            'channel', 'InventoryResumeCreator', 'UUResumeCreator',
+            YouTubeRequestBudget(1),
+        )
+        assert False, 'budget exhaustion should suspend the run'
+    except YouTubeScanBudgetExceeded:
+        pass
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT status, continuation_token, pages_fetched, items_seen "
+        "FROM sentinel_inventory_runs"
+    )
+    assert cur.fetchone() == ('running', 'page-two', 1, 1)
+    cur.close()
+    con.close()
+
+    sentinel_inventory.census_source(
+        'channel', 'InventoryResumeCreator', 'UUResumeCreator',
+        YouTubeRequestBudget(1),
+    )
+    assert calls == [None, 'page-two']
+    detail = client.get(
+        '/api/sentinel/source/channel/InventoryResumeCreator'
+    ).get_json()['data']
+    assert detail['inventory']['known_remote'] == 2
+    assert detail['inventory']['remote_unarchived'] == 2
+
+
+def test_json_export_includes_inventory_snapshots(client, monkeypatch):
+    import sentinel_inventory
+
+    _insert_channel('InventoryExportCreator', 'Export Films')
+    monkeypatch.setattr(
+        sentinel_inventory, 'iter_playlist_pages',
+        lambda *args, **kwargs: iter([
+            _inventory_page(['InventoryExportRemote']),
+        ]),
+    )
+    sentinel_inventory.census_source(
+        'channel', 'InventoryExportCreator', 'UUExportCreator',
+    )
+    payload = json.loads(
+        client.get('/api/export?format=json').get_data(as_text=True)
+    )
+    assert payload['meta']['counts']['sentinel_inventory_runs'] == 1
+    assert payload['meta']['counts']['sentinel_inventory_items'] == 1
+    assert payload['sentinel']['inventory_runs'][0]['status'] == 'complete'
+    assert payload['sentinel']['inventory'][0]['entity_id'] == \
+        'InventoryExportRemote'
+
+
+def test_empty_complete_inventory_is_visible_as_zero_coverage(client, monkeypatch):
+    import sentinel_inventory
+
+    _insert_channel('InventoryEmptyCreator', 'Empty Films')
+    monkeypatch.setattr(
+        sentinel_inventory, 'iter_playlist_pages',
+        lambda *args, **kwargs: iter([_inventory_page([])]),
+    )
+    sentinel_inventory.census_source(
+        'channel', 'InventoryEmptyCreator', 'UUEmptyCreator',
+    )
+    detail = client.get(
+        '/api/sentinel/source/channel/InventoryEmptyCreator'
+    ).get_json()['data']
+    assert detail['inventory']['known_remote'] == 0
+    assert detail['inventory']['preserved_remote'] == 0
+    assert detail['inventory']['coverage_percent'] == 0

@@ -104,6 +104,7 @@ def client():
 
 
 _TABLES = [
+    'sentinel_inventory', 'sentinel_inventory_runs',
     'sentinel_events', 'sentinel_video_state', 'sentinel_scan_runs',
     'videos', 'channels', 'images', 'playlists', 'pl2vid', 'IgnoreVid',
     'queue', 'download_errors',
