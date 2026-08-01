@@ -4,6 +4,9 @@ from flask import Blueprint, current_app, jsonify, request
 
 from sentinel import get_events, get_source_detail, get_sources, get_summary
 from sentinel_inventory import manual_census
+from sentinel_import import (
+    MAX_IMPORT_BYTES, compare_historical_ids, parse_historical_export,
+)
 from sentinel_rescue import (
     create_rescue_preview, create_rescue_session, get_rescue_preview,
     get_rescue_session, set_rescue_session_status,
@@ -79,6 +82,32 @@ def source(source_type, source_id):
         return _success(data)
     except Exception as e:
         logger.error('Sentinel source detail failed for %s: %s', source_id, e)
+        return _error(str(e), 500)
+
+
+@sentinel_bp.route(
+    '/source/<string:source_type>/<string:source_id>/compare-import',
+    methods=['POST'],
+)
+def compare_import(source_type, source_id):
+    """Compare a manual Filmot export without changing Sentinel state."""
+    if source_type != 'channel':
+        return _error('Unsupported Sentinel source type', 404)
+    try:
+        if get_source_detail(source_id) is None:
+            return _error('Sentinel source not found', 404)
+        upload = request.files.get('file')
+        if upload is None or not upload.filename:
+            return _error('A Filmot text export is required', 400)
+        if not upload.filename.lower().endswith('.txt'):
+            return _error('Filmot import must be a .txt file', 400)
+        raw = upload.stream.read(MAX_IMPORT_BYTES + 1)
+        parsed = parse_historical_export(raw)
+        return _success(compare_historical_ids(source_id, parsed))
+    except ValueError as e:
+        return _error(str(e), 400)
+    except Exception as e:
+        logger.error('Sentinel import comparison failed for %s: %s', source_id, e)
         return _error(str(e), 500)
 
 

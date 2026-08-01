@@ -1,3 +1,4 @@
+import io
 import json
 
 from tests.test_project import _db_connect
@@ -308,6 +309,128 @@ def test_observatory_page_and_navigation_render(client):
     assert b'id="sentinel-event-list"' in response.data
     assert b'/static/js/observatory.js' in response.data
     assert b'/observatory.html' in client.get('/').data
+
+
+def test_historical_import_parser_accepts_filmot_urls_and_deduplicates():
+    from sentinel_import import parse_historical_export
+
+    parsed = parse_historical_export(
+        b'https://www.youtube.com/watch?v=ArchVid0001\n'
+        b'https://youtu.be/KnownVid001\n'
+        b'BareVideo01\n'
+        b'https://www.youtube.com/watch?v=ArchVid0001\n'
+        b'not a youtube video\n'
+    )
+    assert parsed['video_ids'] == [
+        'ArchVid0001', 'KnownVid001', 'BareVideo01',
+    ]
+    assert parsed['duplicates_removed'] == 1
+    assert parsed['invalid_lines'] == [
+        {'line': 5, 'value': 'not a youtube video'},
+    ]
+
+
+def test_historical_import_parser_rejects_empty_and_oversized_files():
+    import pytest
+    from sentinel_import import MAX_IMPORT_BYTES, parse_historical_export
+
+    with pytest.raises(ValueError, match='no valid YouTube'):
+        parse_historical_export(b'not a valid export')
+    with pytest.raises(ValueError, match='1 MB'):
+        parse_historical_export(b'x' * (MAX_IMPORT_BYTES + 1))
+
+
+def test_historical_import_endpoint_classifies_without_writes(client):
+    source_id = 'UCImportCompare'
+    _insert_channel(source_id, 'Import Compare Creator')
+    _insert_video('ArchVid0001', channel_id=source_id)
+    _insert_video('OtherVid001', channel_id='UCOtherCreator')
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("INSERT INTO IgnoreVid(id) VALUES('Ignored0001')")
+    cur.execute(
+        "INSERT INTO sentinel_inventory_runs "
+        "(provider, source_type, source_id, remote_collection_id, status, "
+        "items_seen, completed_at) VALUES('youtube','channel',%s,%s,"
+        "'complete',1,NOW())",
+        (source_id, 'UUImportCompare'),
+    )
+    run_id = cur.lastrowid
+    cur.execute(
+        "INSERT INTO sentinel_inventory "
+        "(scan_run_id, provider, source_type, source_id, entity_id, position) "
+        "VALUES(%s,'youtube','channel',%s,'KnownVid001',0)",
+        (run_id, source_id),
+    )
+    watched_tables = (
+        'videos', 'IgnoreVid', 'sentinel_inventory_runs',
+        'sentinel_inventory', 'sentinel_events', 'queue',
+    )
+    before = {}
+    for table in watched_tables:
+        cur.execute('SELECT COUNT(*) FROM `%s`' % table)
+        before[table] = cur.fetchone()[0]
+    cur.close()
+    con.close()
+
+    text = '\n'.join([
+        'https://www.youtube.com/watch?v=ArchVid0001',
+        'https://www.youtube.com/watch?v=KnownVid001',
+        'https://www.youtube.com/watch?v=Ignored0001',
+        'https://www.youtube.com/watch?v=OtherVid001',
+        'https://www.youtube.com/watch?v=Missing0001',
+        'https://www.youtube.com/watch?v=Missing0001',
+        'invalid line',
+    ])
+    response = client.post(
+        '/api/sentinel/source/channel/%s/compare-import' % source_id,
+        data={'file': (io.BytesIO(text.encode()), 'filmot.txt')},
+        content_type='multipart/form-data',
+    )
+    assert response.status_code == 200
+    data = response.get_json()['data']
+    assert data['total'] == 5
+    assert data['archived'] == ['ArchVid0001']
+    assert data['known_unarchived'] == ['KnownVid001']
+    assert data['ignored'] == ['Ignored0001']
+    assert data['other_channel'] == ['OtherVid001']
+    assert data['missing'] == ['Missing0001']
+    assert data['duplicates_removed'] == 1
+    assert data['invalid_lines'][0]['line'] == 7
+
+    con = _db_connect()
+    cur = con.cursor()
+    for table in watched_tables:
+        cur.execute('SELECT COUNT(*) FROM `%s`' % table)
+        assert cur.fetchone()[0] == before[table], table
+    cur.close()
+    con.close()
+
+
+def test_historical_import_endpoint_validates_request_and_source(client):
+    _insert_channel('UCImportValidation', 'Import Validation')
+    path = '/api/sentinel/source/channel/UCImportValidation/compare-import'
+    assert client.post(path).status_code == 400
+    wrong_type = client.post(
+        path,
+        data={'file': (io.BytesIO(b'ArchVid0001'), 'filmot.csv')},
+        content_type='multipart/form-data',
+    )
+    assert wrong_type.status_code == 400
+    unknown = client.post(
+        '/api/sentinel/source/channel/UCUnknownImport/compare-import',
+        data={'file': (io.BytesIO(b'ArchVid0001'), 'filmot.txt')},
+        content_type='multipart/form-data',
+    )
+    assert unknown.status_code == 404
+
+
+def test_observatory_javascript_contains_historical_import_ui(client):
+    script = client.get('/static/js/observatory.js').data
+    assert b'Historical list comparison' in script
+    assert b'/compare-import' in script
+    assert b'Download missing.txt' in script
 
 
 def test_sentinel_summary_and_event_feed_apis(client):

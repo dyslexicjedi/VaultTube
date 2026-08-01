@@ -1883,6 +1883,27 @@ a:focus-visible {
 .vt-rescue-session-head > div:first-child strong { text-transform: capitalize; }
 .vt-rescue-session-head > div:first-child span { margin-top: 2px; color: var(--vt-text-dim); font-family: ui-monospace, monospace; font-size: 9px; }
 .vt-rescue-session-head > div:last-child { display: flex; gap: 7px; }
+.vt-history-import { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--vt-line); }
+.vt-history-import summary { cursor: pointer; list-style-position: outside; }
+.vt-history-import summary span, .vt-history-import summary strong, .vt-history-import summary small { display: block; }
+.vt-history-import summary strong { font-size: 13px; }
+.vt-history-import summary small, .vt-history-import > p { margin-top: 2px; color: var(--vt-text-dim); font-size: 10.5px; }
+.vt-history-import form { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; }
+.vt-history-import form .vt-input { min-width: 0; padding: 7px 8px; }
+.vt-history-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 13px; }
+.vt-history-counts > div { padding: 9px; border-radius: 7px; background: var(--vt-surface-2); }
+.vt-history-counts strong, .vt-history-counts span { display: block; }
+.vt-history-counts strong { font-size: 16px; }
+.vt-history-counts span { margin-top: 2px; color: var(--vt-text-dim); font-size: 9.5px; }
+.vt-history-missing { margin-top: 12px; }
+.vt-history-missing > div:first-child strong, .vt-history-missing > div:first-child span { display: block; }
+.vt-history-missing > div:first-child strong { font-size: 12px; }
+.vt-history-missing > div:first-child span, .vt-history-note { margin-top: 2px; color: var(--vt-text-dim); font-size: 10px; }
+.vt-history-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.vt-history-links a, .vt-history-overflow { padding: 4px 7px; border: 1px solid var(--vt-border); border-radius: 6px; color: var(--vt-text); font-family: ui-monospace, monospace; font-size: 10px; text-decoration: none; }
+.vt-history-links a:hover { border-color: var(--vt-accent); color: var(--vt-accent); }
+.vt-history-overflow { color: var(--vt-text-dim); }
+.vt-history-actions { display: flex; gap: 7px; margin-top: 10px; }
 .vt-sentinel-affected-list { display: flex; flex-direction: column; gap: 1px; }
 .vt-sentinel-affected {
   display: flex;

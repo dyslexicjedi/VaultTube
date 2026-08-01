@@ -189,8 +189,93 @@
             + '<label><span>Storage cap (GB)</span><input class="vt-input" id="rescue-max-gb" type="number" min="0" step="0.1" placeholder="No cap"></label>'
             + '<label><span>Order</span><select class="vt-select" id="rescue-order"><option value="oldest">Oldest first</option><option value="newest">Newest first</option><option value="inventory">Inventory order</option></select></label>'
             + '<button type="button" class="vt-btn" id="rescue-preview-button">Build preview</button>'
-            + '</div><div id="rescue-preview-result"></div></section>';
+            + '</div><div id="rescue-preview-result"></div></section>'
+            + '<details class="vt-history-import">'
+            + '<summary><span><strong>Historical list comparison</strong><small>Compare a manual Filmot export with this creator</small></span></summary>'
+            + '<form id="history-import-form"><input class="vt-input" id="history-import-file" name="file" type="file" accept=".txt,text/plain" required>'
+            + '<button type="submit" class="vt-btn">Compare</button></form>'
+            + '<p>Read-only comparison. This does not change Sentinel evidence, risk, downloads, or ignored videos.</p>'
+            + '<div id="history-import-result"></div></details>';
         $id('rescue-preview-button').addEventListener('click', buildPreview);
+        $id('history-import-form').addEventListener('submit', compareHistoricalImport);
+    }
+
+    function historicalVideoLinks(ids) {
+        return ids.slice(0, 100).map(function (id) {
+            return '<a href="https://www.youtube.com/watch?v=' + encodeURIComponent(id) + '" target="_blank" rel="noopener noreferrer">' + esc(id) + '</a>';
+        }).join('') + (ids.length > 100 ? '<span class="vt-history-overflow">+' + (ids.length - 100) + ' more</span>' : '');
+    }
+
+    function exportHistoricalMissing(ids) {
+        return ids.map(function (id) { return 'https://www.youtube.com/watch?v=' + id; }).join('\n') + (ids.length ? '\n' : '');
+    }
+
+    function renderHistoricalImport(data) {
+        var target = $id('history-import-result');
+        if (!target) return;
+        var cards = [
+            [data.total, 'Imported'], [data.archived.length, 'Archived'],
+            [data.known_unarchived.length, 'Known, not archived'],
+            [data.ignored.length, 'Ignored'], [data.other_channel.length, 'Other creator'],
+            [data.missing.length, 'Newly discovered']
+        ];
+        target.innerHTML = '<div class="vt-history-counts">' + cards.map(function (item) {
+            return '<div><strong>' + item[0] + '</strong><span>' + esc(item[1]) + '</span></div>';
+        }).join('') + '</div>'
+            + (data.missing.length
+                ? '<div class="vt-history-missing"><div><strong>Newly discovered IDs</strong><span>Not found in the archive, tombstones, or prior Sentinel inventories.</span></div>'
+                    + '<div class="vt-history-links">' + historicalVideoLinks(data.missing) + '</div>'
+                    + '<div class="vt-history-actions"><button type="button" class="vt-btn-ghost" id="history-copy-missing">Copy missing URLs</button>'
+                    + '<button type="button" class="vt-btn-ghost" id="history-download-missing">Download missing.txt</button></div></div>'
+                : '<div class="vt-sentinel-census-note">Every valid ID in this export is already known to VaultTube.</div>')
+            + ((data.duplicates_removed || data.invalid_lines.length)
+                ? '<p class="vt-history-note">' + data.duplicates_removed + ' duplicate ID' + (data.duplicates_removed === 1 ? '' : 's')
+                    + ' removed · ' + data.invalid_lines.length + ' invalid line' + (data.invalid_lines.length === 1 ? '' : 's') + ' skipped</p>' : '');
+        if (!data.missing.length) return;
+        var exportText = exportHistoricalMissing(data.missing);
+        $id('history-copy-missing').addEventListener('click', function () {
+            navigator.clipboard.writeText(exportText).then(function () {
+                $id('history-copy-missing').textContent = 'Copied';
+            });
+        });
+        $id('history-download-missing').addEventListener('click', function () {
+            var url = URL.createObjectURL(new Blob([exportText], { type: 'text/plain' }));
+            var link = document.createElement('a');
+            link.href = url;
+            link.download = 'missing.txt';
+            link.click();
+            URL.revokeObjectURL(url);
+        });
+    }
+
+    function compareHistoricalImport(event) {
+        event.preventDefault();
+        if (!selectedSource) return;
+        var file = $id('history-import-file').files[0];
+        var target = $id('history-import-result');
+        var button = event.currentTarget.querySelector('button[type="submit"]');
+        if (!file) {
+            target.innerHTML = '<div class="vt-sentinel-census-note">Choose a Filmot .txt export first.</div>';
+            return;
+        }
+        var form = new FormData();
+        form.append('file', file);
+        button.disabled = true;
+        button.textContent = 'Comparing…';
+        target.innerHTML = '';
+        fetch('/api/sentinel/source/channel/' + encodeURIComponent(selectedSource) + '/compare-import', {
+            method: 'POST', body: form
+        }).then(function (response) {
+            return response.json().then(function (payload) {
+                if (!response.ok || !payload.success) throw new Error(payload.error || 'Comparison failed');
+                return payload.data;
+            });
+        }).then(renderHistoricalImport).catch(function (error) {
+            target.innerHTML = '<div class="vt-sentinel-census-note">' + esc(error.message) + '</div>';
+        }).finally(function () {
+            button.disabled = false;
+            button.textContent = 'Compare';
+        });
     }
 
     function previewItem(item) {
