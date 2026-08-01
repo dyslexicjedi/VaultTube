@@ -101,6 +101,19 @@ def test_sentinel_rescue_preview_tables_exist():
     con.close()
 
 
+def test_sentinel_rescue_execution_schema_exists():
+    con = _db_connect()
+    cur = con.cursor()
+    for table in ('rescue_sessions', 'rescue_items'):
+        cur.execute("SHOW TABLES LIKE %s", (table,))
+        assert cur.fetchone() is not None
+    cur.execute("SHOW COLUMNS FROM queue")
+    columns = {row[0] for row in cur.fetchall()}
+    assert {'priority', 'origin', 'rescue_session_id', 'target_item_id'} <= columns
+    cur.close()
+    con.close()
+
+
 def test_two_independent_negative_checks_confirm_once():
     from sentinel import start_scan_run, finish_scan_run, record_video_observation
 
@@ -1254,6 +1267,200 @@ def test_rescue_preview_requires_complete_inventory_and_valid_limits(client):
         json={'max_videos': 0},
     )
     assert invalid.status_code == 400
+
+
+def _create_phase6_preview(client, monkeypatch, max_videos=2):
+    source_id = _build_preview_fixture(monkeypatch)
+    preview = client.post(
+        '/api/sentinel/source/channel/%s/rescue-preview' % source_id,
+        json={'max_videos': max_videos, 'order': 'oldest'},
+    ).get_json()['data']
+    return source_id, preview
+
+
+def test_priority_download_queue_keeps_ordinary_work_ahead_of_rescue():
+    from QueueObject import QueueObject
+    from queue_utils import PriorityDownloadQueue
+
+    q = PriorityDownloadQueue()
+    rescue = QueueObject('rescue', priority=100, origin='sentinel_rescue')
+    ordinary_first = QueueObject('ordinary-first')
+    ordinary_second = QueueObject('ordinary-second')
+    q.put(rescue)
+    q.put(ordinary_first)
+    q.put(ordinary_second)
+
+    assert [q.get().url, q.get().url, q.get().url] == [
+        'ordinary-first', 'ordinary-second', 'rescue',
+    ]
+
+
+def test_rescue_approval_persists_provenance_and_survives_restart(
+        client, monkeypatch):
+    from database import get_resumable_queue_items
+    from queue_utils import PriorityDownloadQueue
+
+    source_id, preview = _create_phase6_preview(client, monkeypatch)
+    q = PriorityDownloadQueue()
+    client.application.config['queue'] = q
+    response = client.post('/api/sentinel/rescues', json={
+        'preview_id': preview['id'],
+        'download_delay_seconds': 7,
+        'stop_failure_threshold': 2,
+    })
+    assert response.status_code == 200
+    session = response.get_json()['data']
+    assert session['status'] == 'active'
+    assert session['source_id'] == source_id
+    assert session['counts']['queued'] == 2
+    assert session['download_delay_seconds'] == 7
+    assert q.qsize() == 2
+    assert all(item.origin == 'sentinel_rescue' for item in q.snapshot())
+    assert all(item.priority == 100 for item in q.snapshot())
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT priority,origin,rescue_session_id,target_item_id FROM queue "
+        "WHERE rescue_session_id=%s ORDER BY id",
+        (session['id'],),
+    )
+    rows = cur.fetchall()
+    assert len(rows) == 2
+    assert all(row[0] == 100 and row[1] == 'sentinel_rescue' for row in rows)
+    assert all(row[2] == session['id'] and row[3] for row in rows)
+    cur.close()
+    con.close()
+
+    resumable = [row for row in get_resumable_queue_items()
+                 if row[8] == session['id']]
+    assert len(resumable) == 2
+    assert all(row[6] == 100 and row[10] == 7 for row in resumable)
+    assert client.post('/api/sentinel/rescues', json={
+        'preview_id': preview['id'],
+    }).status_code == 409
+
+    payload = json.loads(
+        client.get('/api/export?format=json').get_data(as_text=True)
+    )
+    assert payload['meta']['counts']['rescue_sessions'] == 1
+    assert payload['meta']['counts']['rescue_items'] == 2
+    assert payload['sentinel']['rescue_sessions'][0]['id'] == session['id']
+    assert len(payload['sentinel']['rescue_items']) == 2
+
+
+def test_rescue_revalidates_preview_items_before_enqueue(client, monkeypatch):
+    from queue_utils import PriorityDownloadQueue
+
+    source_id, preview = _create_phase6_preview(client, monkeypatch)
+    _insert_video('PreviewOldest', channel_id=source_id)
+    q = PriorityDownloadQueue()
+    client.application.config['queue'] = q
+
+    session = client.post('/api/sentinel/rescues', json={
+        'preview_id': preview['id'],
+    }).get_json()['data']
+
+    assert session['counts']['skipped'] == 1
+    assert session['counts']['queued'] == 1
+    skipped = next(item for item in session['items'] if item['status'] == 'skipped')
+    assert skipped['id'] == 'PreviewOldest'
+    assert skipped['last_error'] == 'already_archived'
+    assert q.qsize() == 1
+
+
+def test_rescue_rejects_a_stale_preview(client, monkeypatch):
+    import sentinel_inventory
+    from queue_utils import PriorityDownloadQueue
+
+    source_id, preview = _create_phase6_preview(client, monkeypatch)
+    sentinel_inventory.census_source(
+        'channel', source_id, 'UURescuePreviewCreator',
+    )
+    client.application.config['queue'] = PriorityDownloadQueue()
+    response = client.post('/api/sentinel/rescues', json={
+        'preview_id': preview['id'],
+    })
+    assert response.status_code == 409
+    assert 'stale' in response.get_json()['error'].lower()
+    assert client.application.config['queue'].qsize() == 0
+
+
+def test_rescue_pause_resume_and_cancel_are_persistent(client, monkeypatch):
+    from sentinel_rescue import rescue_queue_disposition
+    from queue_utils import PriorityDownloadQueue
+
+    _, preview = _create_phase6_preview(client, monkeypatch)
+    q = PriorityDownloadQueue()
+    client.application.config['queue'] = q
+    session = client.post('/api/sentinel/rescues', json={
+        'preview_id': preview['id'],
+    }).get_json()['data']
+    queued = q.snapshot()[0]
+
+    paused = client.post(
+        '/api/sentinel/rescues/%s/pause' % session['id']
+    ).get_json()['data']
+    assert paused['status'] == 'paused'
+    assert rescue_queue_disposition(queued) == 'defer'
+    resumed = client.post(
+        '/api/sentinel/rescues/%s/resume' % session['id']
+    ).get_json()['data']
+    assert resumed['status'] == 'active'
+    assert rescue_queue_disposition(queued) == 'process'
+    cancelled = client.post(
+        '/api/sentinel/rescues/%s/cancel' % session['id']
+    ).get_json()['data']
+    assert cancelled['status'] == 'cancelled'
+    assert cancelled['counts']['cancelled'] == 2
+    assert rescue_queue_disposition(queued) == 'drop'
+
+
+def test_rescue_queue_outcomes_and_failure_stop_are_synchronized(
+        client, monkeypatch):
+    from database import update_queue_status
+    from providers.base import del_status, set_status
+    from queue_utils import PriorityDownloadQueue
+
+    _, preview = _create_phase6_preview(client, monkeypatch)
+    q = PriorityDownloadQueue()
+    client.application.config['queue'] = q
+    session = client.post('/api/sentinel/rescues', json={
+        'preview_id': preview['id'], 'stop_failure_threshold': 1,
+    }).get_json()['data']
+
+    first = q.get()
+    update_queue_status(first.row_id, 'downloading')
+    update_queue_status(first.row_id, 'failed', error='HTTP 403 cookie auth failed')
+    stopped = client.get(
+        '/api/sentinel/rescues/' + session['id']
+    ).get_json()['data']
+    assert stopped['status'] == 'paused'
+    assert stopped['consecutive_blocking_failures'] == 1
+    assert stopped['counts']['failed'] == 1
+    assert stopped['counts']['queued'] == 1
+
+    client.post('/api/sentinel/rescues/%s/resume' % session['id'])
+    second = q.get()
+    update_queue_status(second.row_id, 'downloading')
+    set_status(second.target_item_id, {
+        'progress': '42%', 'title': 'Rescue in progress',
+    })
+    live = client.get(
+        '/api/sentinel/rescues/' + session['id']
+    ).get_json()['data']
+    active_item = next(item for item in live['items']
+                       if item['id'] == second.target_item_id)
+    assert active_item['live_progress']['progress'] == '42%'
+    del_status(second.target_item_id)
+    update_queue_status(second.row_id, 'done')
+    completed = client.get(
+        '/api/sentinel/rescues/' + session['id']
+    ).get_json()['data']
+    assert completed['status'] == 'completed'
+    assert completed['counts']['preserved'] == 1
+    assert completed['counts']['failed'] == 1
+    assert completed['consecutive_blocking_failures'] == 0
 
 
 def test_manual_census_api_and_service_never_enqueue(client, monkeypatch):

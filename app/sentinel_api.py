@@ -1,10 +1,13 @@
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from sentinel import get_events, get_source_detail, get_sources, get_summary
 from sentinel_inventory import manual_census
-from sentinel_rescue import create_rescue_preview, get_rescue_preview
+from sentinel_rescue import (
+    create_rescue_preview, create_rescue_session, get_rescue_preview,
+    get_rescue_session, set_rescue_session_status,
+)
 
 
 logger = logging.getLogger('sentinel_api')
@@ -120,3 +123,67 @@ def saved_rescue_preview(preview_id):
     except Exception as e:
         logger.error('Sentinel rescue preview read failed for %s: %s', preview_id, e)
         return _error(str(e), 500)
+
+
+@sentinel_bp.route('/rescues', methods=['POST'])
+def start_rescue():
+    body = request.get_json(silent=True) or {}
+    preview_id = str(body.get('preview_id') or '').strip()
+    if not preview_id:
+        return _error('preview_id is required', 400)
+    try:
+        data = create_rescue_session(
+            preview_id, body, current_app.config['queue'],
+        )
+        return _success(data)
+    except ValueError as e:
+        message = str(e)
+        status = 404 if message == 'Rescue preview not found' else 409 \
+            if any(term in message.lower() for term in (
+                'stale', 'already approved', 'blocked', 'availability',
+                'no selected',
+            )) else 400
+        return _error(message, status)
+    except Exception as e:
+        logger.error('Sentinel rescue start failed for %s: %s', preview_id, e)
+        return _error(str(e), 500)
+
+
+@sentinel_bp.route('/rescues/<string:session_id>')
+def rescue_session(session_id):
+    try:
+        data = get_rescue_session(session_id)
+        if data is None:
+            return _error('Rescue session not found', 404)
+        return _success(data)
+    except Exception as e:
+        logger.error('Sentinel rescue read failed for %s: %s', session_id, e)
+        return _error(str(e), 500)
+
+
+def _rescue_action(session_id, action):
+    try:
+        return _success(set_rescue_session_status(session_id, action))
+    except ValueError as e:
+        status = 404 if str(e) == 'Rescue session not found' else 409
+        return _error(str(e), status)
+    except Exception as e:
+        logger.error(
+            'Sentinel rescue %s failed for %s: %s', action, session_id, e,
+        )
+        return _error(str(e), 500)
+
+
+@sentinel_bp.route('/rescues/<string:session_id>/pause', methods=['POST'])
+def pause_rescue(session_id):
+    return _rescue_action(session_id, 'pause')
+
+
+@sentinel_bp.route('/rescues/<string:session_id>/resume', methods=['POST'])
+def resume_rescue(session_id):
+    return _rescue_action(session_id, 'resume')
+
+
+@sentinel_bp.route('/rescues/<string:session_id>/cancel', methods=['POST'])
+def cancel_rescue(session_id):
+    return _rescue_action(session_id, 'cancel')

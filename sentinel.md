@@ -22,7 +22,10 @@ bounded rescue plan.
 - Phase 5 complete: restart-safe rescue previews, deterministic exclusions and
   limits, transparent storage ranges, exact inventory ordering/date ranges,
   and manual census controls. Previewing never enqueues downloads.
-- Phase 6 next: persistent manual rescue sessions and priority-aware execution.
+- Phase 6 complete: persistent manual rescue sessions, low-priority execution,
+  restart recovery, explicit lifecycle controls, live progress, and failure
+  circuit breaking.
+- Phase 7 next: optional guarded automation, disabled by default.
 
 ## Design principles
 
@@ -86,11 +89,12 @@ failures and never observations. Risk-change and source restoration events are
 append-only. High and Critical scores raise sticky alerts, but Phase 4 performs
 no queue or rescue actions.
 
-### Later phases
-
 - `rescue_sessions` stores an approved bounded rescue operation.
 - `rescue_items` tracks every candidate through queued, preserved, failed, or
   skipped states.
+- Queue rows retain priority, origin, session, and target provenance. Existing
+  ordinary work uses priority 0; explicitly approved rescue work uses priority
+  100 so new manual and subscription jobs always move ahead of it.
 
 ## Risk model
 
@@ -150,9 +154,9 @@ download delay, and a stop threshold for repeated authentication or throttling
 failures. Storage is expressed as a range derived from duration and observed
 bitrate because providers do not reliably expose final download size.
 
-The queue will eventually gain `priority`, `origin`, `rescue_session_id`, and
-`target_item_id`. Manual downloads retain precedence over rescue work, and all
-rescue state survives restart.
+The queue stores `priority`, `origin`, `rescue_session_id`, and
+`target_item_id`. Manual and subscription downloads retain precedence over
+rescue work, and all rescue state survives restart.
 
 ## Delivery phases
 
@@ -230,6 +234,20 @@ defaults; every preview records its sample scope, count, and confidence.
 
 Exit criterion: a rescue survives restart, obeys its caps, and does not starve
 manual or ordinary subscription downloads.
+
+Approval revalidates the preview's source state, requires its inventory to
+still be the latest complete census, and checks every selected item again in a
+single database transaction. Items archived, ignored, unavailable, or queued
+since preview creation are recorded as skipped rather than downloaded. The
+approved count/byte caps cannot expand during execution.
+
+Pause stops new rescue items without interrupting an in-flight provider call;
+resume releases them again, and cancel marks all remaining work terminal.
+Authentication, cookie, 403, 429, and throttling failures increment a durable
+circuit breaker and pause the session at the approved threshold. Ordinary work
+always uses the higher-priority queue lane. Queue state drives the rescue item
+ledger, the Observatory polls live item progress, and JSON exports include the
+complete session history.
 
 ### Phase 7 - Guarded automation
 

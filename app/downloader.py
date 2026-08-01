@@ -6,6 +6,7 @@ import providers
 from QueueObject import QueueObject
 from flask import current_app
 from database import insert_download_error, update_queue_status
+from sentinel_rescue import rescue_queue_disposition
 
 logger = logging.getLogger('downloader')
 
@@ -54,6 +55,15 @@ def start_dl_queue(app):
     while 1:
         qo = q.get()  # blocks until an item is enqueued
         with app.app_context():
+            disposition = rescue_queue_disposition(qo)
+            if disposition == 'defer':
+                timer = threading.Timer(1, q.put, args=(qo,))
+                timer.daemon = True
+                timer.start()
+                continue
+            if disposition == 'drop':
+                update_queue_status(qo.row_id, 'cancelled')
+                continue
             logger.info("Downloading %s" % qo.url)
             update_queue_status(qo.row_id, 'downloading')
             provider = providers.get_provider(qo.url)
@@ -76,5 +86,7 @@ def start_dl_queue(app):
                 update_queue_status(qo.row_id, 'failed', error='No provider found for URL')
                 insert_download_error(qo.url, 'Provider Error', 'No provider found for URL')
         # Only pace back-to-back items; a single add still starts instantly
-        if DOWNLOAD_DELAY_SECONDS and not q.empty():
-            time.sleep(DOWNLOAD_DELAY_SECONDS)
+        delay = qo.download_delay_seconds \
+            if qo.download_delay_seconds is not None else DOWNLOAD_DELAY_SECONDS
+        if delay and not q.empty():
+            time.sleep(delay)

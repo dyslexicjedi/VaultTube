@@ -1,4 +1,4 @@
-import logging,os,traceback,sys, threading, queue, signal
+import logging,os,traceback,sys, threading, signal
 from logging.handlers import TimedRotatingFileHandler
 from flask import Flask,render_template,send_file,Blueprint,request,redirect
 from api import api_bp
@@ -10,6 +10,7 @@ from sentinel_inventory import start_census
 from downloader import start_dl_queue
 from transcoder import start_reaper_thread, start_cleanup_thread, shutdown_transcoder
 from QueueObject import QueueObject
+from queue_utils import PriorityDownloadQueue
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -178,11 +179,19 @@ def startup():
     #Check Database
     dbpass = checkdb()
     if(dbpass):
-        q = queue.Queue()
+        q = PriorityDownloadQueue()
         app.config['queue'] = q
         #Restore downloads that were queued or in-flight at last shutdown
-        for rowid, url, source, channel_id, unsave, attempts in get_resumable_queue_items():
-            qo = QueueObject(url, channel_id or "", source, 0, "", unsave=bool(unsave))
+        for (rowid, url, source, channel_id, unsave, attempts, priority,
+             origin, rescue_session_id, target_item_id,
+             download_delay_seconds) in get_resumable_queue_items():
+            qo = QueueObject(
+                url, channel_id or "", source, 0, "", unsave=bool(unsave),
+                priority=priority, origin=origin,
+                rescue_session_id=rescue_session_id,
+                target_item_id=target_item_id,
+                download_delay_seconds=download_delay_seconds,
+            )
             qo.row_id = rowid
             qo.attempts = attempts
             q.put(qo)

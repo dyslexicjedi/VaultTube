@@ -1,7 +1,34 @@
+import itertools
 import logging
+import queue
 from database import insert_queue_item, queue_has_url
 
 logger = logging.getLogger('queue')
+
+
+class PriorityDownloadQueue(queue.PriorityQueue):
+    """QueueObjects ordered by numeric priority while preserving FIFO ties."""
+
+    def __init__(self):
+        super().__init__()
+        self._sequence = itertools.count()
+
+    def put(self, qo, block=True, timeout=None):
+        entry = (int(getattr(qo, 'priority', 0)), next(self._sequence), qo)
+        return super().put(entry, block=block, timeout=timeout)
+
+    def get(self, block=True, timeout=None):
+        return super().get(block=block, timeout=timeout)[2]
+
+    def snapshot(self):
+        with self.mutex:
+            return [entry[2] for entry in sorted(self.queue)]
+
+
+def queue_snapshot(q):
+    if hasattr(q, 'snapshot'):
+        return q.snapshot()
+    return list(q.queue)
 
 
 def enqueue(qo, q):

@@ -3,6 +3,7 @@
     var eventLimit = 30;
     var sourceButtons = {};
     var selectedSource = null;
+    var rescuePoll = null;
 
     function $id(id) { return document.getElementById(id); }
     function esc(value) {
@@ -70,7 +71,7 @@
         var highRisk = data.risk_sources.high + data.risk_sources.critical;
         $id('sentinel-kpi-risk').textContent = highRisk.toLocaleString();
         $id('sentinel-kpi-risk-sub').textContent = data.risk_sources.critical
-            + ' critical · ' + data.risk_sources.high + ' high · observation only';
+            + ' critical · ' + data.risk_sources.high + ' high · manual approval required';
         if (data.last_scan) {
             var scan = data.last_scan;
             $id('sentinel-last-scan').textContent = 'Last scan ' + scan.status
@@ -151,7 +152,7 @@
         var riskPanel = risk
             ? '<div class="vt-sentinel-risk-card ' + riskClass(risk.level) + '">'
                 + '<div><span>Observed source risk</span><strong>' + risk.score + '<small>/100</small></strong><b>' + esc(riskLabel(risk.level)) + '</b></div>'
-                + '<p>Observation only. Sentinel will not queue downloads.</p>'
+                + '<p>No automatic downloads. Rescue execution requires explicit approval.</p>'
                 + (risk.reasons.length
                     ? '<ul>' + risk.reasons.map(function (reason) {
                         var sign = reason.points > 0 ? '+' : '';
@@ -212,7 +213,91 @@
             + '</div><p class="vt-rescue-confidence">' + esc(data.estimate.confidence) + ' confidence from ' + data.estimate.sample_count + ' archived duration/bitrate samples. '
             + data.excluded.archived + ' archived · ' + data.excluded.ignored + ' ignored · ' + data.excluded.unavailable + ' unavailable · ' + data.excluded.queued + ' already queued. No downloads were created.</p>'
             + '<div class="vt-rescue-items">' + data.items.slice(0, 20).map(previewItem).join('') + '</div>'
-            + (data.items.length > 20 ? '<div class="vt-rescue-more">+' + (data.items.length - 20) + ' more in saved preview ' + esc(data.id) + '</div>' : '');
+            + (data.items.length > 20 ? '<div class="vt-rescue-more">+' + (data.items.length - 20) + ' more in saved preview ' + esc(data.id) + '</div>' : '')
+            + '<div class="vt-rescue-approval">'
+            + '<label><span>Delay between rescue downloads</span><input class="vt-input" id="rescue-delay" type="number" min="0" max="3600" value="30"><small>seconds</small></label>'
+            + '<label><span>Pause after repeated auth/throttle failures</span><input class="vt-input" id="rescue-failure-threshold" type="number" min="1" max="20" value="3"><small>failures</small></label>'
+            + '<button type="button" class="vt-btn vt-btn-danger" id="rescue-start-button">Approve and start rescue</button>'
+            + '</div><p class="vt-rescue-warning">This creates ' + data.selected_count + ' low-priority download jobs. Existing manual and subscription work stays ahead of them.</p>';
+        $id('rescue-start-button').addEventListener('click', function () {
+            startRescue(data);
+        });
+    }
+
+    function postJson(url, body) {
+        return fetch(url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {})
+        }).then(function (response) {
+            return response.json().then(function (payload) {
+                if (!response.ok || !payload.success) throw new Error(payload.error || 'Request failed');
+                return payload.data;
+            });
+        });
+    }
+
+    function sessionItem(item) {
+        var progress = item.live_progress && item.live_progress.progress
+            ? ' · ' + esc(item.live_progress.progress) : '';
+        return '<a href="' + esc(item.url) + '" target="_blank" rel="noopener noreferrer">'
+            + '<span><strong>' + item.rank + '. ' + esc(item.id) + '</strong><small>' + esc(item.status) + progress + (item.last_error ? ' · ' + esc(item.last_error) : '') + '</small></span>'
+            + '<span>' + esc(fmtBytes(item.estimated_bytes_low)) + '–' + esc(fmtBytes(item.estimated_bytes_high)) + '</span></a>';
+    }
+
+    function renderSession(data) {
+        var target = $id('rescue-preview-result');
+        if (!target) return;
+        var counts = data.counts;
+        var actions = '';
+        if (data.status === 'active') actions = '<button class="vt-btn" data-rescue-action="pause">Pause</button><button class="vt-btn vt-btn-danger" data-rescue-action="cancel">Cancel remaining</button>';
+        if (data.status === 'paused') actions = '<button class="vt-btn" data-rescue-action="resume">Resume</button><button class="vt-btn vt-btn-danger" data-rescue-action="cancel">Cancel remaining</button>';
+        target.innerHTML = '<div class="vt-rescue-session-head"><div><strong>Rescue ' + esc(data.status) + '</strong><span>' + esc(data.id) + '</span></div><div>' + actions + '</div></div>'
+            + '<div class="vt-rescue-summary">'
+            + '<div><strong>' + counts.preserved + '</strong><span>Preserved</span></div>'
+            + '<div><strong>' + (counts.queued + counts.downloading) + '</strong><span>Remaining</span></div>'
+            + '<div><strong>' + counts.failed + ' failed · ' + counts.skipped + ' skipped</strong><span>Outcomes</span></div></div>'
+            + '<p class="vt-rescue-confidence">Low-priority rescue lane · ' + data.download_delay_seconds + 's delay · auto-pause threshold ' + data.stop_failure_threshold + '. Progress survives restart.</p>'
+            + '<div class="vt-rescue-items">' + data.items.slice(0, 20).map(sessionItem).join('') + '</div>';
+        Array.prototype.forEach.call(target.querySelectorAll('[data-rescue-action]'), function (button) {
+            button.addEventListener('click', function () {
+                rescueAction(data.id, button.getAttribute('data-rescue-action'));
+            });
+        });
+        if (rescuePoll) clearTimeout(rescuePoll);
+        if (data.status === 'active' || data.status === 'paused') {
+            rescuePoll = setTimeout(function () { loadSession(data.id); }, 2000);
+        }
+    }
+
+    function loadSession(sessionId) {
+        api('/api/sentinel/rescues/' + encodeURIComponent(sessionId))
+            .then(renderSession)
+            .catch(function (error) {
+                var target = $id('rescue-preview-result');
+                if (target) target.innerHTML = '<div class="vt-sentinel-census-note">' + esc(error.message) + '</div>';
+            });
+    }
+
+    function rescueAction(sessionId, action) {
+        postJson('/api/sentinel/rescues/' + encodeURIComponent(sessionId) + '/' + action, {})
+            .then(renderSession)
+            .catch(function (error) { window.alert(error.message); });
+    }
+
+    function startRescue(preview) {
+        if (!window.confirm('Start a bounded rescue of ' + preview.selected_count + ' videos? This will create real download jobs.')) return;
+        var button = $id('rescue-start-button');
+        button.disabled = true;
+        button.textContent = 'Starting…';
+        postJson('/api/sentinel/rescues', {
+            preview_id: preview.id,
+            download_delay_seconds: parseInt($id('rescue-delay').value, 10),
+            stop_failure_threshold: parseInt($id('rescue-failure-threshold').value, 10)
+        }).then(renderSession).catch(function (error) {
+            button.disabled = false;
+            button.textContent = 'Approve and start rescue';
+            window.alert(error.message);
+        });
     }
 
     function buildPreview() {
@@ -244,6 +329,7 @@
     }
 
     function selectSource(channelId, filterActivity) {
+        if (rescuePoll) { clearTimeout(rescuePoll); rescuePoll = null; }
         Object.keys(sourceButtons).forEach(function (id) {
             sourceButtons[id].classList.toggle('selected', id === channelId);
         });

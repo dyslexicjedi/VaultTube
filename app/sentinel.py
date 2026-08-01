@@ -777,6 +777,46 @@ def export_sentinel_data():
             }
             for r in cur.fetchall()
         ]
+        cur.execute(
+            "SELECT id,preview_id,provider,source_type,source_id,status,"
+            "max_videos,max_bytes,selected_count,estimated_bytes_low,"
+            "estimated_bytes_high,download_delay_seconds,"
+            "stop_failure_threshold,consecutive_blocking_failures,created_at,"
+            "started_at,updated_at,completed_at FROM rescue_sessions "
+            "ORDER BY created_at,id"
+        )
+        rescue_sessions = [
+            {
+                'id': r[0], 'preview_id': r[1], 'provider': r[2],
+                'source_type': r[3], 'source_id': r[4], 'status': r[5],
+                'max_videos': int(r[6]),
+                'max_bytes': int(r[7]) if r[7] is not None else None,
+                'selected_count': int(r[8]),
+                'estimated_bytes_low': int(r[9]),
+                'estimated_bytes_high': int(r[10]),
+                'download_delay_seconds': int(r[11]),
+                'stop_failure_threshold': int(r[12]),
+                'consecutive_blocking_failures': int(r[13]),
+                'created_at': _iso(r[14]), 'started_at': _iso(r[15]),
+                'updated_at': _iso(r[16]), 'completed_at': _iso(r[17]),
+            }
+            for r in cur.fetchall()
+        ]
+        cur.execute(
+            "SELECT session_id,entity_id,rank_order,queue_id,status,"
+            "estimated_bytes_low,estimated_bytes_high,last_error,created_at,"
+            "updated_at FROM rescue_items ORDER BY session_id,rank_order"
+        )
+        rescue_items = [
+            {
+                'session_id': r[0], 'entity_id': r[1], 'rank': int(r[2]),
+                'queue_id': r[3], 'status': r[4],
+                'estimated_bytes_low': int(r[5]),
+                'estimated_bytes_high': int(r[6]), 'last_error': r[7],
+                'created_at': _iso(r[8]), 'updated_at': _iso(r[9]),
+            }
+            for r in cur.fetchall()
+        ]
         cur.close()
         return {
             'scan_runs': scans, 'video_states': states, 'events': events,
@@ -784,6 +824,7 @@ def export_sentinel_data():
             'sources': sources,
             'rescue_previews': rescue_previews,
             'rescue_preview_items': rescue_preview_items,
+            'rescue_sessions': rescue_sessions, 'rescue_items': rescue_items,
         }
     finally:
         con.close()

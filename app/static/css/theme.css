@@ -1872,6 +1872,17 @@ a:focus-visible {
 .vt-rescue-items strong, .vt-rescue-items small { display: block; }
 .vt-rescue-items small { margin-top: 2px; color: var(--vt-text-dim); }
 .vt-rescue-more { margin-top: 7px; color: var(--vt-text-dim); font-family: ui-monospace, monospace; font-size: 9.5px; }
+.vt-rescue-approval { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 8px; margin-top: 12px; padding: 11px; border: 1px solid rgba(248, 81, 73, .28); border-radius: 7px; background: rgba(248, 81, 73, .05); }
+.vt-rescue-approval label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 7px; }
+.vt-rescue-approval label span { grid-column: 1 / -1; color: var(--vt-text-dim); font-size: 10px; }
+.vt-rescue-approval label small { color: var(--vt-text-dim); font-size: 9.5px; }
+.vt-rescue-warning { margin: 7px 0 0; color: var(--vt-danger); font-size: 10px; }
+.vt-rescue-session-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 13px; }
+.vt-rescue-session-head > div:first-child strong,
+.vt-rescue-session-head > div:first-child span { display: block; }
+.vt-rescue-session-head > div:first-child strong { text-transform: capitalize; }
+.vt-rescue-session-head > div:first-child span { margin-top: 2px; color: var(--vt-text-dim); font-family: ui-monospace, monospace; font-size: 9px; }
+.vt-rescue-session-head > div:last-child { display: flex; gap: 7px; }
 .vt-sentinel-affected-list { display: flex; flex-direction: column; gap: 1px; }
 .vt-sentinel-affected {
   display: flex;
@@ -1952,4 +1963,6 @@ a:focus-visible {
   .vt-sentinel-creator { align-items: flex-start; flex-wrap: wrap; }
   .vt-rescue-controls { grid-template-columns: 1fr; }
   .vt-rescue-summary { grid-template-columns: 1fr; }
+  .vt-rescue-approval { grid-template-columns: 1fr; }
+  .vt-rescue-session-head { align-items: stretch; flex-direction: column; }
 }

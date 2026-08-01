@@ -10,7 +10,7 @@ import datetime
 import requests
 
 from QueueObject import QueueObject
-from queue_utils import enqueue
+from queue_utils import enqueue, queue_snapshot
 from chapters import parse_chapters
 from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for, cache_stats
 from vault_paths import public_video_path, resolve_vault_path
@@ -834,7 +834,7 @@ def queue_status():
     data['queue_size'] = current_app.config['queue'].qsize()
     data['queue_value'] = [
         {'url': q.url}
-        for q in current_app.config['queue'].queue
+        for q in queue_snapshot(current_app.config['queue'])
     ]
     data['cur_id'] = get_cur_videoID()
     data['cur_title'] = get_cur_videoTitle()

@@ -157,6 +157,33 @@ def checkdb():
                 PRIMARY KEY (`id`),
                 INDEX `idx_status` (`status`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        queue_columns = {
+            'priority': "int NOT NULL DEFAULT 0",
+            'origin': "varchar(30) NOT NULL DEFAULT 'ordinary'",
+            'rescue_session_id': "char(36) DEFAULT NULL",
+            'target_item_id': "varchar(255) COLLATE utf8mb4_bin DEFAULT NULL",
+        }
+        for column, definition in queue_columns.items():
+            cur.execute(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema=%s AND table_name='queue' AND column_name=%s",
+                (os.environ['VAULTTUBE_DBNAME'], column),
+            )
+            if cur.fetchone()[0] == 0:
+                cur.execute(
+                    "ALTER TABLE queue ADD COLUMN `%s` %s" % (column, definition)
+                )
+        cur.execute(
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema=%s AND table_name='queue' "
+            "AND index_name='idx_queue_priority'",
+            (os.environ['VAULTTUBE_DBNAME'],),
+        )
+        if cur.fetchone()[0] == 0:
+            cur.execute(
+                "ALTER TABLE queue ADD INDEX `idx_queue_priority` "
+                "(`status`,`priority`,`id`)"
+            )
         #Download Errors
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'download_errors' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
@@ -383,6 +410,56 @@ def checkdb():
                 CONSTRAINT `fk_rescue_preview_item_preview`
                     FOREIGN KEY (`preview_id`)
                     REFERENCES `sentinel_rescue_previews` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema=%s AND table_name='rescue_sessions' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Sentinel rescue sessions table not created, creating...")
+            cur.execute("""CREATE TABLE `rescue_sessions` (
+                `id` char(36) NOT NULL,
+                `preview_id` char(36) NOT NULL,
+                `provider` varchar(50) NOT NULL DEFAULT 'youtube',
+                `source_type` varchar(50) NOT NULL,
+                `source_id` varchar(255) NOT NULL,
+                `status` varchar(20) NOT NULL DEFAULT 'active',
+                `max_videos` int NOT NULL,
+                `max_bytes` bigint DEFAULT NULL,
+                `selected_count` int NOT NULL,
+                `estimated_bytes_low` bigint NOT NULL,
+                `estimated_bytes_high` bigint NOT NULL,
+                `download_delay_seconds` int NOT NULL DEFAULT 30,
+                `stop_failure_threshold` int NOT NULL DEFAULT 3,
+                `consecutive_blocking_failures` int NOT NULL DEFAULT 0,
+                `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `started_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                `completed_at` timestamp NULL DEFAULT NULL,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_rescue_session_preview` (`preview_id`),
+                INDEX `idx_rescue_session_status` (`status`,`created_at`),
+                CONSTRAINT `fk_rescue_session_preview` FOREIGN KEY (`preview_id`)
+                    REFERENCES `sentinel_rescue_previews` (`id`) ON DELETE RESTRICT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema=%s AND table_name='rescue_items' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Sentinel rescue items table not created, creating...")
+            cur.execute("""CREATE TABLE `rescue_items` (
+                `session_id` char(36) NOT NULL,
+                `entity_id` varchar(255) COLLATE utf8mb4_bin NOT NULL,
+                `rank_order` int NOT NULL,
+                `queue_id` int DEFAULT NULL,
+                `status` varchar(20) NOT NULL DEFAULT 'pending',
+                `estimated_bytes_low` bigint NOT NULL,
+                `estimated_bytes_high` bigint NOT NULL,
+                `last_error` text DEFAULT NULL,
+                `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`session_id`,`entity_id`),
+                INDEX `idx_rescue_item_status` (`session_id`,`status`,`rank_order`),
+                INDEX `idx_rescue_item_queue` (`queue_id`),
+                CONSTRAINT `fk_rescue_item_session` FOREIGN KEY (`session_id`)
+                    REFERENCES `rescue_sessions` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_rescue_item_queue` FOREIGN KEY (`queue_id`)
+                    REFERENCES `queue` (`id`) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
         # Import only legacy unavailable rows. Available rows are initialized
         # lazily on their next successful check. The evidence explicitly says
@@ -795,8 +872,16 @@ def insert_queue_item(qo):
     try:
         con = get_connection()
         cur = con.cursor()
-        sql = "INSERT INTO queue(url, source, channel_id, unsave, status, attempts) VALUES(%s, %s, %s, %s, 'pending', %s)"
-        cur.execute(sql, (qo.url, qo.source, qo.channel_id, 1 if qo.unsave else 0, qo.attempts))
+        sql = ("INSERT INTO queue(url, source, channel_id, unsave, status, "
+               "attempts, priority, origin, rescue_session_id, target_item_id) "
+               "VALUES(%s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s)")
+        cur.execute(sql, (
+            qo.url, qo.source, qo.channel_id, 1 if qo.unsave else 0,
+            qo.attempts, getattr(qo, 'priority', 0),
+            getattr(qo, 'origin', 'ordinary'),
+            getattr(qo, 'rescue_session_id', None),
+            getattr(qo, 'target_item_id', None),
+        ))
         rowid = cur.lastrowid
         con.commit()
         cur.close()
@@ -816,6 +901,63 @@ def update_queue_status(rowid, status, error=None, attempts=None):
             cur.execute("UPDATE queue SET status=%s, last_error=%s, attempts=%s WHERE id=%s", (status, error, attempts, rowid))
         else:
             cur.execute("UPDATE queue SET status=%s, last_error=%s WHERE id=%s", (status, error, rowid))
+        cur.execute(
+            "SELECT rescue_session_id,target_item_id FROM queue WHERE id=%s",
+            (rowid,),
+        )
+        rescue = cur.fetchone()
+        if rescue and rescue[0]:
+            session_id, entity_id = rescue
+            item_status = {
+                'pending': 'queued', 'downloading': 'downloading',
+                'done': 'preserved', 'failed': 'failed',
+                'cancelled': 'cancelled',
+            }.get(status)
+            if item_status:
+                cur.execute(
+                    "UPDATE rescue_items SET status=%s,last_error=%s "
+                    "WHERE session_id=%s AND entity_id=%s",
+                    (item_status, error, session_id, entity_id),
+                )
+            if status == 'done':
+                cur.execute(
+                    "UPDATE rescue_sessions SET consecutive_blocking_failures=0 "
+                    "WHERE id=%s",
+                    (session_id,),
+                )
+            elif status == 'failed':
+                message = (error or '').lower()
+                blocking = any(token in message for token in (
+                    'cookie', 'auth', '403', '429', 'too many requests',
+                    'throttl',
+                ))
+                if blocking:
+                    cur.execute(
+                        "UPDATE rescue_sessions SET "
+                        "consecutive_blocking_failures="
+                        "consecutive_blocking_failures+1 WHERE id=%s",
+                        (session_id,),
+                    )
+                    cur.execute(
+                        "UPDATE rescue_sessions SET status='paused' "
+                        "WHERE id=%s AND status='active' AND "
+                        "consecutive_blocking_failures>=stop_failure_threshold",
+                        (session_id,),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE rescue_sessions SET consecutive_blocking_failures=0 "
+                        "WHERE id=%s",
+                        (session_id,),
+                    )
+            cur.execute(
+                "UPDATE rescue_sessions s SET s.status='completed', "
+                "s.completed_at=NOW() WHERE s.id=%s AND s.status<>'cancelled' "
+                "AND NOT EXISTS (SELECT 1 FROM rescue_items i "
+                "WHERE i.session_id=s.id AND i.status IN "
+                "('pending','queued','downloading'))",
+                (session_id,),
+            )
         con.commit()
         cur.close()
         con.close()
@@ -841,7 +983,14 @@ def get_resumable_queue_items():
     try:
         con = get_connection()
         cur = con.cursor()
-        cur.execute("SELECT id, url, source, channel_id, unsave, attempts FROM queue WHERE status IN ('pending','downloading') ORDER BY id")
+        cur.execute(
+            "SELECT q.id, q.url, q.source, q.channel_id, q.unsave, q.attempts, "
+            "q.priority, q.origin, q.rescue_session_id, q.target_item_id, "
+            "s.download_delay_seconds FROM queue q "
+            "LEFT JOIN rescue_sessions s ON s.id=q.rescue_session_id "
+            "WHERE q.status IN ('pending','downloading') "
+            "ORDER BY q.priority, q.id"
+        )
         rv = cur.fetchall()
         cur.close()
         con.close()
@@ -1005,6 +1154,8 @@ def export_row_counts():
             ('sentinel_sources', "SELECT COUNT(*) FROM sentinel_sources"),
             ('sentinel_rescue_previews', "SELECT COUNT(*) FROM sentinel_rescue_previews"),
             ('sentinel_rescue_preview_items', "SELECT COUNT(*) FROM sentinel_rescue_preview_items"),
+            ('rescue_sessions', "SELECT COUNT(*) FROM rescue_sessions"),
+            ('rescue_items', "SELECT COUNT(*) FROM rescue_items"),
         ]:
             cur.execute(sql)
             counts[name] = cur.fetchone()[0]
