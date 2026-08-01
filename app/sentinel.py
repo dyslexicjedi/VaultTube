@@ -404,7 +404,12 @@ def get_events(limit=50, offset=0, event_type=None, channel_id=None):
         con.close()
 
 
-def _source_status(unavailable, suspected, newly_unavailable):
+def _source_status(unavailable, suspected, newly_unavailable,
+                   source_availability=None):
+    if source_availability == 'unavailable':
+        return 'source_unavailable'
+    if source_availability == 'suspected_unavailable':
+        return 'source_suspected'
     if newly_unavailable or suspected:
         return 'attention'
     if unavailable:
@@ -439,7 +444,7 @@ def get_sources(limit=50, offset=0):
             "COALESCE(inv.known_remote,0), COALESCE(inv.preserved_remote,0), "
             "inv.completed_at, COALESCE(risk.risk_score,0), "
             "COALESCE(risk.risk_level,'low'), risk.risk_reasons_json, "
-            "risk.risk_calculated_at "
+            "risk.risk_calculated_at, risk.availability_state "
             "FROM ("
             " SELECT channelId source_id FROM videos WHERE channelId IS NOT NULL GROUP BY channelId "
             " UNION SELECT source_id FROM sentinel_inventory_runs "
@@ -489,6 +494,13 @@ def get_sources(limit=50, offset=0):
             unavailable = int(row[3])
             suspected = int(row[4])
             newly_unavailable = int(row[7])
+            risk_assessed = bool(
+                row[16] is not None
+                and not (
+                    row[17] in (None, 'unknown')
+                    and int(row[13]) == 0 and row[12] is None
+                )
+            )
             items.append({
                 'channel_id': row[0],
                 'channel_name': row[1],
@@ -508,7 +520,7 @@ def get_sources(limit=50, offset=0):
                     if row[10] else None
                 ),
                 'inventory_completed_at': _iso(row[12]),
-                'risk': {
+                'risk': None if not risk_assessed else {
                     'score': int(row[13]), 'level': row[14],
                     'reasons': (
                         json.loads(row[15]) if row[15] else []
@@ -517,7 +529,7 @@ def get_sources(limit=50, offset=0):
                     'observation_only': True,
                 },
                 'status': _source_status(
-                    unavailable, suspected, newly_unavailable,
+                    unavailable, suspected, newly_unavailable, row[17],
                 ),
             })
         cur.close()
@@ -653,6 +665,7 @@ def get_source_detail(channel_id, event_limit=20):
         'event_count': int(event_count),
         'status': _source_status(
             unavailable, suspected, int(newly_unavailable),
+            risk['availability_state'] if risk else None,
         ),
         'affected_videos': affected,
         'events': events['items'],

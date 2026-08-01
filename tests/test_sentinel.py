@@ -785,7 +785,9 @@ def test_sentinel_source_list_and_detail_apis(client):
     by_id = {item['channel_id']: item for item in sources['items']}
     assert by_id['CreatorWithLoss']['status'] == 'attention'
     assert by_id['CreatorWithLoss']['unavailable'] == 1
+    assert by_id['CreatorWithLoss']['risk']['score'] == 25
     assert by_id['CreatorStable']['status'] == 'stable'
+    assert by_id['CreatorStable']['risk'] is None
 
     detail = client.get(
         '/api/sentinel/source/channel/CreatorWithLoss'
@@ -826,7 +828,7 @@ def test_json_export_includes_sentinel_ledger(client):
     assert payload['sentinel']['video_states'][0]['state'] == 'unavailable'
     assert len(payload['sentinel']['scan_runs']) == 2
     assert payload['sentinel']['sources'][0]['source_id'] == 'SentinelChannel'
-    assert payload['sentinel']['sources'][0]['risk_level'] == 'low'
+    assert payload['sentinel']['sources'][0]['risk_level'] == 'elevated'
 
 
 def _inventory_page(video_ids, complete=True, token=None, pages=1,
@@ -1105,6 +1107,9 @@ def test_risk_model_scores_and_caps_deterministically():
     facts = {
         'availability_state': 'unavailable',
         'consecutive_terminal_checks': 2,
+        'archived_video_count': 100,
+        'archived_unavailable_count': 100,
+        'archived_unavailable_percent': 100.0,
         'confirmed_disappearances_24h': 5,
         'inventory_removed_7d': 20,
         'latest_inventory_count': 80,
@@ -1123,7 +1128,7 @@ def test_risk_model_scores_and_caps_deterministically():
     assert {reason['code'] for reason in reasons} == {
         'terminal_unavailable', 'disappearance_burst',
         'weekly_inventory_loss', 'inventory_shrink', 'source_failures',
-        'preservation_gap',
+        'preservation_gap', 'all_archived_unavailable',
     }
     assert risk_level(24) == 'low'
     assert risk_level(25) == 'elevated'
@@ -1133,6 +1138,9 @@ def test_risk_model_scores_and_caps_deterministically():
     vanished.update({
         'availability_state': 'available',
         'consecutive_terminal_checks': 0,
+        'archived_video_count': 0,
+        'archived_unavailable_count': 0,
+        'archived_unavailable_percent': 0.0,
         'confirmed_disappearances_24h': 0,
         'inventory_removed_7d': 100,
         'latest_inventory_count': 0,
@@ -1147,6 +1155,49 @@ def test_risk_model_scores_and_caps_deterministically():
     assert vanished_score == 35
     assert {reason['code'] for reason in vanished_reasons} == {
         'weekly_inventory_loss', 'inventory_shrink',
+    }
+
+
+def test_all_archived_videos_unavailable_is_risk_even_before_source_checks():
+    from sentinel_risk import recalculate_source_risk
+
+    source_id = 'RiskAllArchivedGone'
+    _insert_channel(source_id, 'Gone Archive')
+    _insert_video('RiskGoneOne', is_deleted=1, channel_id=source_id)
+    _insert_video('RiskGoneTwo', is_deleted=1, channel_id=source_id)
+
+    result = recalculate_source_risk('channel', source_id)
+
+    assert result['score'] == 25
+    assert result['level'] == 'elevated'
+    assert result['facts']['archived_unavailable_count'] == 2
+    assert result['facts']['archived_unavailable_percent'] == 100.0
+    assert [reason['code'] for reason in result['reasons']] == [
+        'all_archived_unavailable',
+    ]
+
+
+def test_confirmed_deleted_channel_with_all_archived_videos_gone_is_critical():
+    from sentinel import finish_scan_run, start_scan_run
+    from sentinel_risk import record_source_observation
+
+    source_id = 'RiskDeletedEverything'
+    _insert_channel(source_id, 'Deleted Everything')
+    _insert_video('RiskDeletedOne', is_deleted=1, channel_id=source_id)
+    for _index in range(2):
+        scan = start_scan_run(
+            scan_type='source_presence', source_type='channel',
+            source_id=source_id,
+        )
+        finish_scan_run(scan, 'complete', 1, 1)
+        record_source_observation('channel', source_id, False, scan)
+
+    from sentinel_risk import get_source_risk
+    risk = get_source_risk('channel', source_id)
+    assert risk['score'] == 100
+    assert risk['level'] == 'critical'
+    assert {reason['code'] for reason in risk['reasons']} == {
+        'terminal_unavailable', 'all_archived_unavailable',
     }
 
 
@@ -1221,7 +1272,7 @@ def test_terminal_source_requires_two_complete_checks_and_restores(
     assert record_source_observation('channel', source_id, False, first) is None
     assert client.get(
         '/api/sentinel/source/channel/' + source_id
-    ).get_json()['data']['risk']['score'] == 10
+    ).get_json()['data']['risk']['score'] == 40
 
     second = start_scan_run(
         scan_type='source_presence', source_type='channel', source_id=source_id,
@@ -1233,8 +1284,8 @@ def test_terminal_source_requires_two_complete_checks_and_restores(
     risk = client.get(
         '/api/sentinel/source/channel/' + source_id
     ).get_json()['data']['risk']
-    assert risk['score'] == 55
-    assert risk['level'] == 'high'
+    assert risk['score'] == 85
+    assert risk['level'] == 'critical'
     assert any(alert['id'] == 'sentinel_risk_channel_' + source_id
                and 'no downloads were queued' in alert['message']
                for alert in get_alerts())
@@ -1383,7 +1434,11 @@ def test_census_source_presence_integration_confirms_without_inventory(
         '/api/sentinel/source/channel/' + source_id
     ).get_json()['data']['risk']
     assert first['availability_state'] == 'suspected_unavailable'
-    assert first['score'] == 0
+    assert first['score'] == 30
+    assert first['level'] == 'elevated'
+    assert client.get(
+        '/api/sentinel/source/channel/' + source_id
+    ).get_json()['data']['status'] == 'source_suspected'
 
     sentinel_inventory.census_once(
         client.application, YouTubeRequestBudget(10), interval_seconds=0,
@@ -1392,8 +1447,11 @@ def test_census_source_presence_integration_confirms_without_inventory(
         '/api/sentinel/source/channel/' + source_id
     ).get_json()['data']['risk']
     assert second['availability_state'] == 'unavailable'
-    assert second['score'] == 45
-    assert second['level'] == 'elevated'
+    assert second['score'] == 75
+    assert second['level'] == 'critical'
+    assert client.get(
+        '/api/sentinel/source/channel/' + source_id
+    ).get_json()['data']['status'] == 'source_unavailable'
     assert inventory_calls == []
 
 

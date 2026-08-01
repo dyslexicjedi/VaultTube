@@ -160,6 +160,22 @@ def _calculate_facts(cur, source_type, source_id):
     terminal_checks = int(source[1])
 
     cur.execute(
+        "SELECT COUNT(v.id), COALESCE(SUM(CASE "
+        "WHEN s.state='unavailable' OR "
+        "(s.state IS NULL AND v.isDeleted=1) THEN 1 ELSE 0 END),0) "
+        "FROM videos v LEFT JOIN sentinel_video_state s ON s.video_id=v.id "
+        "WHERE v.channelId=%s",
+        (source_id,),
+    )
+    archived_count, archived_unavailable = cur.fetchone()
+    archived_count = int(archived_count)
+    archived_unavailable = int(archived_unavailable)
+    archived_unavailable_percent = (
+        (archived_unavailable / archived_count) * 100
+        if archived_count else 0.0
+    )
+
+    cur.execute(
         "SELECT COUNT(*) FROM sentinel_events e LEFT JOIN videos v "
         "ON v.id=e.entity_id WHERE COALESCE(v.channelId,e.source_id)=%s "
         "AND e.event_type='source_unavailable' "
@@ -243,6 +259,9 @@ def _calculate_facts(cur, source_type, source_id):
     return {
         'availability_state': availability_state,
         'consecutive_terminal_checks': terminal_checks,
+        'archived_video_count': archived_count,
+        'archived_unavailable_count': archived_unavailable,
+        'archived_unavailable_percent': round(archived_unavailable_percent, 2),
         'confirmed_disappearances_24h': confirmed_24h,
         'inventory_removed_7d': removed_7d,
         'latest_inventory_count': latest_count,
@@ -266,10 +285,39 @@ def _score_facts(facts):
             'evidence': evidence,
         })
 
+    if facts['availability_state'] == 'suspected_unavailable':
+        add('suspected_terminal_unavailable',
+            'Source unavailable in one complete check; confirmation pending',
+            30, {'checks': facts['consecutive_terminal_checks']})
     if (facts['availability_state'] == 'unavailable'
             and facts['consecutive_terminal_checks'] >= 2):
         add('terminal_unavailable', 'Source unavailable in two complete checks',
-            45, {'checks': facts['consecutive_terminal_checks']})
+            75, {'checks': facts['consecutive_terminal_checks']})
+    unavailable_count = facts.get('archived_unavailable_count', 0)
+    unavailable_percent = facts.get('archived_unavailable_percent', 0)
+    if unavailable_count and unavailable_percent >= 100:
+        add('all_archived_unavailable',
+            'All locally known videos are unavailable at the source',
+            25, {
+                'unavailable': unavailable_count,
+                'total': facts.get('archived_video_count', unavailable_count),
+            })
+    elif unavailable_count and unavailable_percent >= 50:
+        add('majority_archived_unavailable',
+            'At least half of locally known videos are unavailable at the source',
+            15, {
+                'unavailable': unavailable_count,
+                'total': facts.get('archived_video_count', unavailable_count),
+                'percent': unavailable_percent,
+            })
+    elif unavailable_count and unavailable_percent >= 10:
+        add('archived_unavailability',
+            'At least 10% of locally known videos are unavailable at the source',
+            5, {
+                'unavailable': unavailable_count,
+                'total': facts.get('archived_video_count', unavailable_count),
+                'percent': unavailable_percent,
+            })
     if facts['confirmed_disappearances_24h'] >= 5:
         add('disappearance_burst', 'Five or more confirmed disappearances in 24 hours',
             25, {'count': facts['confirmed_disappearances_24h']})
@@ -292,7 +340,7 @@ def _score_facts(facts):
     if facts['unpreserved_available_count'] > 25:
         add('preservation_gap', 'More than 25 known videos are not preserved',
             10, {'count': facts['unpreserved_available_count']})
-    if facts['quiet_30d']:
+    if facts['quiet_30d'] and unavailable_count == 0:
         add('quiet_30d', 'No adverse events for 30 days', -15,
             {'since': facts['monitored_since']})
     score = max(0, min(100, sum(reason['points'] for reason in reasons)))
@@ -410,9 +458,14 @@ def get_source_risk(source_type, source_id):
         cur.close()
         if row is None or row[4] is None:
             return None
+        facts = _loads(row[3], {})
+        if (row[5] == 'unknown' and int(row[0]) == 0
+                and not facts.get('adverse_events_30d')
+                and not facts.get('monitored_since')):
+            return None
         return {
             'score': int(row[0]), 'level': row[1],
-            'reasons': _loads(row[2], []), 'facts': _loads(row[3], {}),
+            'reasons': _loads(row[2], []), 'facts': facts,
             'calculated_at': row[4].isoformat(),
             'availability_state': row[5],
             'consecutive_terminal_checks': int(row[6]),

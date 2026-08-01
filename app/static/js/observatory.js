@@ -34,12 +34,15 @@
         return (bytes / Math.pow(1024, unit)).toFixed(unit > 2 ? 1 : 0) + ' ' + units[unit];
     }
     function statusLabel(status) {
+        if (status === 'source_unavailable') return 'Channel unavailable';
+        if (status === 'source_suspected') return 'Channel check pending';
         if (status === 'attention') return 'Needs attention';
         if (status === 'historical_loss') return 'Historical loss';
         return 'Stable';
     }
     function statusClass(status) {
-        return status === 'attention' ? 'attention' : status === 'historical_loss' ? 'history' : 'stable';
+        return status === 'attention' || status === 'source_suspected' ? 'attention'
+            : status === 'historical_loss' || status === 'source_unavailable' ? 'history' : 'stable';
     }
     function riskLabel(level) {
         return level ? level.charAt(0).toUpperCase() + level.slice(1) : 'Low';
@@ -89,10 +92,13 @@
         if (source.suspected) facts.push(source.suspected + ' suspected');
         if (source.known_remote) facts.push(source.preserved_remote + ' of ' + source.known_remote + ' preserved');
         if (!facts.length) facts.push(source.video_count + ' archived');
+        var riskBadge = source.risk
+            ? '<span class="vt-sentinel-state vt-sentinel-risk ' + riskClass(source.risk.level) + '">' + source.risk.score + ' · ' + esc(riskLabel(source.risk.level)) + '</span>'
+            : '<span class="vt-sentinel-state">Not assessed</span>';
         return '<button type="button" class="vt-sentinel-source" data-channel="' + esc(source.channel_id) + '">'
             + '<span class="vt-sentinel-avatar">' + esc(initials) + '</span>'
             + '<span class="vt-sentinel-source-copy"><strong>' + esc(source.channel_name) + '</strong><small>' + esc(facts.join(' · ')) + '</small></span>'
-            + '<span class="vt-sentinel-state vt-sentinel-risk ' + riskClass(source.risk.level) + '">' + source.risk.score + ' · ' + esc(riskLabel(source.risk.level)) + '</span>'
+            + riskBadge
             + '</button>';
     }
 
