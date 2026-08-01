@@ -1909,6 +1909,15 @@ a:focus-visible {
 .vt-archaeology-saved > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .vt-archaeology-saved > div:first-child strong { font-size: 12px; }
 .vt-archaeology-saved > div:first-child span { color: var(--vt-text-dim); font-size: 10px; }
+.vt-archaeology-list { margin-top: 9px; border-top: 1px solid var(--vt-line); }
+.vt-archaeology-item { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--vt-line); }
+.vt-archaeology-item > a { min-width: 0; color: var(--vt-text); text-decoration: none; }
+.vt-archaeology-item > a strong, .vt-archaeology-item > a small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vt-archaeology-item > a strong { font-size: 11px; }
+.vt-archaeology-item > a small { margin-top: 2px; color: var(--vt-text-dim); font-size: 9.5px; }
+.vt-wayback-result { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--vt-text-dim); font-size: 10px; }
+.vt-wayback-result > span { flex: 1; min-width: 180px; }
+.vt-wayback-result > a { color: var(--vt-accent); }
 .vt-sentinel-affected-list { display: flex; flex-direction: column; gap: 1px; }
 .vt-sentinel-affected {
   display: flex;

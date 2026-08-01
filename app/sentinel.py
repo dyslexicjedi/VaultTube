@@ -610,7 +610,9 @@ def get_source_detail(channel_id, event_limit=20):
             remote_unarchived = [item[0] for item in cur.fetchall()]
         cur.execute(
             "SELECT entity_id, evidence_source, evidence_filename, "
-            "first_discovered_at, last_observed_at "
+            "first_discovered_at, last_observed_at, wayback_status, "
+            "wayback_checked_at, wayback_capture_url, wayback_metadata_json, "
+            "metadata_imported_at, recovered_at "
             "FROM sentinel_archaeology_candidates "
             "WHERE provider='youtube' AND source_type='channel' "
             "AND source_id=%s ORDER BY first_discovered_at, entity_id",
@@ -622,6 +624,11 @@ def get_source_detail(channel_id, event_limit=20):
                 'evidence_filename': item[2],
                 'first_discovered_at': _iso(item[3]),
                 'last_observed_at': _iso(item[4]),
+                'wayback_status': item[5], 'wayback_checked_at': _iso(item[6]),
+                'wayback_capture_url': item[7],
+                'wayback_metadata': json.loads(item[8] or '{}'),
+                'metadata_imported_at': _iso(item[9]),
+                'recovered_at': _iso(item[10]),
             }
             for item in cur.fetchall()
         ]
@@ -749,7 +756,10 @@ def export_sentinel_data():
         cur.execute(
             "SELECT provider, source_type, source_id, entity_id, "
             "evidence_source, evidence_filename, first_discovered_at, "
-            "last_observed_at FROM sentinel_archaeology_candidates "
+            "last_observed_at, wayback_status, wayback_checked_at, "
+            "wayback_capture_url, wayback_capture_timestamp, wayback_media_url, "
+            "wayback_metadata_json, metadata_imported_at, recovered_at "
+            "FROM sentinel_archaeology_candidates "
             "ORDER BY provider, source_type, source_id, entity_id"
         )
         archaeology_candidates = [
@@ -759,6 +769,13 @@ def export_sentinel_data():
                 'evidence_filename': r[5],
                 'first_discovered_at': _iso(r[6]),
                 'last_observed_at': _iso(r[7]),
+                'wayback_status': r[8], 'wayback_checked_at': _iso(r[9]),
+                'wayback_capture_url': r[10],
+                'wayback_capture_timestamp': r[11],
+                'wayback_media_url': r[12],
+                'wayback_metadata': json.loads(r[13] or '{}'),
+                'metadata_imported_at': _iso(r[14]),
+                'recovered_at': _iso(r[15]),
             }
             for r in cur.fetchall()
         ]

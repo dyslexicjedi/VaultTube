@@ -131,6 +131,19 @@
             + '</a>';
     }
 
+    function archaeologyRow(item) {
+        var metadata = item.wayback_metadata || {};
+        var label = metadata.title || item.id;
+        var state = item.recovered_at ? 'Recovered video' : item.metadata_imported_at
+            ? 'Metadata imported' : item.wayback_status === 'not_found' ? 'Not found in Wayback'
+            : item.wayback_status === 'media' ? 'Archived video found'
+            : item.wayback_status === 'metadata' ? 'Archived metadata found' : 'Not searched';
+        return '<div class="vt-archaeology-item" data-archaeology-id="' + esc(item.id) + '">'
+            + '<a href="https://www.youtube.com/watch?v=' + encodeURIComponent(item.id) + '" target="_blank" rel="noopener noreferrer"><strong>' + esc(label) + '</strong><small>' + esc(item.id) + ' · ' + esc(state) + '</small></a>'
+            + '<button type="button" class="vt-btn-ghost" data-wayback-search="' + esc(item.id) + '">Search Wayback</button>'
+            + '<div class="vt-wayback-result"></div></div>';
+    }
+
     function renderDetail(data) {
         selectedSource = data.channel_id;
         var available = Math.max(0, data.video_count - data.unavailable - data.suspected);
@@ -175,7 +188,7 @@
         var archaeology = data.archaeology;
         var archaeologyPanel = archaeology && archaeology.count
             ? '<div class="vt-archaeology-saved"><div><strong>Historical discoveries</strong><span>' + archaeology.count + ' ID' + (archaeology.count === 1 ? '' : 's') + ' preserved from manual evidence</span></div>'
-                + '<div class="vt-history-links">' + historicalVideoLinks(archaeology.items.map(function (item) { return item.id; })) + '</div>'
+                + '<div class="vt-archaeology-list">' + archaeology.items.map(archaeologyRow).join('') + '</div>'
                 + (archaeology.count > archaeology.items.length ? '<span class="vt-history-overflow">+' + (archaeology.count - archaeology.items.length) + ' more</span>' : '') + '</div>'
             : '';
         $id('sentinel-detail').innerHTML = riskPanel + coverage + archaeologyPanel
@@ -204,6 +217,54 @@
             + '<div id="history-import-result"></div></details>';
         $id('rescue-preview-button').addEventListener('click', buildPreview);
         $id('history-import-form').addEventListener('submit', compareHistoricalImport);
+        Array.prototype.forEach.call(document.querySelectorAll('[data-wayback-search]'), function (button) {
+            button.addEventListener('click', function () { searchWayback(button); });
+        });
+    }
+
+    function searchWayback(button) {
+        var videoId = button.getAttribute('data-wayback-search');
+        var row = button.closest('.vt-archaeology-item');
+        var result = row.querySelector('.vt-wayback-result');
+        button.disabled = true;
+        button.textContent = 'Searching…';
+        postJson('/api/sentinel/source/channel/' + encodeURIComponent(selectedSource)
+            + '/archaeology/' + encodeURIComponent(videoId) + '/wayback', {})
+            .then(function (data) {
+                button.textContent = 'Search again';
+                if (data.status === 'not_found') {
+                    result.innerHTML = '<span>No archived page or video was found.</span>';
+                    return;
+                }
+                var metadata = data.metadata || {};
+                var action = data.status === 'media' ? 'Import video + metadata' : 'Import metadata';
+                result.innerHTML = '<span>' + esc(metadata.title || (data.status === 'media' ? 'Archived video found' : 'Archived page found')) + '</span>'
+                    + (data.capture_url ? '<a href="' + esc(data.capture_url) + '" target="_blank" rel="noopener noreferrer">View snapshot</a>' : '')
+                    + '<button type="button" class="vt-btn" data-wayback-import="' + esc(videoId) + '" data-include-media="' + (data.status === 'media' ? '1' : '0') + '">' + action + '</button>';
+                result.querySelector('[data-wayback-import]').addEventListener('click', function (importButton) {
+                    importWayback(importButton.currentTarget, result);
+                });
+            }).catch(function (error) {
+                result.innerHTML = '<span>' + esc(error.message) + '</span>';
+                button.textContent = 'Try again';
+            }).finally(function () { button.disabled = false; });
+    }
+
+    function importWayback(button, result) {
+        var videoId = button.getAttribute('data-wayback-import');
+        button.disabled = true;
+        button.textContent = 'Importing…';
+        postJson('/api/sentinel/source/channel/' + encodeURIComponent(selectedSource)
+            + '/archaeology/' + encodeURIComponent(videoId) + '/import', {
+                include_media: button.getAttribute('data-include-media') === '1'
+            }).then(function (data) {
+                result.innerHTML = '<span>' + (data.video_recovered
+                    ? 'Video, metadata, and thumbnail imported.'
+                    : 'Metadata' + (data.thumbnail_imported ? ' and thumbnail' : '') + ' imported.') + '</span>';
+            }).catch(function (error) {
+                result.innerHTML = '<span>' + esc(error.message) + '</span>';
+                button.disabled = false;
+            });
     }
 
     function historicalVideoLinks(ids) {

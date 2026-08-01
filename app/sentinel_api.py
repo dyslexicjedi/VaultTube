@@ -12,6 +12,7 @@ from sentinel_rescue import (
     create_rescue_preview, create_rescue_session, get_rescue_preview,
     get_rescue_session, set_rescue_session_status,
 )
+from sentinel_wayback import import_wayback, search_wayback
 
 
 logger = logging.getLogger('sentinel_api')
@@ -150,6 +151,37 @@ def import_history(source_type, source_id):
     except Exception as e:
         logger.error('Sentinel history import failed for %s: %s', source_id, e)
         return _error(str(e), 500)
+
+
+@sentinel_bp.route(
+    '/source/channel/<string:source_id>/archaeology/<string:video_id>/wayback',
+    methods=['POST'],
+)
+def search_archaeology_wayback(source_id, video_id):
+    try:
+        return _success(search_wayback(source_id, video_id))
+    except ValueError as e:
+        return _error(str(e), 404)
+    except Exception as e:
+        logger.error('Wayback search failed for %s: %s', video_id, e)
+        return _error('Wayback search failed: %s' % e, 502)
+
+
+@sentinel_bp.route(
+    '/source/channel/<string:source_id>/archaeology/<string:video_id>/import',
+    methods=['POST'],
+)
+def import_archaeology_wayback(source_id, video_id):
+    try:
+        body = request.get_json(silent=True) or {}
+        return _success(import_wayback(
+            source_id, video_id, include_media=body.get('include_media', True),
+        ))
+    except ValueError as e:
+        return _error(str(e), 409)
+    except Exception as e:
+        logger.error('Wayback import failed for %s: %s', video_id, e)
+        return _error('Wayback import failed: %s' % e, 502)
 
 
 @sentinel_bp.route(

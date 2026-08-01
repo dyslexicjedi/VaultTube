@@ -376,7 +376,7 @@ def save_video_from_ytdlp(video_id, info, fpath):
         logger.error("save_video_from_ytdlp failed for %s: %s" % (video_id, e))
 
 
-def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source,webpage_url=None):
+def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source,webpage_url=None,description='',thumbnail_override=None):
     """Save a non-YouTube video (Reddit download or manual upload) to the DB.
     The json column gets a plain metadata dict; webpage_url, when known,
     powers the player's copy-source-link button."""
@@ -394,9 +394,9 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
 
 
         # Extract frame at 1 second (or nearest frame)
-        thumbnail_img = None
+        thumbnail_img = thumbnail_override
         try:
-            if fps > 0 and frames > fps:
+            if thumbnail_img is None and fps > 0 and frames > fps:
                 data.set(cv2.CAP_PROP_POS_FRAMES, int(fps))  # frame at 1s
                 ret, frame = data.read()
                 if ret:
@@ -424,7 +424,7 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
         ret['channelId'] = channel_id
         ret['length'] = length_td
         ret['title'] = title
-        ret['description'] = ""
+        ret['description'] = description or ""
         codec_info = _extract_codec_info(file_path)
         ret.update(codec_info)
         # File size for storage accounting

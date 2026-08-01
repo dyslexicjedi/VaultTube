@@ -497,6 +497,181 @@ def test_historical_import_can_be_added_to_channel_history(client):
     assert candidate['source_id'] == source_id
 
 
+class _WaybackResponse:
+    def __init__(self, status=200, json_data=None, text='', headers=None,
+                 content=b'', chunks=None):
+        self.status_code = status
+        self._json = json_data
+        self.text = text
+        self.headers = headers or {}
+        self.content = content
+        self._chunks = chunks if chunks is not None else [content]
+        self.ok = 200 <= status < 300
+
+    def json(self):
+        return self._json
+
+    def raise_for_status(self):
+        if not self.ok:
+            import requests
+            raise requests.HTTPError('HTTP %s' % self.status_code)
+
+    def close(self):
+        pass
+
+    def iter_content(self, _size):
+        return iter(self._chunks)
+
+
+class _WaybackSession:
+    def __init__(self, media=True):
+        self.headers = {}
+        self.media = media
+
+    def get(self, url, params=None, **_kwargs):
+        if url.endswith('/cdx/search/cdx'):
+            if params['url'].startswith('https:'):
+                return _WaybackResponse(json_data=[
+                    ['timestamp', 'original', 'statuscode', 'mimetype'],
+                    ['20180102030405', params['url'], '200', 'text/html'],
+                ])
+            return _WaybackResponse(json_data=[])
+        if '20180102030405id_' in url:
+            return _WaybackResponse(text=(
+                '<meta property="og:title" content="Recovered title">'
+                '<meta property="og:description" content="Recovered description">'
+                '<meta property="og:image" content="https://thumb.test/image.jpg">'
+                '<meta itemprop="datePublished" content="2017-04-03">'
+            ))
+        if 'wayback-fakeurl.archive.org/yt/' in url:
+            return _WaybackResponse(
+                status=206 if self.media else 404,
+                headers={'Content-Type': 'video/mp4'}, chunks=[b'video-bytes'],
+            )
+        if url == 'https://thumb.test/image.jpg':
+            return _WaybackResponse(
+                headers={'Content-Type': 'image/jpeg'}, content=b'jpeg-bytes',
+            )
+        raise AssertionError(url)
+
+
+def _insert_archaeology_candidate(source_id, video_id):
+    _insert_channel(source_id, 'Wayback Creator')
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "INSERT INTO sentinel_archaeology_candidates "
+        "(source_id,entity_id,evidence_source,evidence_filename) "
+        "VALUES(%s,%s,'filmot','filmot.txt')",
+        (source_id, video_id),
+    )
+    cur.close()
+    con.close()
+
+
+def test_wayback_search_detects_page_metadata_and_media(client):
+    from sentinel_wayback import search_wayback
+
+    _insert_archaeology_candidate('UCWaybackSearch', 'Wayback0001')
+    result = search_wayback(
+        'UCWaybackSearch', 'Wayback0001', session=_WaybackSession(),
+    )
+    assert result['status'] == 'media'
+    assert result['metadata']['title'] == 'Recovered title'
+    assert result['metadata']['description'] == 'Recovered description'
+    assert result['metadata']['thumbnail_url'] == 'https://thumb.test/image.jpg'
+    assert result['capture_timestamp'] == '20180102030405'
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT wayback_status,wayback_capture_timestamp,wayback_metadata_json "
+        "FROM sentinel_archaeology_candidates"
+    )
+    status, timestamp, metadata = cur.fetchone()
+    assert status == 'media' and timestamp == '20180102030405'
+    assert json.loads(metadata)['title'] == 'Recovered title'
+    cur.close()
+    con.close()
+
+
+def test_wayback_import_recovers_validated_video_and_thumbnail(client, monkeypatch):
+    import os
+    import sentinel_wayback
+
+    source_id, video_id = 'UCWaybackImport', 'Wayback0002'
+    _insert_archaeology_candidate(source_id, video_id)
+    recovered_path = os.path.join(
+        os.environ['VAULTTUBE_VAULTDIR'], source_id, video_id + '.mp4',
+    )
+    if os.path.exists(recovered_path):
+        os.unlink(recovered_path)
+    session = _WaybackSession()
+    sentinel_wayback.search_wayback(source_id, video_id, session=session)
+    monkeypatch.setattr(
+        sentinel_wayback, 'get_codec_info',
+        lambda _path: {'vcodec': 'h264', 'acodec': 'aac', 'container': 'mp4'},
+    )
+    result = sentinel_wayback.import_wayback(
+        source_id, video_id, include_media=True, session=session,
+    )
+    assert result['video_recovered'] is True
+    assert result['thumbnail_imported'] is True
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT title,description,channelId FROM videos WHERE id=%s", (video_id,))
+    assert cur.fetchone() == ('Recovered title', 'Recovered description', source_id)
+    cur.execute("SELECT image FROM images WHERE id=%s", (video_id,))
+    assert cur.fetchone()[0] == b'jpeg-bytes'
+    cur.execute("SELECT recovered_at FROM sentinel_archaeology_candidates WHERE entity_id=%s", (video_id,))
+    assert cur.fetchone()[0] is not None
+    cur.close()
+    con.close()
+
+
+def test_wayback_import_rejects_non_video_response(client, monkeypatch):
+    import pytest
+    import sentinel_wayback
+
+    source_id, video_id = 'UCWaybackInvalid', 'Wayback0004'
+    _insert_archaeology_candidate(source_id, video_id)
+    session = _WaybackSession()
+    sentinel_wayback.search_wayback(source_id, video_id, session=session)
+    monkeypatch.setattr(
+        sentinel_wayback, 'get_codec_info',
+        lambda _path: {'vcodec': None, 'acodec': None, 'container': None},
+    )
+    with pytest.raises(ValueError, match='not a valid video'):
+        sentinel_wayback.import_wayback(
+            source_id, video_id, include_media=True, session=session,
+        )
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT COUNT(*) FROM videos WHERE id=%s", (video_id,))
+    assert cur.fetchone()[0] == 0
+    cur.close()
+    con.close()
+
+
+def test_wayback_api_routes_and_observatory_controls(client, monkeypatch):
+    import sentinel_api
+
+    monkeypatch.setattr(sentinel_api, 'search_wayback', lambda channel, video: {
+        'status': 'metadata', 'metadata': {'title': 'Found'},
+    })
+    monkeypatch.setattr(sentinel_api, 'import_wayback', lambda channel, video, include_media=True: {
+        'metadata_imported': True, 'video_recovered': include_media,
+    })
+    base = '/api/sentinel/source/channel/UCWayback/archaeology/Wayback0003'
+    assert client.post(base + '/wayback').get_json()['data']['status'] == 'metadata'
+    imported = client.post(base + '/import', json={'include_media': False})
+    assert imported.get_json()['data']['video_recovered'] is False
+    script = client.get('/static/js/observatory.js').data
+    assert b'Search Wayback' in script
+    assert b'Import video + metadata' in script
+
+
 def test_observatory_javascript_contains_historical_import_ui(client):
     script = client.get('/static/js/observatory.js').data
     assert b'Historical list comparison' in script

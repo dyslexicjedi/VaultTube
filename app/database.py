@@ -363,11 +363,41 @@ def checkdb():
                 `entity_id` varchar(255) COLLATE utf8mb4_bin NOT NULL,
                 `evidence_source` varchar(50) NOT NULL DEFAULT 'filmot',
                 `evidence_filename` varchar(255) DEFAULT NULL,
+                `wayback_status` varchar(30) NOT NULL DEFAULT 'unsearched',
+                `wayback_checked_at` timestamp NULL DEFAULT NULL,
+                `wayback_capture_url` varchar(2000) DEFAULT NULL,
+                `wayback_capture_timestamp` varchar(14) DEFAULT NULL,
+                `wayback_media_url` text DEFAULT NULL,
+                `wayback_metadata_json` longtext DEFAULT NULL,
+                `metadata_imported_at` timestamp NULL DEFAULT NULL,
+                `recovered_at` timestamp NULL DEFAULT NULL,
                 `first_discovered_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 `last_observed_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (`provider`,`source_type`,`source_id`,`entity_id`),
                 INDEX `idx_archaeology_entity` (`provider`,`entity_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        archaeology_columns = {
+            'wayback_status': "varchar(30) NOT NULL DEFAULT 'unsearched'",
+            'wayback_checked_at': "timestamp NULL DEFAULT NULL",
+            'wayback_capture_url': "varchar(2000) DEFAULT NULL",
+            'wayback_capture_timestamp': "varchar(14) DEFAULT NULL",
+            'wayback_media_url': "text DEFAULT NULL",
+            'wayback_metadata_json': "longtext DEFAULT NULL",
+            'metadata_imported_at': "timestamp NULL DEFAULT NULL",
+            'recovered_at': "timestamp NULL DEFAULT NULL",
+        }
+        for column, definition in archaeology_columns.items():
+            cur.execute(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema=%s AND table_name="
+                "'sentinel_archaeology_candidates' AND column_name=%s",
+                (os.environ['VAULTTUBE_DBNAME'], column),
+            )
+            if cur.fetchone()[0] == 0:
+                cur.execute(
+                    "ALTER TABLE sentinel_archaeology_candidates "
+                    "ADD COLUMN `%s` %s" % (column, definition)
+                )
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema=%s AND table_name='sentinel_sources' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
         if not cur.fetchone():
             logger.info("Sentinel sources table not created, creating...")
