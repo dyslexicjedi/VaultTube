@@ -35,6 +35,11 @@
         <span class="vt-kpi-value" id="sentinel-kpi-suspected">—</span>
         <span class="vt-kpi-sub">one negative check only</span>
     </div>
+    <div class="vt-kpi vt-kpi-observation">
+        <span class="vt-kpi-label">High-risk sources</span>
+        <span class="vt-kpi-value" id="sentinel-kpi-risk">—</span>
+        <span class="vt-kpi-sub" id="sentinel-kpi-risk-sub">observation only · no automatic rescue</span>
+    </div>
 </div>
 
 <div class="vt-sentinel-grid">
@@ -75,6 +80,9 @@
                     <option value="imported_existing_state">Imported history</option>
                     <option value="inventory_removed">Removed from inventory</option>
                     <option value="inventory_restored">Returned to inventory</option>
+                    <option value="source_terminal_unavailable">Source unavailable</option>
+                    <option value="source_terminal_restored">Source restored</option>
+                    <option value="risk_changed">Risk changed</option>
                 </select>
             </label>
         </div>

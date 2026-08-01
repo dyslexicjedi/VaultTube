@@ -1830,6 +1830,27 @@ a:focus-visible {
 .vt-sentinel-unarchived a { padding: 4px 7px; border: 1px solid var(--vt-border); border-radius: 6px; color: var(--vt-text); font-family: ui-monospace, monospace; font-size: 10px; text-decoration: none; }
 .vt-sentinel-unarchived a:hover { border-color: var(--vt-accent); color: var(--vt-accent); }
 .vt-sentinel-event-dot.removed { background: var(--vt-warning, #e4a853); box-shadow: 0 0 0 4px rgba(228,168,83,.12); }
+.vt-sentinel-event-dot.risk { background: #9b7cff; box-shadow: 0 0 0 4px rgba(155,124,255,.13); }
+.vt-kpi-observation { border-color: rgba(155,124,255,.28); }
+.vt-sentinel-risk.risk-low { color: #78c99a; border-color: rgba(120,201,154,.32); }
+.vt-sentinel-risk.risk-elevated { color: #e4b85d; border-color: rgba(228,184,93,.34); }
+.vt-sentinel-risk.risk-high { color: #ed8a55; border-color: rgba(237,138,85,.35); }
+.vt-sentinel-risk.risk-critical { color: #ff6478; border-color: rgba(255,100,120,.4); }
+.vt-sentinel-risk-card { margin-bottom: 18px; padding: 14px; border: 1px solid var(--vt-border); border-left-width: 3px; border-radius: 9px; background: var(--vt-surface-2); }
+.vt-sentinel-risk-card.risk-low { border-left-color: #78c99a; }
+.vt-sentinel-risk-card.risk-elevated { border-left-color: #e4b85d; }
+.vt-sentinel-risk-card.risk-high { border-left-color: #ed8a55; }
+.vt-sentinel-risk-card.risk-critical { border-left-color: #ff6478; }
+.vt-sentinel-risk-card > div:first-child { display: flex; align-items: baseline; gap: 10px; }
+.vt-sentinel-risk-card > div:first-child span { flex: 1; color: var(--vt-text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.vt-sentinel-risk-card > div:first-child > strong { font-size: 25px; }
+.vt-sentinel-risk-card > div:first-child > strong small { font-size: 11px; color: var(--vt-text-dim); }
+.vt-sentinel-risk-card > div:first-child b { font-size: 12px; text-transform: uppercase; }
+.vt-sentinel-risk-card > p { margin: 6px 0 12px; color: var(--vt-text-dim); font-size: 11px; }
+.vt-sentinel-risk-card ul { margin: 0; padding: 0; list-style: none; }
+.vt-sentinel-risk-card li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--vt-border); font-size: 11.5px; }
+.vt-sentinel-risk-card li strong { white-space: nowrap; }
+.vt-sentinel-risk-clear { padding-top: 8px; border-top: 1px solid var(--vt-border); color: var(--vt-text-dim); font-size: 11.5px; }
 .vt-sentinel-affected-list { display: flex; flex-direction: column; gap: 1px; }
 .vt-sentinel-affected {
   display: flex;

@@ -12,7 +12,15 @@ from providers.youtube import (
     YouTubeQuotaExceeded,
     YouTubeRequestBudget,
     YouTubeScanBudgetExceeded,
+    YouTubeSourceCheckFailed,
+    check_channel_presence,
     iter_playlist_pages,
+)
+from sentinel import finish_scan_run, start_scan_run
+from sentinel_risk import (
+    recalculate_all_source_risks,
+    recalculate_source_risk,
+    record_source_observation,
 )
 
 
@@ -217,20 +225,38 @@ def _complete_run(run_id):
         raise
     finally:
         con.close()
+    if source_type == 'channel':
+        try:
+            recalculate_source_risk(source_type, source_id)
+        except Exception as exc:
+            logger.error('Risk calculation failed after inventory %s: %s', run_id, exc)
 
 
-def _fail_run(run_id, status, error):
+def _fail_run(run_id, status, error, failure_class='incomplete'):
     con = get_connection(logger)
+    source = None
     try:
         cur = con.cursor()
         cur.execute(
+            "SELECT source_type, source_id FROM sentinel_inventory_runs "
+            "WHERE id=%s",
+            (run_id,),
+        )
+        source = cur.fetchone()
+        cur.execute(
             "UPDATE sentinel_inventory_runs SET status=%s, error_message=%s, "
+            "failure_class=%s, "
             "completed_at=NOW() WHERE id=%s",
-            (status, str(error), run_id),
+            (status, str(error), failure_class, run_id),
         )
         cur.close()
     finally:
         con.close()
+    if source and source[0] == 'channel':
+        try:
+            recalculate_source_risk(source[0], source[1])
+        except Exception as exc:
+            logger.error('Risk calculation failed after census failure: %s', exc)
 
 
 def census_source(source_type, source_id, collection_id, request_budget=None):
@@ -259,7 +285,10 @@ def census_source(source_type, source_id, collection_id, request_budget=None):
     except (YouTubeQuotaExceeded, YouTubeScanBudgetExceeded):
         raise
     except YouTubePlaylistTruncated as exc:
-        _fail_run(run['id'], 'partial', exc)
+        _fail_run(
+            run['id'], 'partial', exc,
+            getattr(exc, 'failure_class', 'incomplete'),
+        )
         raise
     except Exception as exc:
         # Network/provider errors can safely resume the same uncommitted page.
@@ -295,6 +324,30 @@ def census_once(app, request_budget=None, interval_seconds=None):
             if not inventory_due(source_type, source_id, interval_seconds):
                 continue
             try:
+                if source_type == 'channel':
+                    scan_id = start_scan_run(
+                        scan_type='source_presence', source_type=source_type,
+                        source_id=source_id,
+                    )
+                    try:
+                        present = check_channel_presence(source_id, budget)
+                    except (YouTubeQuotaExceeded, YouTubeScanBudgetExceeded):
+                        finish_scan_run(scan_id, 'failed', 0, 1, 'quota or budget')
+                        raise
+                    except YouTubeSourceCheckFailed as exc:
+                        finish_scan_run(scan_id, 'failed', 0, 1, str(exc))
+                        logger.warning(
+                            'Source presence check failed for %s: %s',
+                            source_id, exc,
+                        )
+                        continue
+                    finish_scan_run(scan_id, 'complete', 1, 1)
+                    record_source_observation(
+                        source_type, source_id, present, scan_id,
+                        {'method': 'youtube.channels.list'},
+                    )
+                    if not present:
+                        continue
                 results.append(census_source(
                     source_type, source_id, collection_id, budget,
                 ))
@@ -323,6 +376,7 @@ def _env_int(name, default):
 def start_census(app):
     """Low-frequency inventory loop, independent of hourly catch-up scans."""
     while True:
+        recalculate_all_source_risks()
         census_once(app)
         # Interrupted runs retry hourly; completed sources retain the much
         # lower census frequency.

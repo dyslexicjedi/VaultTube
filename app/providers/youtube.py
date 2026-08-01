@@ -20,6 +20,7 @@ logger = logging.getLogger('youtube')
 # YouTube cookies have been rotated/expired by Google's security measures.
 _COOKIE_INVALID_MARKER = 'cookies are no longer valid'
 _PLAYLIST_ITEMS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/playlistItems'
+_CHANNELS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/channels'
 _DEFAULT_PLAYLIST_MAX_PAGES = 100
 
 
@@ -44,6 +45,12 @@ class YouTubeScanBudgetExceeded(RuntimeError):
 
 class YouTubePlaylistTruncated(RuntimeError):
     """Playlist enumeration stopped before a trustworthy completion signal."""
+
+
+class YouTubeSourceCheckFailed(RuntimeError):
+    """A source-level check failed without proving source unavailability."""
+
+    failure_class = 'incomplete'
 
 
 class YouTubeRequestBudget:
@@ -168,6 +175,62 @@ def _is_youtube_quota_error(payload, http_status=None):
         for value in _youtube_api_error_values(payload)
     }
     return bool(normalized & quota_values)
+
+
+def check_channel_presence(channel_id, request_budget=None):
+    """Return whether channels.list contains the ID after a successful check.
+
+    Provider, auth, network, quota, and malformed responses raise instead of
+    being interpreted as a missing channel.
+    """
+    if request_budget is not None:
+        request_budget.consume()
+    params = {
+        'part': 'id', 'id': channel_id,
+        'key': os.environ['VAULTTUBE_YTKEY'],
+    }
+    try:
+        response = requests.get(_CHANNELS_ENDPOINT, params=params, timeout=30)
+    except Exception as exc:
+        error = YouTubeSourceCheckFailed(
+            'YouTube channel check request failed: %s' % exc
+        )
+        error.failure_class = 'network'
+        raise error
+    status = getattr(response, 'status_code', None)
+    try:
+        payload = response.json()
+    except Exception as exc:
+        error = YouTubeSourceCheckFailed(
+            'YouTube channel check returned invalid JSON: %s' % exc
+        )
+        error.failure_class = 'incomplete'
+        raise error
+    finally:
+        response.close()
+    if _is_youtube_quota_error(payload, status):
+        raise YouTubeQuotaExceeded(
+            'YouTube API quota exceeded while checking channel %s' % channel_id
+        )
+    if not isinstance(payload, dict) or not isinstance(payload.get('items'), list):
+        values = {
+            re.sub(r'[^a-z0-9]', '', str(value).lower())
+            for value in _youtube_api_error_values(payload)
+        }
+        error = YouTubeSourceCheckFailed(
+            'YouTube channel check returned an invalid API response'
+        )
+        error.failure_class = (
+            'auth' if values & {
+                'keyinvalid', 'forbidden', 'unauthorized',
+                'iprefererblocked', 'accessnotconfigured',
+            } else 'incomplete'
+        )
+        raise error
+    return any(
+        isinstance(item, dict) and item.get('id') == channel_id
+        for item in payload['items']
+    )
 
 
 def _attach_quota_resume_metadata(exc, page_token, requested_tokens,
@@ -300,9 +363,19 @@ def iter_playlist_pages(playlist_id, request_budget=None,
                     retj.get('error', retj)
                     if isinstance(retj, dict) else retj,
                 )
-                raise YouTubePlaylistTruncated(
+                exc = YouTubePlaylistTruncated(
                     "Playlist %s returned an invalid API response" % playlist_id
                 )
+                reasons = {
+                    re.sub(r'[^a-z0-9]', '', str(value).lower())
+                    for value in _youtube_api_error_values(retj)
+                } if isinstance(retj, dict) else set()
+                exc.failure_class = (
+                    'source' if reasons & {
+                        'playlistnotfound', 'channelnotfound', 'notfound',
+                    } else 'incomplete'
+                )
+                raise exc
 
             raw_items = retj['items']
             video_ids = [

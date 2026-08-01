@@ -1,8 +1,8 @@
 """Durable source-availability observations for VaultTube Sentinel.
 
-Phase 1 deliberately covers only videos already present in the vault. Later
-phases add remote inventories, risk scoring, and rescue planning on top of this
-event ledger.
+The event ledger began with locally archived videos and now also carries remote
+inventory, source-presence, and explainable risk observations. Rescue planning
+remains a separate later phase.
 """
 
 import json
@@ -208,8 +208,20 @@ def record_video_observation(video_id, available, scan_id, evidence=None):
                 video_id,
             ),
         )
+        cur.execute("SELECT channelId FROM videos WHERE id=%s", (video_id,))
+        source_row = cur.fetchone()
+        source_id = source_row[0] if source_row else None
         con.commit()
         cur.close()
+        if event_type and source_id:
+            try:
+                from sentinel_risk import recalculate_source_risk
+                recalculate_source_risk('channel', source_id)
+            except Exception as exc:
+                logger.error(
+                    'Risk calculation failed after video observation %s: %s',
+                    video_id, exc,
+                )
         return event_type
     except Exception:
         try:
@@ -244,11 +256,12 @@ def _event_row(row):
         'title': row[8],
         'channel_id': row[9],
         'channel_name': row[10] or row[9],
+        'entity_type': row[11] if len(row) > 11 else 'video',
     }
 
 
 def get_summary():
-    """Observatory totals derived strictly from Phase 1 local observations."""
+    """Observatory totals across availability, inventory, and source risk."""
     con = get_connection(logger)
     if con is None:
         raise RuntimeError('Unable to get database connection for Sentinel summary')
@@ -290,6 +303,14 @@ def get_summary():
             " AND newer.id>r.id)"
         )
         known_remote, preserved_remote, latest_inventory_at = cur.fetchone()
+        cur.execute(
+            "SELECT COALESCE(SUM(risk_level='elevated'),0), "
+            "COALESCE(SUM(risk_level='high'),0), "
+            "COALESCE(SUM(risk_level='critical'),0), COUNT(*) "
+            "FROM sentinel_sources WHERE source_type='channel' "
+            "AND risk_calculated_at IS NOT NULL"
+        )
+        elevated, high, critical, assessed = cur.fetchone()
         cur.close()
         return {
             'monitored_videos': int(monitored),
@@ -307,6 +328,11 @@ def get_summary():
                 if known_remote else None
             ),
             'latest_inventory_at': _iso(latest_inventory_at),
+            'risk_sources': {
+                'assessed': int(assessed), 'elevated': int(elevated),
+                'high': int(high), 'critical': int(critical),
+                'observation_only': True,
+            },
             'last_scan': None if scan is None else {
                 'id': int(scan[0]),
                 'status': scan[1],
@@ -324,6 +350,8 @@ def get_summary():
 EVENT_TYPES = {
     'source_unavailable', 'source_restored', 'imported_existing_state',
     'inventory_removed', 'inventory_restored',
+    'source_terminal_unavailable', 'source_terminal_restored',
+    'risk_changed',
 }
 
 
@@ -331,7 +359,7 @@ def get_events(limit=50, offset=0, event_type=None, channel_id=None):
     """Return a paged event feed enriched with current video/channel labels."""
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
-    conditions = ["e.entity_type='video'"]
+    conditions = ["e.entity_type IN ('video','source')"]
     params = []
     if event_type:
         if event_type not in EVENT_TYPES:
@@ -357,7 +385,8 @@ def get_events(limit=50, offset=0, event_type=None, channel_id=None):
         cur.execute(
             "SELECT e.id, e.entity_id, e.event_type, e.from_state, e.to_state, "
             "e.observed_at, e.scan_run_id, e.evidence_json, v.title, "
-            "COALESCE(v.channelId,e.source_id), c.channelname FROM sentinel_events e "
+            "COALESCE(v.channelId,e.source_id), c.channelname, e.entity_type "
+            "FROM sentinel_events e "
             "LEFT JOIN videos v ON v.id=e.entity_id "
             "LEFT JOIN channels c ON c.channelid=COALESCE(v.channelId,e.source_id) WHERE " + where +
             " ORDER BY e.observed_at DESC, e.id DESC LIMIT %s OFFSET %s",
@@ -408,7 +437,9 @@ def get_sources(limit=50, offset=0):
             "COALESCE(ev.newly_unavailable_30d,0), "
             "COALESCE(ev.restored_30d,0), local.last_checked_at, "
             "COALESCE(inv.known_remote,0), COALESCE(inv.preserved_remote,0), "
-            "inv.completed_at "
+            "inv.completed_at, COALESCE(risk.risk_score,0), "
+            "COALESCE(risk.risk_level,'low'), risk.risk_reasons_json, "
+            "risk.risk_calculated_at "
             "FROM ("
             " SELECT channelId source_id FROM videos WHERE channelId IS NOT NULL GROUP BY channelId "
             " UNION SELECT source_id FROM sentinel_inventory_runs "
@@ -445,7 +476,9 @@ def get_sources(limit=50, offset=0):
             "    AND newer.id>r.id) "
             "  GROUP BY r.source_id, r.completed_at"
             ") inv ON inv.source_id=base.source_id "
-            "ORDER BY newly_unavailable_30d DESC, "
+            "LEFT JOIN sentinel_sources risk ON risk.provider='youtube' "
+            "AND risk.source_type='channel' AND risk.source_id=base.source_id "
+            "ORDER BY risk.risk_score DESC, newly_unavailable_30d DESC, "
             "local.suspected DESC, local.unavailable DESC, "
             "ev.latest_event_at DESC, local.video_count DESC "
             "LIMIT %s OFFSET %s",
@@ -475,6 +508,14 @@ def get_sources(limit=50, offset=0):
                     if row[10] else None
                 ),
                 'inventory_completed_at': _iso(row[12]),
+                'risk': {
+                    'score': int(row[13]), 'level': row[14],
+                    'reasons': (
+                        json.loads(row[15]) if row[15] else []
+                    ),
+                    'calculated_at': _iso(row[16]),
+                    'observation_only': True,
+                },
                 'status': _source_status(
                     unavailable, suspected, newly_unavailable,
                 ),
@@ -486,7 +527,7 @@ def get_sources(limit=50, offset=0):
 
 
 def get_source_detail(channel_id, event_limit=20):
-    """Current Phase 1 state and recent event history for one creator."""
+    """Availability, coverage, risk, and recent history for one creator."""
     con = get_connection(logger)
     if con is None:
         raise RuntimeError('Unable to get database connection for Sentinel source')
@@ -572,6 +613,8 @@ def get_source_detail(channel_id, event_limit=20):
         con.close()
 
     events = get_events(limit=event_limit, channel_id=channel_id)
+    from sentinel_risk import get_source_risk
+    risk = get_source_risk('channel', channel_id)
     unavailable = int(row[2])
     suspected = int(row[3])
     known_remote = int(inventory[2]) if inventory else 0
@@ -589,6 +632,7 @@ def get_source_detail(channel_id, event_limit=20):
         ),
         'affected_videos': affected,
         'events': events['items'],
+        'risk': risk,
         'inventory': None if inventory is None else {
             'run_id': int(inventory[0]),
             'completed_at': _iso(inventory[1]),
@@ -642,14 +686,16 @@ def export_sentinel_data():
         ]
         cur.execute(
             "SELECT id, entity_id, event_type, from_state, to_state, "
-            "observed_at, scan_run_id, evidence_json, NULL, source_id, NULL "
+            "observed_at, scan_run_id, evidence_json, NULL, source_id, NULL, "
+            "entity_type "
             "FROM sentinel_events ORDER BY id"
         )
         events = [_event_row(r) for r in cur.fetchall()]
         cur.execute(
             "SELECT id, provider, source_type, source_id, remote_collection_id, "
             "status, continuation_token, pages_fetched, items_seen, "
-            "requests_made, started_at, updated_at, completed_at, error_message "
+            "requests_made, started_at, updated_at, completed_at, error_message, "
+            "failure_class "
             "FROM sentinel_inventory_runs ORDER BY id"
         )
         inventory_runs = [
@@ -661,6 +707,7 @@ def export_sentinel_data():
                 'requests_made': int(r[9]), 'started_at': _iso(r[10]),
                 'updated_at': _iso(r[11]), 'completed_at': _iso(r[12]),
                 'error_message': r[13],
+                'failure_class': r[14],
             }
             for r in cur.fetchall()
         ]
@@ -676,10 +723,33 @@ def export_sentinel_data():
             }
             for r in cur.fetchall()
         ]
+        cur.execute(
+            "SELECT provider, source_type, source_id, availability_state, "
+            "consecutive_terminal_checks, last_observation_scan_id, "
+            "last_observed_at, risk_score, risk_level, risk_reasons_json, "
+            "risk_facts_json, risk_calculated_at FROM sentinel_sources "
+            "ORDER BY provider, source_type, source_id"
+        )
+        sources = [
+            {
+                'provider': r[0], 'source_type': r[1], 'source_id': r[2],
+                'availability_state': r[3],
+                'consecutive_terminal_checks': int(r[4]),
+                'last_observation_scan_id': r[5],
+                'last_observed_at': _iso(r[6]), 'risk_score': int(r[7]),
+                'risk_level': r[8], 'risk_reasons': (
+                    json.loads(r[9]) if r[9] else []
+                ),
+                'risk_facts': json.loads(r[10]) if r[10] else {},
+                'risk_calculated_at': _iso(r[11]),
+            }
+            for r in cur.fetchall()
+        ]
         cur.close()
         return {
             'scan_runs': scans, 'video_states': states, 'events': events,
             'inventory_runs': inventory_runs, 'inventory': inventory,
+            'sources': sources,
         }
     finally:
         con.close()

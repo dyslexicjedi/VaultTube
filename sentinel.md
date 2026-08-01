@@ -16,7 +16,11 @@ bounded rescue plan.
 - Phase 3 complete: low-frequency complete remote inventories, durable
   pagination continuations, archive-coverage reporting, and inventory
   removal/restoration events kept separate from source availability.
-- Phase 4 next: deterministic, explainable source risk in observation mode.
+- Phase 4 complete: deterministic source scores, stored evidence and reasons,
+  two-check source availability, risk-change history, and High/Critical alerts
+  in observation-only mode.
+- Phase 5 next: deterministic rescue previews and storage estimates, with no
+  enqueueing.
 
 ## Design principles
 
@@ -65,11 +69,21 @@ Existing `isDeleted=1` rows are imported as `unavailable` with an
 `imported_existing_state` event. The import timestamp records when Sentinel
 learned about the legacy state, not when the video originally disappeared.
 
-### Later phases
+### Phases 3-4
 
 - `sentinel_inventory` stores the latest complete remote inventory, including
   known videos that are not locally archived.
 - `sentinel_sources` stores explainable source risk and its contributing facts.
+
+Source-level availability has its own two-check state machine. A successful
+`youtube.channels.list` response with no matching channel is a negative
+observation; quota, authentication, network, and malformed responses are scan
+failures and never observations. Risk-change and source restoration events are
+append-only. High and Critical scores raise sticky alerts, but Phase 4 performs
+no queue or rescue actions.
+
+### Later phases
+
 - `rescue_sessions` stores an approved bounded rescue operation.
 - `rescue_items` tracks every candidate through queued, preserved, failed, or
   skipped states.

@@ -32,11 +32,20 @@
     function statusClass(status) {
         return status === 'attention' ? 'attention' : status === 'historical_loss' ? 'history' : 'stable';
     }
+    function riskLabel(level) {
+        return level ? level.charAt(0).toUpperCase() + level.slice(1) : 'Low';
+    }
+    function riskClass(level) {
+        return 'risk-' + (level || 'low');
+    }
     function eventInfo(type) {
         if (type === 'source_unavailable') return { title: 'Unavailable confirmed', cls: 'unavailable' };
         if (type === 'source_restored') return { title: 'Restored at source', cls: 'restored' };
         if (type === 'inventory_removed') return { title: 'Removed from inventory', cls: 'removed' };
         if (type === 'inventory_restored') return { title: 'Returned to inventory', cls: 'restored' };
+        if (type === 'source_terminal_unavailable') return { title: 'Source unavailable', cls: 'unavailable' };
+        if (type === 'source_terminal_restored') return { title: 'Source restored', cls: 'restored' };
+        if (type === 'risk_changed') return { title: 'Risk changed', cls: 'risk' };
         return { title: 'Existing unavailable state imported', cls: 'imported' };
     }
 
@@ -50,6 +59,10 @@
             $id('sentinel-kpi-coverage-sub').textContent = data.preserved_remote_videos.toLocaleString()
                 + ' of ' + data.known_remote_videos.toLocaleString() + ' known remote videos preserved';
         }
+        var highRisk = data.risk_sources.high + data.risk_sources.critical;
+        $id('sentinel-kpi-risk').textContent = highRisk.toLocaleString();
+        $id('sentinel-kpi-risk-sub').textContent = data.risk_sources.critical
+            + ' critical · ' + data.risk_sources.high + ' high · observation only';
         if (data.last_scan) {
             var scan = data.last_scan;
             $id('sentinel-last-scan').textContent = 'Last scan ' + scan.status
@@ -70,7 +83,7 @@
         return '<button type="button" class="vt-sentinel-source" data-channel="' + esc(source.channel_id) + '">'
             + '<span class="vt-sentinel-avatar">' + esc(initials) + '</span>'
             + '<span class="vt-sentinel-source-copy"><strong>' + esc(source.channel_name) + '</strong><small>' + esc(facts.join(' · ')) + '</small></span>'
-            + '<span class="vt-sentinel-state ' + statusClass(source.status) + '">' + esc(statusLabel(source.status)) + '</span>'
+            + '<span class="vt-sentinel-state vt-sentinel-risk ' + riskClass(source.risk.level) + '">' + source.risk.score + ' · ' + esc(riskLabel(source.risk.level)) + '</span>'
             + '</button>';
     }
 
@@ -124,6 +137,19 @@
             ? '<div class="vt-sentinel-affected-list">' + data.affected_videos.map(affectedVideo).join('') + '</div>'
             : '<div class="vt-empty vt-sentinel-detail-empty">No archived videos currently need attention.</div>';
         var inventory = data.inventory;
+        var risk = data.risk;
+        var riskPanel = risk
+            ? '<div class="vt-sentinel-risk-card ' + riskClass(risk.level) + '">'
+                + '<div><span>Observed source risk</span><strong>' + risk.score + '<small>/100</small></strong><b>' + esc(riskLabel(risk.level)) + '</b></div>'
+                + '<p>Observation only. Sentinel will not queue downloads.</p>'
+                + (risk.reasons.length
+                    ? '<ul>' + risk.reasons.map(function (reason) {
+                        var sign = reason.points > 0 ? '+' : '';
+                        return '<li><span>' + esc(reason.label) + '</span><strong>' + sign + reason.points + '</strong></li>';
+                    }).join('') + '</ul>'
+                    : '<div class="vt-sentinel-risk-clear">No active risk signals.</div>')
+                + '</div>'
+            : '<div class="vt-sentinel-census-note">Risk has not been assessed yet.</div>';
         var coverage = inventory
             ? '<div class="vt-sentinel-availability"><span>Archive coverage from complete census</span><strong>'
                 + inventory.preserved_remote + ' of ' + inventory.known_remote + ' (' + inventory.coverage_percent + '%)</strong></div>'
@@ -135,7 +161,7 @@
                         }).join('') + '</div></div>'
                     : '')
             : '<div class="vt-sentinel-census-note">No complete remote census yet. Partial scans are intentionally excluded.</div>';
-        $id('sentinel-detail').innerHTML = coverage
+        $id('sentinel-detail').innerHTML = riskPanel + coverage
             + '<div class="vt-sentinel-local-state">'
             + '<div class="vt-sentinel-availability"><span>Archived without an availability alert</span><strong>' + available + ' of ' + data.video_count + '</strong></div>'
             + '<div class="vt-meter"><div style="width:' + pct + '%"></div></div>'
@@ -164,7 +190,13 @@
         var info = eventInfo(event.event_type);
         var target = event.title || event.entity_id;
         var creator = event.channel_name || event.channel_id || 'Unknown creator';
-        var note = event.event_type === 'inventory_removed'
+        var note = event.event_type === 'risk_changed'
+            ? 'The deterministic evidence score changed; Sentinel remains observation-only.'
+            : event.event_type === 'source_terminal_unavailable'
+                ? 'Confirmed after two complete source-level checks.'
+                : event.event_type === 'source_terminal_restored'
+                    ? 'A complete source-level check found the creator again.'
+                    : event.event_type === 'inventory_removed'
             ? 'Missing from a newer complete inventory; availability is not inferred.'
             : event.event_type === 'inventory_restored'
                 ? 'Present again after being absent from the previous complete inventory.'
@@ -173,9 +205,9 @@
             : event.event_type === 'source_restored'
                 ? 'A successful source check found this video again.'
                 : 'Confirmed after two independent successful checks.';
-        var videoLink = event.title
+        var videoLink = event.entity_type !== 'source' && event.title
             ? '<a href="/player.html?id=' + encodeURIComponent(event.entity_id) + '">' + esc(target) + '</a>'
-            : '<strong>' + esc(target) + '</strong>';
+            : '<strong>' + esc(event.entity_type === 'source' ? creator : target) + '</strong>';
         var creatorLink = event.channel_id
             ? '<a href="/creator.html?creator=' + encodeURIComponent(event.channel_id) + '">' + esc(creator) + '</a>'
             : esc(creator);

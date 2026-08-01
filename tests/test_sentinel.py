@@ -82,6 +82,15 @@ def test_sentinel_inventory_tables_exist():
     con.close()
 
 
+def test_sentinel_source_risk_table_exists():
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SHOW TABLES LIKE 'sentinel_sources'")
+    assert cur.fetchone() is not None
+    cur.close()
+    con.close()
+
+
 def test_two_independent_negative_checks_confirm_once():
     from sentinel import start_scan_run, finish_scan_run, record_video_observation
 
@@ -365,9 +374,12 @@ def test_json_export_includes_sentinel_ledger(client):
     assert payload['meta']['counts']['sentinel_events'] == 1
     assert payload['meta']['counts']['sentinel_video_states'] == 1
     assert payload['meta']['counts']['sentinel_scan_runs'] == 2
+    assert payload['meta']['counts']['sentinel_sources'] == 1
     assert payload['sentinel']['events'][0]['entity_id'] == 'SentinelExportGone'
     assert payload['sentinel']['video_states'][0]['state'] == 'unavailable'
     assert len(payload['sentinel']['scan_runs']) == 2
+    assert payload['sentinel']['sources'][0]['source_id'] == 'SentinelChannel'
+    assert payload['sentinel']['sources'][0]['risk_level'] == 'low'
 
 
 def _inventory_page(video_ids, complete=True, token=None, pages=1,
@@ -633,3 +645,392 @@ def test_empty_complete_inventory_is_visible_as_zero_coverage(client, monkeypatc
     assert detail['inventory']['known_remote'] == 0
     assert detail['inventory']['preserved_remote'] == 0
     assert detail['inventory']['coverage_percent'] == 0
+
+
+def test_risk_model_scores_and_caps_deterministically():
+    from sentinel_risk import _score_facts, risk_level
+
+    facts = {
+        'availability_state': 'unavailable',
+        'consecutive_terminal_checks': 2,
+        'confirmed_disappearances_24h': 5,
+        'inventory_removed_7d': 20,
+        'latest_inventory_count': 80,
+        'previous_inventory_count': 100,
+        'inventory_removed_percent_7d': 25.0,
+        'inventory_shrink_percent': 20.0,
+        'consecutive_source_failures': 3,
+        'unpreserved_available_count': 80,
+        'adverse_events_30d': 25,
+        'monitored_since': '2024-01-01T00:00:00',
+        'quiet_30d': False,
+    }
+    score, reasons = _score_facts(facts)
+    assert score == 100
+    assert risk_level(score) == 'critical'
+    assert {reason['code'] for reason in reasons} == {
+        'terminal_unavailable', 'disappearance_burst',
+        'weekly_inventory_loss', 'inventory_shrink', 'source_failures',
+        'preservation_gap',
+    }
+    assert risk_level(24) == 'low'
+    assert risk_level(25) == 'elevated'
+    assert risk_level(50) == 'high'
+    assert risk_level(75) == 'critical'
+    vanished = dict(facts)
+    vanished.update({
+        'availability_state': 'available',
+        'consecutive_terminal_checks': 0,
+        'confirmed_disappearances_24h': 0,
+        'inventory_removed_7d': 100,
+        'latest_inventory_count': 0,
+        'previous_inventory_count': 100,
+        'inventory_removed_percent_7d': 100.0,
+        'inventory_shrink_percent': 100.0,
+        'consecutive_source_failures': 0,
+        'unpreserved_available_count': 0,
+        'adverse_events_30d': 100,
+    })
+    vanished_score, vanished_reasons = _score_facts(vanished)
+    assert vanished_score == 35
+    assert {reason['code'] for reason in vanished_reasons} == {
+        'weekly_inventory_loss', 'inventory_shrink',
+    }
+
+
+def test_inventory_risk_is_explainable_and_exposed(client, monkeypatch):
+    import sentinel_inventory
+
+    _insert_channel('RiskInventoryCreator', 'Risk Inventory Films')
+    snapshots = iter([
+        ['RiskRemote%03d' % index for index in range(100)],
+        ['RiskRemote%03d' % index for index in range(80)],
+    ])
+    monkeypatch.setattr(
+        sentinel_inventory, 'iter_playlist_pages',
+        lambda *args, **kwargs: iter([_inventory_page(next(snapshots))]),
+    )
+    sentinel_inventory.census_source(
+        'channel', 'RiskInventoryCreator', 'UURiskInventory',
+    )
+    sentinel_inventory.census_source(
+        'channel', 'RiskInventoryCreator', 'UURiskInventory',
+    )
+
+    detail = client.get(
+        '/api/sentinel/source/channel/RiskInventoryCreator'
+    ).get_json()['data']
+    assert detail['risk']['score'] == 45
+    assert detail['risk']['level'] == 'elevated'
+    assert detail['risk']['observation_only'] is True
+    assert {reason['code'] for reason in detail['risk']['reasons']} == {
+        'weekly_inventory_loss', 'inventory_shrink', 'preservation_gap',
+    }
+    source = next(
+        item for item in client.get('/api/sentinel/sources').get_json()['data']['items']
+        if item['channel_id'] == 'RiskInventoryCreator'
+    )
+    assert source['risk']['score'] == 45
+    assert source['risk']['reasons'] == detail['risk']['reasons']
+    summary = client.get('/api/sentinel/summary').get_json()['data']
+    assert summary['risk_sources']['elevated'] == 1
+    assert summary['risk_sources']['observation_only'] is True
+
+    risk_events = client.get(
+        '/api/sentinel/events?channel_id=RiskInventoryCreator'
+        '&event_type=risk_changed'
+    ).get_json()['data']['items']
+    assert len(risk_events) == 1
+    assert risk_events[0]['entity_type'] == 'source'
+    assert risk_events[0]['to_state'] == 'elevated:45'
+
+
+def test_terminal_source_requires_two_complete_checks_and_restores(
+        client, monkeypatch):
+    from providers.base import get_alerts
+    from sentinel import finish_scan_run, start_scan_run
+    from sentinel_risk import record_source_observation
+    import sentinel_inventory
+
+    source_id = 'RiskTerminalCreator'
+    _insert_channel(source_id, 'Terminal Films')
+    monkeypatch.setattr(
+        sentinel_inventory, 'iter_playlist_pages',
+        lambda *args, **kwargs: iter([_inventory_page([
+            'TerminalRemote%02d' % index for index in range(30)
+        ])]),
+    )
+    sentinel_inventory.census_source('channel', source_id, 'UUTerminal')
+
+    first = start_scan_run(
+        scan_type='source_presence', source_type='channel', source_id=source_id,
+    )
+    finish_scan_run(first, 'complete', 1, 1)
+    assert record_source_observation('channel', source_id, False, first) is None
+    assert client.get(
+        '/api/sentinel/source/channel/' + source_id
+    ).get_json()['data']['risk']['score'] == 10
+
+    second = start_scan_run(
+        scan_type='source_presence', source_type='channel', source_id=source_id,
+    )
+    finish_scan_run(second, 'complete', 1, 1)
+    assert record_source_observation(
+        'channel', source_id, False, second,
+    ) == 'source_terminal_unavailable'
+    risk = client.get(
+        '/api/sentinel/source/channel/' + source_id
+    ).get_json()['data']['risk']
+    assert risk['score'] == 55
+    assert risk['level'] == 'high'
+    assert any(alert['id'] == 'sentinel_risk_channel_' + source_id
+               and 'no downloads were queued' in alert['message']
+               for alert in get_alerts())
+
+    third = start_scan_run(
+        scan_type='source_presence', source_type='channel', source_id=source_id,
+    )
+    finish_scan_run(third, 'complete', 1, 1)
+    assert record_source_observation(
+        'channel', source_id, True, third,
+    ) == 'source_terminal_restored'
+    restored = client.get(
+        '/api/sentinel/source/channel/' + source_id
+    ).get_json()['data']['risk']
+    assert restored['score'] == 10
+    assert restored['level'] == 'low'
+    assert not any(alert['id'] == 'sentinel_risk_channel_' + source_id
+                   for alert in get_alerts())
+
+
+def _insert_failed_inventory_runs(source_id, failure_class):
+    con = _db_connect()
+    cur = con.cursor()
+    for index in range(3):
+        cur.execute(
+            "INSERT INTO sentinel_inventory_runs "
+            "(provider, source_type, source_id, remote_collection_id, status, "
+            "failure_class, completed_at, error_message) "
+            "VALUES('youtube','channel',%s,%s,'partial',%s,NOW(),'test')",
+            (source_id, 'UUFailure%d' % index, failure_class),
+        )
+    cur.close()
+    con.close()
+
+
+def test_only_explicit_source_failures_increase_risk():
+    from sentinel_risk import recalculate_source_risk
+
+    _insert_channel('RiskIncompleteCreator', 'Incomplete Films')
+    _insert_failed_inventory_runs('RiskIncompleteCreator', 'incomplete')
+    incomplete = recalculate_source_risk('channel', 'RiskIncompleteCreator')
+    assert incomplete['score'] == 0
+    assert incomplete['facts']['consecutive_source_failures'] == 0
+
+    _insert_channel('RiskQuotaCreator', 'Quota Films')
+    _insert_failed_inventory_runs('RiskQuotaCreator', 'quota')
+    quota = recalculate_source_risk('channel', 'RiskQuotaCreator')
+    assert quota['score'] == 0
+    assert quota['facts']['consecutive_source_failures'] == 0
+
+    _insert_channel('RiskSourceFailureCreator', 'Failure Films')
+    _insert_failed_inventory_runs('RiskSourceFailureCreator', 'source')
+    source = recalculate_source_risk('channel', 'RiskSourceFailureCreator')
+    assert source['score'] == 10
+    assert source['facts']['consecutive_source_failures'] == 3
+    assert [reason['code'] for reason in source['reasons']] == [
+        'source_failures',
+    ]
+
+
+def test_quiet_period_is_a_stored_negative_reason(monkeypatch):
+    import sentinel_inventory
+    from sentinel_risk import recalculate_source_risk
+
+    source_id = 'RiskQuietCreator'
+    _insert_channel(source_id, 'Quiet Films')
+    monkeypatch.setattr(
+        sentinel_inventory, 'iter_playlist_pages',
+        lambda *args, **kwargs: iter([_inventory_page([])]),
+    )
+    sentinel_inventory.census_source('channel', source_id, 'UUQuiet')
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "UPDATE sentinel_inventory_runs SET completed_at=DATE_SUB(NOW(), "
+        "INTERVAL 31 DAY) WHERE source_id=%s",
+        (source_id,),
+    )
+    cur.close()
+    con.close()
+
+    result = recalculate_source_risk('channel', source_id)
+    assert result['score'] == 0
+    assert result['facts']['unpreserved_available_count'] == 0
+    assert result['facts']['quiet_30d'] is True
+    quiet = next(reason for reason in result['reasons']
+                 if reason['code'] == 'quiet_30d')
+    assert quiet['points'] == -15
+
+
+def test_incomplete_source_scan_cannot_change_terminal_state():
+    from sentinel import finish_scan_run, start_scan_run
+    from sentinel_risk import record_source_observation
+
+    source_id = 'RiskFailedObservation'
+    _insert_channel(source_id, 'Failed Observation Films')
+    scan = start_scan_run(
+        scan_type='source_presence', source_type='channel', source_id=source_id,
+    )
+    finish_scan_run(scan, 'failed', 0, 1, 'quota')
+    try:
+        record_source_observation('channel', source_id, False, scan)
+        assert False, 'failed source scan must not be observed'
+    except ValueError:
+        pass
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT COUNT(*) FROM sentinel_sources WHERE source_id=%s",
+        (source_id,),
+    )
+    assert cur.fetchone()[0] == 0
+    cur.close()
+    con.close()
+
+
+def test_census_source_presence_integration_confirms_without_inventory(
+        client, monkeypatch):
+    import sentinel_inventory
+    from providers.youtube import YouTubeRequestBudget
+
+    source_id = 'UCRiskCensusMissingCreator'
+    _insert_channel(source_id, 'Missing Census Films')
+    monkeypatch.setattr(
+        sentinel_inventory, 'get_active_subscriptions',
+        lambda: [(source_id,)],
+    )
+    monkeypatch.setattr(
+        sentinel_inventory, 'get_active_playlist_subs', lambda: [],
+    )
+    monkeypatch.setattr(
+        sentinel_inventory, 'check_channel_presence',
+        lambda channel_id, budget: False,
+    )
+    inventory_calls = []
+    monkeypatch.setattr(
+        sentinel_inventory, 'census_source',
+        lambda *args, **kwargs: inventory_calls.append(args),
+    )
+
+    sentinel_inventory.census_once(
+        client.application, YouTubeRequestBudget(10), interval_seconds=0,
+    )
+    first = client.get(
+        '/api/sentinel/source/channel/' + source_id
+    ).get_json()['data']['risk']
+    assert first['availability_state'] == 'suspected_unavailable'
+    assert first['score'] == 0
+
+    sentinel_inventory.census_once(
+        client.application, YouTubeRequestBudget(10), interval_seconds=0,
+    )
+    second = client.get(
+        '/api/sentinel/source/channel/' + source_id
+    ).get_json()['data']['risk']
+    assert second['availability_state'] == 'unavailable'
+    assert second['score'] == 45
+    assert second['level'] == 'elevated'
+    assert inventory_calls == []
+
+
+def test_failed_presence_check_is_score_neutral(client, monkeypatch):
+    import sentinel_inventory
+    from providers.youtube import YouTubeRequestBudget, YouTubeSourceCheckFailed
+
+    source_id = 'UCRiskPresenceAuthCreator'
+    _insert_channel(source_id, 'Auth Failure Films')
+    monkeypatch.setattr(
+        sentinel_inventory, 'get_active_subscriptions',
+        lambda: [(source_id,)],
+    )
+    monkeypatch.setattr(
+        sentinel_inventory, 'get_active_playlist_subs', lambda: [],
+    )
+
+    def auth_failure(channel_id, budget):
+        error = YouTubeSourceCheckFailed('invalid credentials')
+        error.failure_class = 'auth'
+        raise error
+
+    monkeypatch.setattr(
+        sentinel_inventory, 'check_channel_presence', auth_failure,
+    )
+    sentinel_inventory.census_once(
+        client.application, YouTubeRequestBudget(10), interval_seconds=0,
+    )
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT status FROM sentinel_scan_runs WHERE source_id=%s",
+        (source_id,),
+    )
+    assert cur.fetchone()[0] == 'failed'
+    cur.execute(
+        "SELECT COUNT(*) FROM sentinel_sources WHERE source_id=%s",
+        (source_id,),
+    )
+    assert cur.fetchone()[0] == 0
+    cur.execute(
+        "SELECT COUNT(*) FROM sentinel_events WHERE source_id=%s",
+        (source_id,),
+    )
+    assert cur.fetchone()[0] == 0
+    cur.close()
+    con.close()
+
+
+def test_channel_presence_requires_a_successful_provider_response(monkeypatch):
+    import requests
+    from providers.youtube import (
+        YouTubeQuotaExceeded, YouTubeRequestBudget,
+        check_channel_presence,
+    )
+
+    payloads = iter([
+        {'items': [{'id': 'UCConfirmedPresent'}]},
+        {'items': []},
+        {'error': {'errors': [{'reason': 'quotaExceeded'}]}},
+    ])
+    calls = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+        def close(self):
+            pass
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response(next(payloads))
+
+    monkeypatch.setattr(requests, 'get', fake_get)
+    budget = YouTubeRequestBudget(3)
+    assert check_channel_presence('UCConfirmedPresent', budget) is True
+    assert check_channel_presence('UCConfirmedMissing', budget) is False
+    try:
+        check_channel_presence('UCQuotaUnknown', budget)
+        assert False, 'quota response must not become a negative observation'
+    except YouTubeQuotaExceeded:
+        pass
+    assert budget.used == 3
+    assert all(call[0].endswith('/channels') for call in calls)
+    assert calls[0][1]['params']['part'] == 'id'

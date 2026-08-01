@@ -282,10 +282,22 @@ def checkdb():
                 `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 `completed_at` timestamp NULL DEFAULT NULL,
                 `error_message` text DEFAULT NULL,
+                `failure_class` varchar(40) DEFAULT NULL,
                 PRIMARY KEY (`id`),
                 INDEX `idx_inventory_run_source` (`provider`,`source_type`,`source_id`,`status`),
                 INDEX `idx_inventory_run_completed` (`completed_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        cur.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema=%s AND table_name='sentinel_inventory_runs' "
+            "AND column_name='failure_class'",
+            (os.environ['VAULTTUBE_DBNAME'],),
+        )
+        if cur.fetchone()[0] == 0:
+            cur.execute(
+                "ALTER TABLE sentinel_inventory_runs ADD COLUMN "
+                "`failure_class` varchar(40) DEFAULT NULL"
+            )
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema=%s AND table_name='sentinel_inventory' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
         if not cur.fetchone():
             logger.info("Sentinel inventory table not created, creating...")
@@ -301,6 +313,28 @@ def checkdb():
                 INDEX `idx_inventory_source_entity` (`provider`,`source_type`,`source_id`,`entity_id`),
                 CONSTRAINT `fk_inventory_run` FOREIGN KEY (`scan_run_id`)
                     REFERENCES `sentinel_inventory_runs` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema=%s AND table_name='sentinel_sources' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Sentinel sources table not created, creating...")
+            cur.execute("""CREATE TABLE `sentinel_sources` (
+                `provider` varchar(50) NOT NULL DEFAULT 'youtube',
+                `source_type` varchar(50) NOT NULL,
+                `source_id` varchar(255) NOT NULL,
+                `availability_state` varchar(40) NOT NULL DEFAULT 'unknown',
+                `consecutive_terminal_checks` int NOT NULL DEFAULT 0,
+                `last_observation_scan_id` bigint DEFAULT NULL,
+                `last_observed_at` timestamp NULL DEFAULT NULL,
+                `risk_score` int NOT NULL DEFAULT 0,
+                `risk_level` varchar(20) NOT NULL DEFAULT 'low',
+                `risk_reasons_json` longtext DEFAULT NULL,
+                `risk_facts_json` longtext DEFAULT NULL,
+                `risk_calculated_at` timestamp NULL DEFAULT NULL,
+                PRIMARY KEY (`provider`,`source_type`,`source_id`),
+                INDEX `idx_sentinel_source_risk` (`risk_score`,`risk_level`),
+                CONSTRAINT `fk_sentinel_source_observation_scan`
+                    FOREIGN KEY (`last_observation_scan_id`)
+                    REFERENCES `sentinel_scan_runs` (`id`) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
         # Import only legacy unavailable rows. Available rows are initialized
         # lazily on their next successful check. The evidence explicitly says
@@ -920,6 +954,7 @@ def export_row_counts():
             ('sentinel_scan_runs', "SELECT COUNT(*) FROM sentinel_scan_runs"),
             ('sentinel_inventory_runs', "SELECT COUNT(*) FROM sentinel_inventory_runs"),
             ('sentinel_inventory_items', "SELECT COUNT(*) FROM sentinel_inventory"),
+            ('sentinel_sources', "SELECT COUNT(*) FROM sentinel_sources"),
         ]:
             cur.execute(sql)
             counts[name] = cur.fetchone()[0]

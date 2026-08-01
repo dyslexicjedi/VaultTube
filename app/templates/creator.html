@@ -75,8 +75,9 @@
         .then(function (body) {
             if (!body.success) return;
             var data = body.data;
-            if (!data.unavailable && !data.suspected && !data.event_count && !data.inventory) return;
+            if (!data.unavailable && !data.suspected && !data.event_count && !data.inventory && !data.risk) return;
             var facts = [];
+            if (data.risk) facts.push(data.risk.score + '/100 ' + data.risk.level + ' observed risk');
             if (data.inventory) facts.push(data.inventory.preserved_remote + ' of ' + data.inventory.known_remote + ' known remote videos preserved (' + data.inventory.coverage_percent + '%)');
             if (data.unavailable) facts.push(data.unavailable + ' archived video' + (data.unavailable === 1 ? '' : 's') + ' unavailable at source');
             if (data.suspected) facts.push(data.suspected + ' awaiting confirmation');
