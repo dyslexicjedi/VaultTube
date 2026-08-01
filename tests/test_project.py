@@ -1058,9 +1058,8 @@ def test_patreon_db_info_json(client):
 
 
 def test_run_deleted_check_batched(client, monkeypatch):
-    """One API call per 50 IDs; videos absent from the response get
-    isDeleted=1, present ones get cleared. Rows are injected so the fake
-    API response can never touch real data."""
+    """One API call per 50 IDs; two independent negative scans confirm an
+    unavailable video, while a positive result restores one immediately."""
     import logging, requests, backend
 
     con = _db_connect()
@@ -1078,8 +1077,10 @@ def test_run_deleted_check_batched(client, monkeypatch):
 
     with client.application.app_context():
         backend.run_deleted_check(rows=[('DelVid1', 0), ('DelVid2', 1)])
+        # A second completed scan is required to confirm DelVid1 unavailable.
+        backend.run_deleted_check(rows=[('DelVid1', 0)])
 
-    assert len(calls) == 1                       # both IDs in one batched call
+    assert len(calls) == 2
     assert 'DelVid1' in calls[0] and 'DelVid2' in calls[0]
 
     con = _db_connect()
@@ -1089,6 +1090,19 @@ def test_run_deleted_check_batched(client, monkeypatch):
     con.close()
     assert result['DelVid1'] == 1   # vanished from the source
     assert result['DelVid2'] == 0   # back/still up: flag cleared
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT entity_id, event_type FROM sentinel_events "
+        "WHERE entity_id IN ('DelVid1','DelVid2') ORDER BY entity_id"
+    )
+    assert cur.fetchall() == [
+        ('DelVid1', 'source_unavailable'),
+        ('DelVid2', 'source_restored'),
+    ]
+    cur.close()
+    con.close()
 
 
 def test_partial_download_detection():

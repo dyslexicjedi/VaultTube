@@ -103,7 +103,11 @@ def client():
         yield c
 
 
-_TABLES = ['videos', 'channels', 'images', 'playlists', 'pl2vid', 'IgnoreVid', 'queue', 'download_errors']
+_TABLES = [
+    'sentinel_events', 'sentinel_video_state', 'sentinel_scan_runs',
+    'videos', 'channels', 'images', 'playlists', 'pl2vid', 'IgnoreVid',
+    'queue', 'download_errors',
+]
 
 
 @pytest.fixture(autouse=True)

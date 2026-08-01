@@ -1,5 +1,6 @@
 import glob,time,os,re,requests,datetime,json,cv2,logging
-from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,update_video_deleted,get_video_index,update_video_filesize
+from database import check_db_video,save_video,check_db_channel,save_channel,check_db_video_length,update_length,insert_not_found,get_oldest_video_check,get_video_index,update_video_filesize
+from sentinel import start_scan_run, finish_scan_run, record_video_observation
 from transcoder import get_codec_info, get_container_from_ext
 
 logger = logging.getLogger('backend')
@@ -243,9 +244,17 @@ def run_deleted_check(rows=None, batch_size=50):
     if not rows:
         return
     checked = newly_gone = restored = 0
+    requests_made = 0
+    observations = []
+    try:
+        scan_id = start_scan_run()
+    except Exception as e:
+        logger.error("Deleted check skipped: unable to start Sentinel scan: %s" % e)
+        return
     for i in range(0, len(rows), batch_size):
         chunk = rows[i:i+batch_size]
         try:
+            requests_made += 1
             r = requests.get('https://www.googleapis.com/youtube/v3/videos?part=id&maxResults=50&id='
                              + ','.join(vid for vid, _ in chunk)
                              + '&key=' + os.environ['VAULTTUBE_YTKEY'], timeout=30)
@@ -253,22 +262,54 @@ def run_deleted_check(rows=None, batch_size=50):
             r.close()
         except Exception as e:
             logger.error("Deleted check batch failed: %s" % e)
+            finish_scan_run(
+                scan_id, 'partial' if observations else 'failed',
+                len(observations),
+                requests_made, str(e),
+            )
             return
         if 'error' in retj:
-            logger.error("Deleted check API error: %s" % retj['error'].get('message', retj['error']))
+            error_message = retj['error'].get('message', retj['error'])
+            logger.error("Deleted check API error: %s" % error_message)
+            finish_scan_run(
+                scan_id, 'partial' if observations else 'failed',
+                len(observations),
+                requests_made, str(error_message),
+            )
             return
         alive = {item['id'] for item in retj.get('items', [])}
-        for vid, was_deleted in chunk:
-            is_deleted = 0 if vid in alive else 1
-            if is_deleted != (was_deleted or 0):
-                if is_deleted:
-                    newly_gone += 1
-                    logger.info("Video gone from YouTube: %s" % vid)
-                else:
-                    restored += 1
-                    logger.info("Video back on YouTube: %s" % vid)
-            update_video_deleted(vid, is_deleted)
+        for vid, _was_deleted in chunk:
+            observations.append((vid, vid in alive, len(chunk)))
+
+    # Do not apply any observations until every provider batch succeeds. This
+    # prevents a partial provider pass from contributing a disappearance check.
+    for vid, available, chunk_size in observations:
+        try:
+            event_type = record_video_observation(
+                vid,
+                available,
+                scan_id,
+                evidence={
+                    'method': 'youtube.videos.list',
+                    'batch_size': chunk_size,
+                    'present_in_response': available,
+                },
+            )
+            if event_type == 'source_unavailable':
+                newly_gone += 1
+                logger.info("Video gone from YouTube: %s" % vid)
+            elif event_type == 'source_restored':
+                restored += 1
+                logger.info("Video back on YouTube: %s" % vid)
             checked += 1
+        except Exception as e:
+            logger.error("Sentinel observation failed for %s: %s" % (vid, e))
+            finish_scan_run(
+                scan_id, 'partial' if checked else 'failed', checked,
+                requests_made, str(e),
+            )
+            return
+    finish_scan_run(scan_id, 'complete', checked, requests_made)
     logger.info("Deleted check: %d checked, %d newly gone, %d restored" % (checked, newly_gone, restored))
 
 _YTDLP_STRIP_KEYS = frozenset({

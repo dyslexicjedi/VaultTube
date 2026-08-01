@@ -170,6 +170,82 @@ def checkdb():
                 PRIMARY KEY (`id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
             logger.info("Download Errors table created")
+        # Sentinel Phase 1: durable scan evidence, current availability state,
+        # and an append-only event ledger.
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = %s AND table_name = 'sentinel_scan_runs' LIMIT 1;", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Sentinel scan runs table not created, creating...")
+            cur.execute("""CREATE TABLE `sentinel_scan_runs` (
+                `id` bigint NOT NULL AUTO_INCREMENT,
+                `provider` varchar(50) NOT NULL,
+                `scan_type` varchar(50) NOT NULL,
+                `source_type` varchar(50) NOT NULL,
+                `source_id` varchar(255) NOT NULL,
+                `status` varchar(20) NOT NULL DEFAULT 'running',
+                `started_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `completed_at` timestamp NULL DEFAULT NULL,
+                `items_seen` int NOT NULL DEFAULT 0,
+                `requests_made` int NOT NULL DEFAULT 0,
+                `error_message` text DEFAULT NULL,
+                PRIMARY KEY (`id`),
+                INDEX `idx_sentinel_scan_status` (`status`),
+                INDEX `idx_sentinel_scan_source` (`provider`,`source_type`,`source_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = %s AND table_name = 'sentinel_video_state' LIMIT 1;", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Sentinel video state table not created, creating...")
+            cur.execute("""CREATE TABLE `sentinel_video_state` (
+                `video_id` varchar(50) COLLATE utf8mb4_bin NOT NULL,
+                `provider` varchar(50) NOT NULL DEFAULT 'youtube',
+                `state` varchar(40) NOT NULL DEFAULT 'available',
+                `consecutive_negative_checks` int NOT NULL DEFAULT 0,
+                `last_scan_id` bigint DEFAULT NULL,
+                `last_checked_at` timestamp NULL DEFAULT NULL,
+                `last_positive_at` timestamp NULL DEFAULT NULL,
+                `last_negative_at` timestamp NULL DEFAULT NULL,
+                PRIMARY KEY (`video_id`),
+                INDEX `idx_sentinel_video_state` (`state`),
+                CONSTRAINT `fk_sentinel_state_scan` FOREIGN KEY (`last_scan_id`)
+                    REFERENCES `sentinel_scan_runs` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = %s AND table_name = 'sentinel_events' LIMIT 1;", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Sentinel events table not created, creating...")
+            cur.execute("""CREATE TABLE `sentinel_events` (
+                `id` bigint NOT NULL AUTO_INCREMENT,
+                `provider` varchar(50) NOT NULL,
+                `entity_type` varchar(50) NOT NULL,
+                `entity_id` varchar(255) COLLATE utf8mb4_bin NOT NULL,
+                `event_type` varchar(80) NOT NULL,
+                `from_state` varchar(40) DEFAULT NULL,
+                `to_state` varchar(40) DEFAULT NULL,
+                `observed_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `scan_run_id` bigint DEFAULT NULL,
+                `evidence_json` longtext DEFAULT NULL,
+                `dedupe_key` varchar(255) COLLATE utf8mb4_bin NOT NULL,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_sentinel_event_dedupe` (`dedupe_key`),
+                INDEX `idx_sentinel_event_entity` (`provider`,`entity_type`,`entity_id`),
+                INDEX `idx_sentinel_event_observed` (`observed_at`),
+                CONSTRAINT `fk_sentinel_event_scan` FOREIGN KEY (`scan_run_id`)
+                    REFERENCES `sentinel_scan_runs` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        # Import only legacy unavailable rows. Available rows are initialized
+        # lazily on their next successful check. The evidence explicitly says
+        # that observed_at is the import time, not the disappearance time.
+        cur.execute("""INSERT IGNORE INTO sentinel_video_state
+            (video_id, provider, state, consecutive_negative_checks,
+             last_checked_at, last_negative_at)
+            SELECT id, 'youtube', 'unavailable', 2, lastScanned, lastScanned
+            FROM videos WHERE source='youtube' AND isDeleted=1""")
+        cur.execute("""INSERT IGNORE INTO sentinel_events
+            (provider, entity_type, entity_id, event_type, from_state, to_state,
+             evidence_json, dedupe_key)
+            SELECT 'youtube', 'video', id, 'imported_existing_state', NULL,
+                   'unavailable',
+                   '{"source":"videos.isDeleted","observed_at_known":false}',
+                   CONCAT('imported:youtube:video:', id, ':unavailable')
+            FROM videos WHERE source='youtube' AND isDeleted=1""")
         cur.close()
         con.close()
         cleanup_old_errors(7)
