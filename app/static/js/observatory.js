@@ -172,7 +172,13 @@
                         }).join('') + '</div></div>'
                     : '')
             : '<div class="vt-sentinel-census-note">No complete remote census yet. Partial scans are intentionally excluded.</div>';
-        $id('sentinel-detail').innerHTML = riskPanel + coverage
+        var archaeology = data.archaeology;
+        var archaeologyPanel = archaeology && archaeology.count
+            ? '<div class="vt-archaeology-saved"><div><strong>Historical discoveries</strong><span>' + archaeology.count + ' ID' + (archaeology.count === 1 ? '' : 's') + ' preserved from manual evidence</span></div>'
+                + '<div class="vt-history-links">' + historicalVideoLinks(archaeology.items.map(function (item) { return item.id; })) + '</div>'
+                + (archaeology.count > archaeology.items.length ? '<span class="vt-history-overflow">+' + (archaeology.count - archaeology.items.length) + ' more</span>' : '') + '</div>'
+            : '';
+        $id('sentinel-detail').innerHTML = riskPanel + coverage + archaeologyPanel
             + '<div class="vt-sentinel-local-state">'
             + '<div class="vt-sentinel-availability"><span>Archived without an availability alert</span><strong>' + available + ' of ' + data.video_count + '</strong></div>'
             + '<div class="vt-meter"><div style="width:' + pct + '%"></div></div>'
@@ -219,13 +225,16 @@
             [data.ignored.length, 'Ignored'], [data.other_channel.length, 'Other creator'],
             [data.missing.length, 'Newly discovered']
         ];
-        target.innerHTML = '<div class="vt-history-counts">' + cards.map(function (item) {
+        target.innerHTML = (data.saved_count
+            ? '<div class="vt-history-saved-note">Added ' + data.saved_count + ' ID' + (data.saved_count === 1 ? '' : 's') + ' to this channel’s historical discoveries.</div>'
+            : '') + '<div class="vt-history-counts">' + cards.map(function (item) {
             return '<div><strong>' + item[0] + '</strong><span>' + esc(item[1]) + '</span></div>';
         }).join('') + '</div>'
             + (data.missing.length
                 ? '<div class="vt-history-missing"><div><strong>Newly discovered IDs</strong><span>Not found in the archive, tombstones, or prior Sentinel inventories.</span></div>'
                     + '<div class="vt-history-links">' + historicalVideoLinks(data.missing) + '</div>'
-                    + '<div class="vt-history-actions"><button type="button" class="vt-btn-ghost" id="history-copy-missing">Copy missing URLs</button>'
+                    + '<div class="vt-history-actions"><button type="button" class="vt-btn" id="history-save-missing">Add ' + data.missing.length + ' to channel history</button>'
+                    + '<button type="button" class="vt-btn-ghost" id="history-copy-missing">Copy missing URLs</button>'
                     + '<button type="button" class="vt-btn-ghost" id="history-download-missing">Download missing.txt</button></div></div>'
                 : '<div class="vt-sentinel-census-note">Every valid ID in this export is already known to VaultTube.</div>')
             + ((data.duplicates_removed || data.invalid_lines.length)
@@ -233,6 +242,7 @@
                     + ' removed · ' + data.invalid_lines.length + ' invalid line' + (data.invalid_lines.length === 1 ? '' : 's') + ' skipped</p>' : '');
         if (!data.missing.length) return;
         var exportText = exportHistoricalMissing(data.missing);
+        $id('history-save-missing').addEventListener('click', saveHistoricalImport);
         $id('history-copy-missing').addEventListener('click', function () {
             navigator.clipboard.writeText(exportText).then(function () {
                 $id('history-copy-missing').textContent = 'Copied';
@@ -245,6 +255,28 @@
             link.download = 'missing.txt';
             link.click();
             URL.revokeObjectURL(url);
+        });
+    }
+
+    function saveHistoricalImport() {
+        if (!selectedSource) return;
+        var file = $id('history-import-file').files[0];
+        var button = $id('history-save-missing');
+        var target = $id('history-import-result');
+        if (!file || !button) return;
+        var form = new FormData();
+        form.append('file', file);
+        button.disabled = true;
+        button.textContent = 'Adding…';
+        fetch('/api/sentinel/source/channel/' + encodeURIComponent(selectedSource) + '/import-history', {
+            method: 'POST', body: form
+        }).then(function (response) {
+            return response.json().then(function (payload) {
+                if (!response.ok || !payload.success) throw new Error(payload.error || 'Import failed');
+                return payload.data;
+            });
+        }).then(renderHistoricalImport).catch(function (error) {
+            target.innerHTML = '<div class="vt-sentinel-census-note">' + esc(error.message) + '</div>';
         });
     }
 

@@ -353,6 +353,21 @@ def checkdb():
                 "ALTER TABLE sentinel_inventory ADD COLUMN "
                 "`remote_published_at` timestamp NULL DEFAULT NULL"
             )
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema=%s AND table_name='sentinel_archaeology_candidates' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Sentinel archaeology candidates table not created, creating...")
+            cur.execute("""CREATE TABLE `sentinel_archaeology_candidates` (
+                `provider` varchar(50) NOT NULL DEFAULT 'youtube',
+                `source_type` varchar(50) NOT NULL DEFAULT 'channel',
+                `source_id` varchar(255) NOT NULL,
+                `entity_id` varchar(255) COLLATE utf8mb4_bin NOT NULL,
+                `evidence_source` varchar(50) NOT NULL DEFAULT 'filmot',
+                `evidence_filename` varchar(255) DEFAULT NULL,
+                `first_discovered_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `last_observed_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`provider`,`source_type`,`source_id`,`entity_id`),
+                INDEX `idx_archaeology_entity` (`provider`,`entity_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema=%s AND table_name='sentinel_sources' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
         if not cur.fetchone():
             logger.info("Sentinel sources table not created, creating...")
@@ -1151,6 +1166,7 @@ def export_row_counts():
             ('sentinel_scan_runs', "SELECT COUNT(*) FROM sentinel_scan_runs"),
             ('sentinel_inventory_runs', "SELECT COUNT(*) FROM sentinel_inventory_runs"),
             ('sentinel_inventory_items', "SELECT COUNT(*) FROM sentinel_inventory"),
+            ('sentinel_archaeology_candidates', "SELECT COUNT(*) FROM sentinel_archaeology_candidates"),
             ('sentinel_sources', "SELECT COUNT(*) FROM sentinel_sources"),
             ('sentinel_rescue_previews', "SELECT COUNT(*) FROM sentinel_rescue_previews"),
             ('sentinel_rescue_preview_items', "SELECT COUNT(*) FROM sentinel_rescue_preview_items"),

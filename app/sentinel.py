@@ -608,6 +608,23 @@ def get_source_detail(channel_id, event_limit=20):
                 (inventory[0],),
             )
             remote_unarchived = [item[0] for item in cur.fetchall()]
+        cur.execute(
+            "SELECT entity_id, evidence_source, evidence_filename, "
+            "first_discovered_at, last_observed_at "
+            "FROM sentinel_archaeology_candidates "
+            "WHERE provider='youtube' AND source_type='channel' "
+            "AND source_id=%s ORDER BY first_discovered_at, entity_id",
+            (channel_id,),
+        )
+        archaeology = [
+            {
+                'id': item[0], 'evidence_source': item[1],
+                'evidence_filename': item[2],
+                'first_discovered_at': _iso(item[3]),
+                'last_observed_at': _iso(item[4]),
+            }
+            for item in cur.fetchall()
+        ]
         cur.close()
     finally:
         con.close()
@@ -633,6 +650,10 @@ def get_source_detail(channel_id, event_limit=20):
         'affected_videos': affected,
         'events': events['items'],
         'risk': risk,
+        'archaeology': {
+            'count': len(archaeology),
+            'items': archaeology[:20],
+        },
         'inventory': None if inventory is None else {
             'run_id': int(inventory[0]),
             'completed_at': _iso(inventory[1]),
@@ -722,6 +743,22 @@ def export_sentinel_data():
                 'source_type': r[2], 'source_id': r[3], 'entity_id': r[4],
                 'position': r[5], 'remote_published_at': _iso(r[6]),
                 'observed_at': _iso(r[7]),
+            }
+            for r in cur.fetchall()
+        ]
+        cur.execute(
+            "SELECT provider, source_type, source_id, entity_id, "
+            "evidence_source, evidence_filename, first_discovered_at, "
+            "last_observed_at FROM sentinel_archaeology_candidates "
+            "ORDER BY provider, source_type, source_id, entity_id"
+        )
+        archaeology_candidates = [
+            {
+                'provider': r[0], 'source_type': r[1], 'source_id': r[2],
+                'entity_id': r[3], 'evidence_source': r[4],
+                'evidence_filename': r[5],
+                'first_discovered_at': _iso(r[6]),
+                'last_observed_at': _iso(r[7]),
             }
             for r in cur.fetchall()
         ]
@@ -821,6 +858,7 @@ def export_sentinel_data():
         return {
             'scan_runs': scans, 'video_states': states, 'events': events,
             'inventory_runs': inventory_runs, 'inventory': inventory,
+            'archaeology_candidates': archaeology_candidates,
             'sources': sources,
             'rescue_previews': rescue_previews,
             'rescue_preview_items': rescue_preview_items,

@@ -1903,7 +1903,12 @@ a:focus-visible {
 .vt-history-links a, .vt-history-overflow { padding: 4px 7px; border: 1px solid var(--vt-border); border-radius: 6px; color: var(--vt-text); font-family: ui-monospace, monospace; font-size: 10px; text-decoration: none; }
 .vt-history-links a:hover { border-color: var(--vt-accent); color: var(--vt-accent); }
 .vt-history-overflow { color: var(--vt-text-dim); }
-.vt-history-actions { display: flex; gap: 7px; margin-top: 10px; }
+.vt-history-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.vt-history-saved-note { margin-top: 12px; padding: 9px 11px; border: 1px solid rgba(120, 201, 154, .3); border-radius: 7px; background: rgba(120, 201, 154, .08); color: #78c99a; font-size: 11px; }
+.vt-archaeology-saved { margin: 16px 0; padding: 12px; border: 1px solid var(--vt-border); border-radius: 8px; background: var(--vt-surface-2); }
+.vt-archaeology-saved > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.vt-archaeology-saved > div:first-child strong { font-size: 12px; }
+.vt-archaeology-saved > div:first-child span { color: var(--vt-text-dim); font-size: 10px; }
 .vt-sentinel-affected-list { display: flex; flex-direction: column; gap: 1px; }
 .vt-sentinel-affected {
   display: flex;

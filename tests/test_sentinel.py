@@ -83,6 +83,15 @@ def test_sentinel_inventory_tables_exist():
     con.close()
 
 
+def test_sentinel_archaeology_table_exists():
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SHOW TABLES LIKE 'sentinel_archaeology_candidates'")
+    assert cur.fetchone() is not None
+    cur.close()
+    con.close()
+
+
 def test_sentinel_source_risk_table_exists():
     con = _db_connect()
     cur = con.cursor()
@@ -365,7 +374,8 @@ def test_historical_import_endpoint_classifies_without_writes(client):
     )
     watched_tables = (
         'videos', 'IgnoreVid', 'sentinel_inventory_runs',
-        'sentinel_inventory', 'sentinel_events', 'queue',
+        'sentinel_inventory', 'sentinel_archaeology_candidates',
+        'sentinel_events', 'queue',
     )
     before = {}
     for table in watched_tables:
@@ -426,10 +436,73 @@ def test_historical_import_endpoint_validates_request_and_source(client):
     assert unknown.status_code == 404
 
 
+def test_historical_import_can_be_added_to_channel_history(client):
+    source_id = 'UCImportHistory'
+    _insert_channel(source_id, 'Imported History Creator')
+    _insert_video('HistArch001', channel_id=source_id)
+    text = (
+        'https://www.youtube.com/watch?v=HistArch001\n'
+        'https://www.youtube.com/watch?v=HistNew0001\n'
+    )
+    path = '/api/sentinel/source/channel/%s' % source_id
+
+    saved = client.post(
+        path + '/import-history',
+        data={'file': (io.BytesIO(text.encode()), '../filmot-export.txt')},
+        content_type='multipart/form-data',
+    )
+    assert saved.status_code == 200
+    payload = saved.get_json()['data']
+    assert payload['saved_count'] == 1
+    assert payload['saved_ids'] == ['HistNew0001']
+    assert payload['missing'] == []
+    assert payload['known_unarchived'] == ['HistNew0001']
+    assert payload['evidence_source'] == 'filmot'
+    assert payload['evidence_filename'] == 'filmot-export.txt'
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT source_id, entity_id, evidence_source, evidence_filename "
+        "FROM sentinel_archaeology_candidates"
+    )
+    assert cur.fetchall() == [(
+        source_id, 'HistNew0001', 'filmot', 'filmot-export.txt',
+    )]
+    for table in ('sentinel_events', 'sentinel_inventory', 'queue'):
+        cur.execute('SELECT COUNT(*) FROM `%s`' % table)
+        assert cur.fetchone()[0] == 0, table
+    cur.execute("SELECT COUNT(*) FROM videos")
+    assert cur.fetchone()[0] == 1
+    cur.close()
+    con.close()
+
+    compared = client.post(
+        path + '/compare-import',
+        data={'file': (io.BytesIO(text.encode()), 'filmot-export.txt')},
+        content_type='multipart/form-data',
+    ).get_json()['data']
+    assert compared['missing'] == []
+    assert compared['known_unarchived'] == ['HistNew0001']
+
+    detail = client.get(path).get_json()['data']
+    assert detail['archaeology']['count'] == 1
+    assert detail['archaeology']['items'][0]['id'] == 'HistNew0001'
+    assert detail['archaeology']['items'][0]['evidence_source'] == 'filmot'
+
+    export = json.loads(client.get('/api/export').get_data(as_text=True))
+    assert export['meta']['counts']['sentinel_archaeology_candidates'] == 1
+    candidate = export['sentinel']['archaeology_candidates'][0]
+    assert candidate['entity_id'] == 'HistNew0001'
+    assert candidate['source_id'] == source_id
+
+
 def test_observatory_javascript_contains_historical_import_ui(client):
     script = client.get('/static/js/observatory.js').data
     assert b'Historical list comparison' in script
     assert b'/compare-import' in script
+    assert b'/import-history' in script
+    assert b'Add ' in script and b'to channel history' in script
     assert b'Download missing.txt' in script
 
 
