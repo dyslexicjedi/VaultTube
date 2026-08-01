@@ -217,3 +217,323 @@ def record_video_observation(video_id, available, scan_id, evidence=None):
         raise
     finally:
         con.close()
+
+
+def _iso(value):
+    return value.isoformat() if value is not None else None
+
+
+def _event_row(row):
+    evidence = {}
+    if row[7]:
+        try:
+            evidence = json.loads(row[7])
+        except (TypeError, ValueError):
+            evidence = {'raw': row[7]}
+    return {
+        'id': int(row[0]),
+        'entity_id': row[1],
+        'event_type': row[2],
+        'from_state': row[3],
+        'to_state': row[4],
+        'observed_at': _iso(row[5]),
+        'scan_run_id': row[6],
+        'evidence': evidence,
+        'title': row[8],
+        'channel_id': row[9],
+        'channel_name': row[10] or row[9],
+    }
+
+
+def get_summary():
+    """Observatory totals derived strictly from Phase 1 local observations."""
+    con = get_connection(logger)
+    if con is None:
+        raise RuntimeError('Unable to get database connection for Sentinel summary')
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT COUNT(*), "
+            "COALESCE(SUM(s.state='unavailable'),0), "
+            "COALESCE(SUM(s.state='suspected_unavailable'),0) "
+            "FROM sentinel_video_state s JOIN videos v ON v.id=s.video_id"
+        )
+        monitored, unavailable, suspected = cur.fetchone()
+        cur.execute(
+            "SELECT "
+            "COALESCE(SUM(event_type='source_unavailable' AND "
+            "observed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)),0), "
+            "COALESCE(SUM(event_type='source_restored' AND "
+            "observed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)),0), "
+            "COALESCE(SUM(event_type='imported_existing_state'),0), COUNT(*) "
+            "FROM sentinel_events"
+        )
+        unavailable_7d, restored_30d, imported, total_events = cur.fetchone()
+        cur.execute(
+            "SELECT id, status, started_at, completed_at, items_seen, "
+            "requests_made, error_message FROM sentinel_scan_runs "
+            "ORDER BY id DESC LIMIT 1"
+        )
+        scan = cur.fetchone()
+        cur.close()
+        return {
+            'monitored_videos': int(monitored),
+            'preserved_unavailable': int(unavailable),
+            'suspected_unavailable': int(suspected),
+            'newly_unavailable_7d': int(unavailable_7d),
+            'restored_30d': int(restored_30d),
+            'imported_existing_state': int(imported),
+            'total_events': int(total_events),
+            'last_scan': None if scan is None else {
+                'id': int(scan[0]),
+                'status': scan[1],
+                'started_at': _iso(scan[2]),
+                'completed_at': _iso(scan[3]),
+                'items_seen': int(scan[4]),
+                'requests_made': int(scan[5]),
+                'error_message': scan[6],
+            },
+        }
+    finally:
+        con.close()
+
+
+EVENT_TYPES = {
+    'source_unavailable', 'source_restored', 'imported_existing_state',
+}
+
+
+def get_events(limit=50, offset=0, event_type=None, channel_id=None):
+    """Return a paged event feed enriched with current video/channel labels."""
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    conditions = ["e.entity_type='video'"]
+    params = []
+    if event_type:
+        if event_type not in EVENT_TYPES:
+            raise ValueError('Unknown Sentinel event type')
+        conditions.append('e.event_type=%s')
+        params.append(event_type)
+    if channel_id:
+        conditions.append('v.channelId=%s')
+        params.append(channel_id)
+    where = ' AND '.join(conditions)
+
+    con = get_connection(logger)
+    if con is None:
+        raise RuntimeError('Unable to get database connection for Sentinel events')
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM sentinel_events e "
+            "LEFT JOIN videos v ON v.id=e.entity_id WHERE " + where,
+            tuple(params),
+        )
+        total = int(cur.fetchone()[0])
+        cur.execute(
+            "SELECT e.id, e.entity_id, e.event_type, e.from_state, e.to_state, "
+            "e.observed_at, e.scan_run_id, e.evidence_json, v.title, "
+            "v.channelId, c.channelname FROM sentinel_events e "
+            "LEFT JOIN videos v ON v.id=e.entity_id "
+            "LEFT JOIN channels c ON c.channelid=v.channelId WHERE " + where +
+            " ORDER BY e.observed_at DESC, e.id DESC LIMIT %s OFFSET %s",
+            tuple(params + [limit, offset]),
+        )
+        items = [_event_row(row) for row in cur.fetchall()]
+        cur.close()
+        return {
+            'items': items,
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+        }
+    finally:
+        con.close()
+
+
+def _source_status(unavailable, suspected, newly_unavailable):
+    if newly_unavailable or suspected:
+        return 'attention'
+    if unavailable:
+        return 'historical_loss'
+    return 'stable'
+
+
+def get_sources(limit=50, offset=0):
+    """Creators ordered by recent confirmed/suspected source changes."""
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    con = get_connection(logger)
+    if con is None:
+        raise RuntimeError('Unable to get database connection for Sentinel sources')
+    try:
+        cur = con.cursor()
+        cur.execute("SELECT COUNT(DISTINCT channelId) FROM videos WHERE channelId IS NOT NULL")
+        total = int(cur.fetchone()[0])
+        cur.execute(
+            "SELECT v.channelId, COALESCE(c.channelname, v.channelId), "
+            "COUNT(DISTINCT v.id), "
+            "COALESCE(SUM(s.state='unavailable'),0), "
+            "COALESCE(SUM(s.state='suspected_unavailable'),0), "
+            "COALESCE(ev.event_count,0), ev.latest_event_at, "
+            "COALESCE(ev.newly_unavailable_30d,0), "
+            "COALESCE(ev.restored_30d,0), MAX(s.last_checked_at) "
+            "FROM videos v LEFT JOIN channels c ON c.channelid=v.channelId "
+            "LEFT JOIN sentinel_video_state s ON s.video_id=v.id "
+            "LEFT JOIN ("
+            "  SELECT v2.channelId, COUNT(*) event_count, MAX(e.observed_at) latest_event_at, "
+            "  SUM(e.event_type='source_unavailable' AND e.observed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) newly_unavailable_30d, "
+            "  SUM(e.event_type='source_restored' AND e.observed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) restored_30d "
+            "  FROM sentinel_events e JOIN videos v2 ON v2.id=e.entity_id "
+            "  GROUP BY v2.channelId"
+            ") ev ON ev.channelId=v.channelId "
+            "WHERE v.channelId IS NOT NULL "
+            "GROUP BY v.channelId, c.channelname, ev.event_count, "
+            "ev.latest_event_at, ev.newly_unavailable_30d, ev.restored_30d "
+            "ORDER BY newly_unavailable_30d DESC, "
+            "SUM(s.state='suspected_unavailable') DESC, "
+            "SUM(s.state='unavailable') DESC, ev.latest_event_at DESC, "
+            "COUNT(DISTINCT v.id) DESC LIMIT %s OFFSET %s",
+            (limit, offset),
+        )
+        items = []
+        for row in cur.fetchall():
+            unavailable = int(row[3])
+            suspected = int(row[4])
+            newly_unavailable = int(row[7])
+            items.append({
+                'channel_id': row[0],
+                'channel_name': row[1],
+                'video_count': int(row[2]),
+                'unavailable': unavailable,
+                'suspected': suspected,
+                'event_count': int(row[5]),
+                'latest_event_at': _iso(row[6]),
+                'newly_unavailable_30d': newly_unavailable,
+                'restored_30d': int(row[8]),
+                'last_checked_at': _iso(row[9]),
+                'status': _source_status(
+                    unavailable, suspected, newly_unavailable,
+                ),
+            })
+        cur.close()
+        return {'items': items, 'total': total, 'limit': limit, 'offset': offset}
+    finally:
+        con.close()
+
+
+def get_source_detail(channel_id, event_limit=20):
+    """Current Phase 1 state and recent event history for one creator."""
+    con = get_connection(logger)
+    if con is None:
+        raise RuntimeError('Unable to get database connection for Sentinel source')
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT COALESCE(c.channelname, %s), COUNT(v.id), "
+            "COALESCE(SUM(s.state='unavailable'),0), "
+            "COALESCE(SUM(s.state='suspected_unavailable'),0), "
+            "MAX(s.last_checked_at) FROM videos v "
+            "LEFT JOIN channels c ON c.channelid=v.channelId "
+            "LEFT JOIN sentinel_video_state s ON s.video_id=v.id "
+            "WHERE v.channelId=%s GROUP BY c.channelname",
+            (channel_id, channel_id),
+        )
+        row = cur.fetchone()
+        if row is None:
+            cur.close()
+            return None
+        cur.execute(
+            "SELECT v.id, v.title, v.PublishedAt, s.state, s.last_negative_at "
+            "FROM videos v JOIN sentinel_video_state s ON s.video_id=v.id "
+            "WHERE v.channelId=%s AND s.state IN "
+            "('unavailable','suspected_unavailable') "
+            "ORDER BY s.last_negative_at DESC, v.PublishedAt DESC LIMIT 20",
+            (channel_id,),
+        )
+        affected = [
+            {
+                'id': item[0], 'title': item[1],
+                'published_at': _iso(item[2]), 'state': item[3],
+                'last_negative_at': _iso(item[4]),
+            }
+            for item in cur.fetchall()
+        ]
+        cur.execute(
+            "SELECT COUNT(*), COALESCE(SUM(e.event_type='source_unavailable' "
+            "AND e.observed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)),0) "
+            "FROM sentinel_events e JOIN videos v ON v.id=e.entity_id "
+            "WHERE v.channelId=%s",
+            (channel_id,),
+        )
+        event_count, newly_unavailable = cur.fetchone()
+        cur.close()
+    finally:
+        con.close()
+
+    events = get_events(limit=event_limit, channel_id=channel_id)
+    unavailable = int(row[2])
+    suspected = int(row[3])
+    return {
+        'channel_id': channel_id,
+        'channel_name': row[0],
+        'video_count': int(row[1]),
+        'unavailable': unavailable,
+        'suspected': suspected,
+        'last_checked_at': _iso(row[4]),
+        'event_count': int(event_count),
+        'status': _source_status(
+            unavailable, suspected, int(newly_unavailable),
+        ),
+        'affected_videos': affected,
+        'events': events['items'],
+    }
+
+
+def export_sentinel_data():
+    """Serializable Phase 1 ledger for the JSON backup export."""
+    con = get_connection(logger)
+    if con is None:
+        raise RuntimeError('Unable to get database connection for Sentinel export')
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT id, provider, scan_type, source_type, source_id, status, "
+            "started_at, completed_at, items_seen, requests_made, error_message "
+            "FROM sentinel_scan_runs ORDER BY id"
+        )
+        scans = [
+            {
+                'id': int(r[0]), 'provider': r[1], 'scan_type': r[2],
+                'source_type': r[3], 'source_id': r[4], 'status': r[5],
+                'started_at': _iso(r[6]), 'completed_at': _iso(r[7]),
+                'items_seen': int(r[8]), 'requests_made': int(r[9]),
+                'error_message': r[10],
+            }
+            for r in cur.fetchall()
+        ]
+        cur.execute(
+            "SELECT video_id, provider, state, consecutive_negative_checks, "
+            "last_scan_id, last_checked_at, last_positive_at, last_negative_at "
+            "FROM sentinel_video_state ORDER BY video_id"
+        )
+        states = [
+            {
+                'video_id': r[0], 'provider': r[1], 'state': r[2],
+                'consecutive_negative_checks': int(r[3]),
+                'last_scan_id': r[4], 'last_checked_at': _iso(r[5]),
+                'last_positive_at': _iso(r[6]),
+                'last_negative_at': _iso(r[7]),
+            }
+            for r in cur.fetchall()
+        ]
+        cur.execute(
+            "SELECT id, entity_id, event_type, from_state, to_state, "
+            "observed_at, scan_run_id, evidence_json, NULL, NULL, NULL "
+            "FROM sentinel_events ORDER BY id"
+        )
+        events = [_event_row(r) for r in cur.fetchall()]
+        cur.close()
+        return {'scan_runs': scans, 'video_states': states, 'events': events}
+    finally:
+        con.close()

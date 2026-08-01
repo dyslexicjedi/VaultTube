@@ -6,6 +6,15 @@ provider failures from genuine disappearance, explains why a source appears at
 risk, and can prioritize still-available media after the user approves a
 bounded rescue plan.
 
+## Implementation status
+
+- Phase 1 complete: durable scan evidence, two-check availability state, and
+  the append-only event ledger.
+- Phase 2 complete: Observatory read APIs and interface, creator context, and
+  Sentinel data in JSON exports. The interface deliberately reports observed
+  state rather than a risk score; risk scoring begins in Phase 4.
+- Phase 3 next: durable remote inventories and archive-coverage reporting.
+
 ## Design principles
 
 1. Observation, risk assessment, and rescue execution are separate stages.

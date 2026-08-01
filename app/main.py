@@ -2,6 +2,7 @@ import logging,os,traceback,sys, threading, queue, signal
 from logging.handlers import TimedRotatingFileHandler
 from flask import Flask,render_template,send_file,Blueprint,request,redirect
 from api import api_bp
+from sentinel_api import sentinel_bp
 from backend import backend_thread,deleted_check_thread
 from database import checkdb,get_resumable_queue_items
 from scanner import start_scanner
@@ -89,6 +90,7 @@ videos = Blueprint('videos',__name__,static_url_path='/videos',static_folder=os.
 #Register with Flask
 app.register_blueprint(videos)
 app.register_blueprint(api_bp,url_prefix='/api')
+app.register_blueprint(sentinel_bp,url_prefix='/api/sentinel')
 
 #Basic Routes
 @app.route('/')
@@ -143,6 +145,10 @@ def stats():
 @app.route("/storage.html")
 def storage():
     return render_template("/storage.html")
+
+@app.route("/observatory.html")
+def observatory():
+    return render_template("/observatory.html")
 
 @app.route("/upload.html")
 def upload():

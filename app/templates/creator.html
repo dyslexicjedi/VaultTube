@@ -11,6 +11,14 @@
     </a>
 </div>
 
+<section class="vt-sentinel-creator" id="creator-sentinel" hidden>
+    <div class="vt-sentinel-creator-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+    </div>
+    <div><strong id="creator-sentinel-title">Sentinel</strong><span id="creator-sentinel-copy"></span></div>
+    <a class="vt-all" id="creator-sentinel-link">View in Observatory</a>
+</section>
+
 <div class="vt-grid" id="creator-grid"></div>
 <div class="vt-empty" id="creator-empty" hidden>No videos from this channel yet.</div>
 <ul class="vt-pages" id="creator-pages"></ul>
@@ -59,6 +67,23 @@
         link.href = info.source_url;
         link.hidden = false;
     }).catch(function () {});
+
+    // Sentinel context for this creator. Phase 2 reports observed local
+    // availability only; risk and remote archive coverage arrive later.
+    fetch('/api/sentinel/source/channel/' + encodeURIComponent(creator))
+        .then(function (r) { return r.json(); })
+        .then(function (body) {
+            if (!body.success) return;
+            var data = body.data;
+            if (!data.unavailable && !data.suspected && !data.event_count) return;
+            var facts = [];
+            if (data.unavailable) facts.push(data.unavailable + ' archived video' + (data.unavailable === 1 ? '' : 's') + ' unavailable at source');
+            if (data.suspected) facts.push(data.suspected + ' awaiting confirmation');
+            if (data.event_count) facts.push(data.event_count + ' recorded event' + (data.event_count === 1 ? '' : 's'));
+            document.getElementById('creator-sentinel-copy').textContent = facts.join(' · ');
+            document.getElementById('creator-sentinel-link').href = '/observatory.html?channel=' + encodeURIComponent(creator);
+            document.getElementById('creator-sentinel').hidden = false;
+        }).catch(function () {});
 
     // Subscribe toggle (sub_status returns "0", "1", or "" for unknown channels)
     var subBtn = document.getElementById('creator-sub');

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="vt-sentinel-head">
+    <div>
+        <h1>Observatory</h1>
+        <p>Source changes confirmed by successful checks of videos preserved in this vault.</p>
+    </div>
+    <span class="vt-sentinel-scan" id="sentinel-last-scan">No availability scans yet</span>
+</div>
+
+<div class="vt-sentinel-kpis">
+    <a class="vt-kpi" href="/browse.html?show=deleted">
+        <span class="vt-kpi-label">Preserved but unavailable</span>
+        <span class="vt-kpi-value" id="sentinel-kpi-unavailable">—</span>
+        <span class="vt-kpi-sub">still safe in this vault</span>
+    </a>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Confirmed this week</span>
+        <span class="vt-kpi-value" id="sentinel-kpi-new">—</span>
+        <span class="vt-kpi-sub">new source losses</span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Restored in 30 days</span>
+        <span class="vt-kpi-value" id="sentinel-kpi-restored">—</span>
+        <span class="vt-kpi-sub">available again</span>
+    </div>
+    <div class="vt-kpi">
+        <span class="vt-kpi-label">Awaiting confirmation</span>
+        <span class="vt-kpi-value" id="sentinel-kpi-suspected">—</span>
+        <span class="vt-kpi-sub">one negative check only</span>
+    </div>
+</div>
+
+<div class="vt-sentinel-grid">
+    <section class="vt-sentinel-panel">
+        <div class="vt-sentinel-panel-head">
+            <div><h2>Creators</h2><span id="sentinel-source-count"></span></div>
+            <button type="button" class="vt-all-button" id="sentinel-all-activity">All activity</button>
+        </div>
+        <div class="vt-sentinel-source-list" id="sentinel-source-list"></div>
+        <div class="vt-empty" id="sentinel-source-empty" hidden>No archived creators yet.</div>
+    </section>
+
+    <section class="vt-sentinel-panel">
+        <div class="vt-sentinel-panel-head">
+            <div><h2 id="sentinel-detail-name">Creator detail</h2><span id="sentinel-detail-status">Select a creator</span></div>
+            <a class="vt-all" id="sentinel-detail-link" hidden>Open creator</a>
+        </div>
+        <div class="vt-sentinel-detail" id="sentinel-detail">
+            <div class="vt-empty">Select a creator to inspect its source history.</div>
+        </div>
+    </section>
+</div>
+
+<section class="vt-section vt-sentinel-activity">
+    <div class="vt-sentinel-activity-head">
+        <div><h2>Activity</h2><span id="sentinel-event-count"></span></div>
+        <div class="vt-sentinel-filters">
+            <label>
+                <span>Creator</span>
+                <select class="vt-select" id="sentinel-channel-filter"><option value="">All creators</option></select>
+            </label>
+            <label>
+                <span>Event</span>
+                <select class="vt-select" id="sentinel-event-filter">
+                    <option value="">All events</option>
+                    <option value="source_unavailable">Unavailable confirmed</option>
+                    <option value="source_restored">Restored</option>
+                    <option value="imported_existing_state">Imported history</option>
+                </select>
+            </label>
+        </div>
+    </div>
+    <div class="vt-sentinel-events" id="sentinel-event-list"></div>
+    <div class="vt-empty" id="sentinel-event-empty" hidden>No Sentinel events match these filters.</div>
+    <div class="vt-sentinel-more"><button type="button" class="vt-btn-ghost" id="sentinel-load-more" hidden>Load more</button></div>
+</section>
+
+<script src="/static/js/observatory.js"></script>
+{% endblock %}

@@ -14,6 +14,7 @@ from queue_utils import enqueue
 from chapters import parse_chapters
 from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for, cache_stats
 from vault_paths import public_video_path, resolve_vault_path
+from sentinel import export_sentinel_data
 from werkzeug.exceptions import HTTPException
 
 logger = logging.getLogger('api')
@@ -1547,6 +1548,7 @@ def api_export():
         yield '],"subscriptions":' + json.dumps({'channels': channels, 'playlists': playlists}, default=str)
         yield ',"mappings":' + json.dumps(export_pl2vid(), default=str)
         yield ',"tombstones":' + json.dumps(export_tombstones(), default=str)
+        yield ',"sentinel":' + json.dumps(export_sentinel_data(), default=str)
         yield ',"config":' + json.dumps(_build_export_config(), default=str) + '}'
 
     return Response(

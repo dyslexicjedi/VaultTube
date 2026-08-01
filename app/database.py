@@ -842,6 +842,9 @@ def export_row_counts():
             ('subscribed_playlists', "SELECT COUNT(*) FROM playlists WHERE subscribed = 1"),
             ('mappings', "SELECT COUNT(*) FROM pl2vid"),
             ('tombstones', "SELECT COUNT(*) FROM IgnoreVid"),
+            ('sentinel_events', "SELECT COUNT(*) FROM sentinel_events"),
+            ('sentinel_video_states', "SELECT COUNT(*) FROM sentinel_video_state"),
+            ('sentinel_scan_runs', "SELECT COUNT(*) FROM sentinel_scan_runs"),
         ]:
             cur.execute(sql)
             counts[name] = cur.fetchone()[0]
