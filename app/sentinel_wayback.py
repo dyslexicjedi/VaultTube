@@ -8,6 +8,8 @@ import os
 import re
 import tempfile
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from backend import save_uploaded_video_metadata
 from database import get_connection
@@ -16,6 +18,7 @@ from transcoder import get_codec_info
 
 logger = logging.getLogger('sentinel_wayback')
 CDX_URL = 'https://web.archive.org/cdx/search/cdx'
+TIMEMAP_CDX_URL = 'https://web.archive.org/web/timemap/cdx'
 REPLAY_ROOT = 'https://web.archive.org/web/'
 MEDIA_TEMPLATE = (
     'https://web.archive.org/web/2oe_/'
@@ -25,6 +28,28 @@ USER_AGENT = 'VaultTube-Sentinel/1.0 (+https://github.com/dyslexicjedi/VaultTube
 MAX_MEDIA_BYTES = int(os.environ.get(
     'VAULTTUBE_WAYBACK_MAX_BYTES', str(20 * 1024 * 1024 * 1024),
 ))
+SEARCH_TIMEOUT = (
+    float(os.environ.get('VAULTTUBE_WAYBACK_CONNECT_TIMEOUT', '10')),
+    float(os.environ.get('VAULTTUBE_WAYBACK_READ_TIMEOUT', '90')),
+)
+MEDIA_TIMEOUT = (
+    SEARCH_TIMEOUT[0],
+    float(os.environ.get('VAULTTUBE_WAYBACK_MEDIA_TIMEOUT', '300')),
+)
+
+
+def _session(session=None):
+    if session is not None:
+        session.headers.update({'User-Agent': USER_AGENT})
+        return session
+    session = requests.Session()
+    retries = Retry(
+        total=1, connect=1, read=0, status=0, backoff_factor=1,
+        allowed_methods=frozenset(('GET',)),
+    )
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+    session.headers.update({'User-Agent': USER_AGENT})
+    return session
 
 
 def _meta(html_text, key):
@@ -52,54 +77,130 @@ def _extract_metadata(html_text):
     }
 
 
+def _primary_cdx(original, session):
+    response = session.get(CDX_URL, params={
+        'url': original, 'output': 'json',
+        'fl': 'timestamp,original,statuscode,mimetype',
+        'filter': ['statuscode:200', 'mimetype:text/html'],
+        'collapse': 'digest', 'limit': '50',
+    }, timeout=SEARCH_TIMEOUT)
+    response.raise_for_status()
+    rows = response.json()
+    if not rows:
+        return []
+    headings = rows[0]
+    return [dict(zip(headings, row)) for row in rows[1:]]
+
+
+def _timemap_cdx(original, session):
+    response = session.get(TIMEMAP_CDX_URL, params={
+        'url': original,
+        'fl': 'timestamp,original,statuscode,mimetype',
+        'filter': ['statuscode:200', 'mimetype:text/html'],
+        'collapse': 'digest', 'limit': '50',
+    }, timeout=SEARCH_TIMEOUT)
+    response.raise_for_status()
+    captures = []
+    for line in response.text.splitlines():
+        fields = line.split(None, 3)
+        if len(fields) == 4:
+            captures.append(dict(zip(
+                ('timestamp', 'original', 'statuscode', 'mimetype'), fields,
+            )))
+    return captures
+
+
+def _capture_index(original, video_id, scheme, session):
+    try:
+        return _primary_cdx(original, session), None
+    except (requests.RequestException, ValueError) as primary_exc:
+        primary_error = str(primary_exc)
+        logger.warning(
+            'Wayback legacy CDX lookup failed for %s/%s; trying Timemap: %s',
+            video_id, scheme, primary_error,
+        )
+    try:
+        captures = _timemap_cdx(original, session)
+        logger.info(
+            'Wayback Timemap fallback succeeded for %s/%s with %d captures',
+            video_id, scheme, len(captures),
+        )
+        return captures, None
+    except (requests.RequestException, ValueError) as fallback_exc:
+        logger.warning(
+            'Wayback Timemap lookup also failed for %s/%s: %s',
+            video_id, scheme, fallback_exc,
+        )
+        return [], '%s URL index: legacy CDX failed (%s); Timemap failed (%s)' % (
+            scheme.upper(), primary_error, fallback_exc,
+        )
+
+
 def _captures(video_id, session):
     captures = []
+    successful_queries = 0
+    errors = []
     for scheme in ('https', 'http'):
         original = '%s://www.youtube.com/watch?v=%s' % (scheme, video_id)
-        response = session.get(CDX_URL, params={
-            'url': original, 'output': 'json',
-            'fl': 'timestamp,original,statuscode,mimetype',
-            'filter': ['statuscode:200', 'mimetype:text/html'],
-            'collapse': 'digest', 'limit': '50',
-        }, timeout=30)
-        response.raise_for_status()
-        rows = response.json()
-        if rows:
-            captures.extend(dict(zip(rows[0], row)) for row in rows[1:])
+        rows, error = _capture_index(original, video_id, scheme, session)
+        if error is None:
+            successful_queries += 1
+            captures.extend(rows)
+        else:
+            errors.append(error)
     # Earliest captures are most likely to predate a deletion/private-state
     # page; later captures often contain only YouTube's generic error metadata.
-    return sorted(captures, key=lambda item: item['timestamp'])
+    return (
+        sorted(captures, key=lambda item: item['timestamp']),
+        successful_queries,
+        errors,
+    )
 
 
 def search_wayback(channel_id, video_id, session=None):
     _candidate(channel_id, video_id)
-    session = session or requests.Session()
-    session.headers.update({'User-Agent': USER_AGENT})
-    captures = _captures(video_id, session)
+    session = _session(session)
+    captures, index_successes, warnings = _captures(video_id, session)
     best = None
+    replay_successes = 0
     for capture in captures:
         replay = REPLAY_ROOT + capture['timestamp'] + 'id_/' + capture['original']
         try:
-            response = session.get(replay, timeout=30)
+            response = session.get(replay, timeout=SEARCH_TIMEOUT)
             response.raise_for_status()
+            replay_successes += 1
             metadata = _extract_metadata(response.text)
             if any(metadata.values()):
                 best = {'capture_url': replay, 'capture_timestamp': capture['timestamp'], 'metadata': metadata}
                 break
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            warnings.append('Capture replay: %s' % exc)
             continue
 
     media_url = MEDIA_TEMPLATE.format(video_id=video_id)
     media_found = False
     try:
-        probe = session.get(media_url, headers={'Range': 'bytes=0-0'}, stream=True, timeout=30)
+        probe = session.get(
+            media_url, headers={'Range': 'bytes=0-0'}, stream=True,
+            timeout=SEARCH_TIMEOUT,
+        )
         content_type = (probe.headers.get('Content-Type') or '').lower()
         media_found = probe.status_code in (200, 206) and (
             content_type.startswith('video/') or content_type == 'application/octet-stream'
         )
         probe.close()
-    except requests.RequestException:
-        pass
+    except requests.RequestException as exc:
+        warnings.append('Media probe: %s' % exc)
+
+    if not best and not media_found:
+        no_usable_index = index_successes == 0
+        all_replays_failed = bool(captures) and replay_successes == 0
+        media_failed = any(item.startswith('Media probe:') for item in warnings)
+        if no_usable_index or all_replays_failed or media_failed:
+            raise RuntimeError(
+                'Wayback did not complete the lookup after retries. Please try again. '
+                + (warnings[-1] if warnings else '')
+            )
 
     status = 'media' if media_found else 'metadata' if best else 'not_found'
     result = {
@@ -108,6 +209,8 @@ def search_wayback(channel_id, video_id, session=None):
         'capture_timestamp': best['capture_timestamp'] if best else None,
         'media_url': media_url if media_found else None,
         'metadata': best['metadata'] if best else {},
+        'partial': bool(warnings),
+        'warnings': warnings,
     }
     con = get_connection(logger)
     try:
@@ -153,8 +256,7 @@ def import_wayback(channel_id, video_id, include_media=True, session=None):
     item = _candidate(channel_id, video_id)
     if item['status'] not in ('metadata', 'media'):
         raise ValueError('Search Wayback successfully before importing')
-    session = session or requests.Session()
-    session.headers.update({'User-Agent': USER_AGENT})
+    session = _session(session)
     metadata = item['metadata']
     thumbnail = None
     if metadata.get('thumbnail_url'):
@@ -165,7 +267,7 @@ def import_wayback(channel_id, video_id, include_media=True, session=None):
             )
         for thumbnail_url in thumbnail_urls:
             try:
-                response = session.get(thumbnail_url, timeout=30)
+                response = session.get(thumbnail_url, timeout=SEARCH_TIMEOUT)
                 if response.ok and (response.headers.get('Content-Type') or '').startswith('image/'):
                     thumbnail = response.content
                     break
@@ -179,7 +281,7 @@ def import_wayback(channel_id, video_id, include_media=True, session=None):
         final_path = os.path.join(channel_dir, video_id + '.mp4')
         if os.path.exists(final_path):
             raise ValueError('A vault file already exists for this video ID')
-        response = session.get(item['media_url'], stream=True, timeout=(30, 120))
+        response = session.get(item['media_url'], stream=True, timeout=MEDIA_TIMEOUT)
         response.raise_for_status()
         size = int(response.headers.get('Content-Length') or 0)
         if size > MAX_MEDIA_BYTES:

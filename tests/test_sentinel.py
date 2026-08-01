@@ -595,6 +595,59 @@ def test_wayback_search_detects_page_metadata_and_media(client):
     con.close()
 
 
+def test_wayback_search_falls_back_to_timemap_after_cdx_timeout(client):
+    import requests
+    from sentinel_wayback import search_wayback
+
+    class OneTimeoutSession(_WaybackSession):
+        def __init__(self):
+            super().__init__()
+            self.timemap_requested = False
+
+        def get(self, url, params=None, **kwargs):
+            if url.endswith('/cdx/search/cdx') and params['url'].startswith('https:'):
+                raise requests.ReadTimeout('temporary index timeout')
+            if url.endswith('/web/timemap/cdx'):
+                self.timemap_requested = True
+                return _WaybackResponse(text=(
+                    '20180102030405 %s 200 text/html\n' % params['url']
+                ))
+            return super().get(url, params=params, **kwargs)
+
+    _insert_archaeology_candidate('UCWaybackTimeout', 'Wayback0005')
+    session = OneTimeoutSession()
+    result = search_wayback(
+        'UCWaybackTimeout', 'Wayback0005', session=session,
+    )
+    assert result['status'] == 'media'
+    assert result['metadata']['title'] == 'Recovered title'
+    assert result['partial'] is False
+    assert result['warnings'] == []
+    assert session.timemap_requested is True
+
+
+def test_wayback_search_falls_back_to_timemap_after_cdx_504(client):
+    from sentinel_wayback import search_wayback
+
+    class GatewayTimeoutSession(_WaybackSession):
+        def get(self, url, params=None, **kwargs):
+            if url.endswith('/cdx/search/cdx') and params['url'].startswith('https:'):
+                return _WaybackResponse(status=504, text='Gateway Time-out')
+            if url.endswith('/web/timemap/cdx'):
+                return _WaybackResponse(text=(
+                    '20180102030405 %s 200 text/html\n' % params['url']
+                ))
+            return super().get(url, params=params, **kwargs)
+
+    _insert_archaeology_candidate('UCWayback504', 'Wayback0006')
+    result = search_wayback(
+        'UCWayback504', 'Wayback0006', session=GatewayTimeoutSession(),
+    )
+    assert result['status'] == 'media'
+    assert result['capture_timestamp'] == '20180102030405'
+    assert result['partial'] is False
+
+
 def test_wayback_import_recovers_validated_video_and_thumbnail(client, monkeypatch):
     import os
     import sentinel_wayback

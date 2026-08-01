@@ -239,6 +239,7 @@
                 var metadata = data.metadata || {};
                 var action = data.status === 'media' ? 'Import video + metadata' : 'Import metadata';
                 result.innerHTML = '<span>' + esc(metadata.title || (data.status === 'media' ? 'Archived video found' : 'Archived page found')) + '</span>'
+                    + (data.partial ? '<small>Partial result; one Wayback request timed out but usable evidence was found.</small>' : '')
                     + (data.capture_url ? '<a href="' + esc(data.capture_url) + '" target="_blank" rel="noopener noreferrer">View snapshot</a>' : '')
                     + '<button type="button" class="vt-btn" data-wayback-import="' + esc(videoId) + '" data-include-media="' + (data.status === 'media' ? '1' : '0') + '">' + action + '</button>';
                 result.querySelector('[data-wayback-import]').addEventListener('click', function (importButton) {
