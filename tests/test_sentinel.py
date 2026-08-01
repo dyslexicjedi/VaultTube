@@ -91,6 +91,16 @@ def test_sentinel_source_risk_table_exists():
     con.close()
 
 
+def test_sentinel_rescue_preview_tables_exist():
+    con = _db_connect()
+    cur = con.cursor()
+    for table in ('sentinel_rescue_previews', 'sentinel_rescue_preview_items'):
+        cur.execute("SHOW TABLES LIKE %s", (table,))
+        assert cur.fetchone() is not None
+    cur.close()
+    con.close()
+
+
 def test_two_independent_negative_checks_confirm_once():
     from sentinel import start_scan_run, finish_scan_run, record_video_observation
 
@@ -383,9 +393,14 @@ def test_json_export_includes_sentinel_ledger(client):
 
 
 def _inventory_page(video_ids, complete=True, token=None, pages=1,
-                    items_seen=None, requested=None):
+                    items_seen=None, requested=None, published=None):
+    published = published or {}
     return {
         'video_ids': video_ids,
+        'items': [
+            {'video_id': video_id, 'published_at': published.get(video_id)}
+            for video_id in video_ids
+        ],
         'requested_page_token': requested,
         'next_page_token': token,
         'complete': complete,
@@ -1034,3 +1049,294 @@ def test_channel_presence_requires_a_successful_provider_response(monkeypatch):
     assert budget.used == 3
     assert all(call[0].endswith('/channels') for call in calls)
     assert calls[0][1]['params']['part'] == 'id'
+
+
+def test_inventory_pager_exposes_remote_publication_time(monkeypatch):
+    import requests
+    from providers.youtube import iter_playlist_pages
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {
+                'items': [{
+                    'contentDetails': {
+                        'videoId': 'PublishedRemote',
+                        'videoPublishedAt': '2025-04-05T06:07:08Z',
+                    },
+                }],
+            }
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(requests, 'get', lambda *args, **kwargs: Response())
+    page = next(iter_playlist_pages(
+        'UUPublishedRemote', include_page_info=True,
+    ))
+    assert page['video_ids'] == ['PublishedRemote']
+    assert page['items'] == [{
+        'video_id': 'PublishedRemote',
+        'published_at': '2025-04-05T06:07:08Z',
+    }]
+
+
+def _set_video_estimator_sample(video_id, length='0:10:00', filesize=600000):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "UPDATE videos SET `length`=%s, filesize=%s WHERE id=%s",
+        (length, filesize, video_id),
+    )
+    cur.close()
+    con.close()
+
+
+def _build_preview_fixture(monkeypatch, source_id='UCRescuePreviewCreator'):
+    import sentinel_inventory
+
+    _insert_channel(source_id, 'Preview Films')
+    for index in range(3):
+        sample_id = 'PreviewSample%d' % index
+        _insert_video(sample_id, channel_id=source_id)
+        _set_video_estimator_sample(sample_id)
+    _insert_video('PreviewArchived', channel_id=source_id)
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("INSERT INTO IgnoreVid(id) VALUES('PreviewIgnored')")
+    cur.execute(
+        "INSERT INTO sentinel_video_state "
+        "(video_id, provider, state, consecutive_negative_checks) "
+        "VALUES('PreviewUnavailable','youtube','unavailable',2)"
+    )
+    cur.execute(
+        "INSERT INTO queue(url,source,channel_id,status) "
+        "VALUES('https://youtu.be/PreviewQueued','youtube',%s,'pending')",
+        (source_id,),
+    )
+    cur.close()
+    con.close()
+
+    ids = [
+        'PreviewNewest', 'PreviewMiddle', 'PreviewOldest',
+        'PreviewArchived', 'PreviewIgnored', 'PreviewUnavailable',
+        'PreviewQueued',
+    ]
+    published = {
+        'PreviewNewest': '2025-03-01T12:00:00Z',
+        'PreviewMiddle': '2025-02-01T12:00:00Z',
+        'PreviewOldest': '2025-01-01T12:00:00Z',
+    }
+    monkeypatch.setattr(
+        sentinel_inventory, 'iter_playlist_pages',
+        lambda *args, **kwargs: iter([
+            _inventory_page(ids, published=published),
+        ]),
+    )
+    sentinel_inventory.census_source(
+        'channel', source_id, 'UURescuePreviewCreator',
+    )
+    return source_id
+
+
+def test_rescue_preview_exclusions_limits_persistence_and_no_enqueue(
+        client, monkeypatch):
+    source_id = _build_preview_fixture(monkeypatch)
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT id, url, status FROM queue ORDER BY id")
+    queue_before = cur.fetchall()
+    cur.close()
+    con.close()
+
+    response = client.post(
+        '/api/sentinel/source/channel/%s/rescue-preview' % source_id,
+        json={'max_videos': 2, 'order': 'oldest'},
+    )
+    assert response.status_code == 200
+    preview = response.get_json()['data']
+    assert preview['observation_only'] is True
+    assert preview['enqueued_count'] == 0
+    assert preview['inventory_count'] == 7
+    assert preview['eligible_count'] == 3
+    assert preview['selected_count'] == 2
+    assert preview['limited_count'] == 1
+    assert preview['excluded'] == {
+        'archived': 1, 'ignored': 1, 'queued': 1, 'unavailable': 1,
+    }
+    assert [item['id'] for item in preview['items']] == [
+        'PreviewOldest', 'PreviewMiddle',
+    ]
+    assert preview['date_range'] == {
+        'known_for_selected': 2,
+        'newest': '2025-02-01T12:00:00',
+        'oldest': '2025-01-01T12:00:00',
+    }
+    assert preview['estimate']['sample_scope'] == 'source_archive'
+    assert preview['estimate']['sample_count'] == 3
+    assert preview['estimated_bytes_low'] > 0
+    assert preview['estimated_bytes_high'] >= preview['estimated_bytes_low']
+
+    saved = client.get(
+        '/api/sentinel/rescue-previews/' + preview['id']
+    ).get_json()['data']
+    assert saved == preview
+
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT id, url, status FROM queue ORDER BY id")
+    assert cur.fetchall() == queue_before
+    cur.execute(
+        "SELECT COUNT(*) FROM sentinel_rescue_preview_items "
+        "WHERE preview_id=%s",
+        (preview['id'],),
+    )
+    assert cur.fetchone()[0] == 2
+    cur.close()
+    con.close()
+
+
+def test_rescue_preview_is_deterministic_and_honors_byte_cap(
+        client, monkeypatch):
+    source_id = _build_preview_fixture(monkeypatch)
+    path = '/api/sentinel/source/channel/%s/rescue-preview' % source_id
+    first = client.post(
+        path, json={'max_videos': 3, 'max_bytes': 1000000, 'order': 'newest'},
+    ).get_json()['data']
+    second = client.post(
+        path, json={'max_videos': 3, 'max_bytes': 1000000, 'order': 'newest'},
+    ).get_json()['data']
+    assert first['id'] != second['id']
+    assert first['selected_count'] == 1
+    assert first['estimated_bytes_high'] <= 1000000
+    comparable = [
+        'eligible_count', 'selected_count', 'excluded', 'estimated_bytes_low',
+        'estimated_bytes_high', 'limits', 'date_range', 'items',
+    ]
+    for key in comparable:
+        assert first[key] == second[key]
+
+
+def test_rescue_preview_blocks_unavailable_source(client, monkeypatch):
+    source_id = _build_preview_fixture(monkeypatch)
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "UPDATE sentinel_sources SET availability_state='unavailable' "
+        "WHERE source_type='channel' AND source_id=%s",
+        (source_id,),
+    )
+    cur.close()
+    con.close()
+
+    preview = client.post(
+        '/api/sentinel/source/channel/%s/rescue-preview' % source_id,
+        json={'max_videos': 10},
+    ).get_json()['data']
+    assert preview['blocked_reason'] == 'source_unavailable'
+    assert preview['eligible_count'] == 3
+    assert preview['selected_count'] == 0
+    assert preview['items'] == []
+
+
+def test_rescue_preview_requires_complete_inventory_and_valid_limits(client):
+    _insert_channel('UCNoPreviewInventory', 'No Inventory Films')
+    missing = client.post(
+        '/api/sentinel/source/channel/UCNoPreviewInventory/rescue-preview',
+        json={},
+    )
+    assert missing.status_code == 409
+    invalid = client.post(
+        '/api/sentinel/source/channel/UCNoPreviewInventory/rescue-preview',
+        json={'max_videos': 0},
+    )
+    assert invalid.status_code == 400
+
+
+def test_manual_census_api_and_service_never_enqueue(client, monkeypatch):
+    import sentinel_api
+    import sentinel_inventory
+
+    monkeypatch.setattr(
+        sentinel_api, 'manual_census',
+        lambda source_type, source_id: {
+            'status': 'complete', 'run_id': 42,
+            'source_type': source_type, 'source_id': source_id,
+            'requests_made': 3,
+        },
+    )
+    response = client.post(
+        '/api/sentinel/source/channel/UCManualPreview/scan'
+    )
+    assert response.status_code == 200
+    assert response.get_json()['data']['run_id'] == 42
+
+    _insert_channel('UCManualService', 'Manual Service Films')
+    monkeypatch.setattr(
+        sentinel_inventory, 'check_channel_presence',
+        lambda source_id, budget: (budget.consume() or True),
+    )
+    monkeypatch.setattr(
+        sentinel_inventory, 'census_source',
+        lambda source_type, source_id, collection_id, budget: {
+            'status': 'complete', 'run_id': 77,
+        },
+    )
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT COUNT(*) FROM queue")
+    before = cur.fetchone()[0]
+    cur.close()
+    con.close()
+    result = sentinel_inventory.manual_census(
+        'channel', 'UCManualService',
+    )
+    assert result['run_id'] == 77
+    assert result['requests_made'] == 1
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT COUNT(*) FROM queue")
+    assert cur.fetchone()[0] == before
+    cur.close()
+    con.close()
+
+
+def test_manual_census_first_negative_is_only_suspected(monkeypatch):
+    import sentinel_inventory
+
+    source_id = 'UCManualMissing'
+    _insert_channel(source_id, 'Possibly Missing Films')
+    monkeypatch.setattr(
+        sentinel_inventory, 'check_channel_presence',
+        lambda source_id, budget: (budget.consume() or False),
+    )
+    monkeypatch.setattr(
+        sentinel_inventory, 'census_source',
+        lambda *args, **kwargs: pytest.fail(
+            'an unavailable source must not start an inventory census'
+        ),
+    )
+
+    result = sentinel_inventory.manual_census('channel', source_id)
+
+    assert result['status'] == 'suspected_unavailable'
+    assert result['requests_made'] == 1
+
+
+def test_json_export_includes_saved_rescue_preview(client, monkeypatch):
+    source_id = _build_preview_fixture(monkeypatch)
+    preview = client.post(
+        '/api/sentinel/source/channel/%s/rescue-preview' % source_id,
+        json={'max_videos': 1},
+    ).get_json()['data']
+    payload = json.loads(
+        client.get('/api/export?format=json').get_data(as_text=True)
+    )
+    assert payload['meta']['counts']['sentinel_rescue_previews'] == 1
+    assert payload['meta']['counts']['sentinel_rescue_preview_items'] == 1
+    assert payload['sentinel']['rescue_previews'][0]['id'] == preview['id']
+    assert payload['sentinel']['rescue_preview_items'][0]['entity_id'] == \
+        preview['items'][0]['id']

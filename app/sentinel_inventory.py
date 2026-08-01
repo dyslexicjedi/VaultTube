@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+import datetime
 
 from database import get_active_playlist_subs, get_active_subscriptions
 from database import get_connection
@@ -18,6 +19,7 @@ from providers.youtube import (
 )
 from sentinel import finish_scan_run, start_scan_run
 from sentinel_risk import (
+    get_source_risk,
     recalculate_all_source_risks,
     recalculate_source_risk,
     record_source_observation,
@@ -28,6 +30,7 @@ logger = logging.getLogger('sentinel_inventory')
 DEFAULT_CENSUS_INTERVAL = 7 * 24 * 60 * 60
 DEFAULT_CENSUS_BUDGET = 500
 DEFAULT_CENSUS_MAX_PAGES = 2000
+DEFAULT_MANUAL_CENSUS_BUDGET = 2000
 
 
 def _json_list(value):
@@ -38,6 +41,15 @@ def _json_list(value):
         return parsed if isinstance(parsed, list) else []
     except (TypeError, ValueError):
         return []
+
+
+def _remote_time(value):
+    if not value:
+        return None
+    try:
+        return datetime.datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ')
+    except (TypeError, ValueError):
+        return None
 
 
 def inventory_due(source_type, source_id, interval_seconds=None):
@@ -115,12 +127,21 @@ def _save_page(run_id, source_type, source_id, page):
         if requested is not None and requested not in history:
             history.append(requested)
         start_position = max(0, int(page['items_seen']) - len(page['video_ids']))
+        published = {
+            item.get('video_id'): _remote_time(item.get('published_at'))
+            for item in page.get('items', [])
+            if isinstance(item, dict) and item.get('video_id')
+        }
         for index, video_id in enumerate(page['video_ids']):
             cur.execute(
                 "INSERT IGNORE INTO sentinel_inventory "
-                "(scan_run_id, provider, source_type, source_id, entity_id, position) "
-                "VALUES(%s, 'youtube', %s, %s, %s, %s)",
-                (run_id, source_type, source_id, video_id, start_position + index),
+                "(scan_run_id, provider, source_type, source_id, entity_id, "
+                "position, remote_published_at) "
+                "VALUES(%s, 'youtube', %s, %s, %s, %s, %s)",
+                (
+                    run_id, source_type, source_id, video_id,
+                    start_position + index, published.get(video_id),
+                ),
             )
         cur.execute(
             "UPDATE sentinel_inventory_runs SET continuation_token=%s, "
@@ -303,6 +324,44 @@ def census_source(source_type, source_id, collection_id, request_budget=None):
         finally:
             con.close()
         raise
+
+
+def manual_census(source_type, source_id):
+    """Run an explicitly requested census without touching the download queue."""
+    if source_type != 'channel' or not source_id.startswith('UC'):
+        raise ValueError('Manual census currently supports YouTube channels')
+    budget = YouTubeRequestBudget(_env_int(
+        'VAULTTUBE_SENTINEL_MANUAL_CENSUS_BUDGET',
+        DEFAULT_MANUAL_CENSUS_BUDGET,
+    ))
+    scan_id = start_scan_run(
+        scan_type='source_presence', source_type=source_type,
+        source_id=source_id,
+    )
+    try:
+        present = check_channel_presence(source_id, budget)
+    except Exception as exc:
+        finish_scan_run(scan_id, 'failed', 0, budget.used, str(exc))
+        raise
+    finish_scan_run(scan_id, 'complete', 1, budget.used)
+    record_source_observation(
+        source_type, source_id, present, scan_id,
+        {'method': 'youtube.channels.list', 'trigger': 'manual'},
+    )
+    if not present:
+        source = get_source_risk(source_type, source_id)
+        return {
+            'status': source['availability_state'], 'source_type': source_type,
+            'source_id': source_id, 'requests_made': budget.used,
+        }
+    result = census_source(
+        source_type, source_id, 'UU' + source_id[2:], budget,
+    )
+    result.update({
+        'source_type': source_type, 'source_id': source_id,
+        'requests_made': budget.used,
+    })
+    return result
 
 
 def census_once(app, request_budget=None, interval_seconds=None):

@@ -2,6 +2,7 @@
     var eventOffset = 0;
     var eventLimit = 30;
     var sourceButtons = {};
+    var selectedSource = null;
 
     function $id(id) { return document.getElementById(id); }
     function esc(value) {
@@ -23,6 +24,13 @@
         var opts = { month: 'short', day: 'numeric', year: 'numeric' };
         if (includeTime) { opts.hour = 'numeric'; opts.minute = '2-digit'; }
         return date.toLocaleString(undefined, opts);
+    }
+    function fmtBytes(value) {
+        var bytes = Number(value || 0);
+        if (!bytes) return '0 B';
+        var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        var unit = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+        return (bytes / Math.pow(1024, unit)).toFixed(unit > 2 ? 1 : 0) + ' ' + units[unit];
     }
     function statusLabel(status) {
         if (status === 'attention') return 'Needs attention';
@@ -123,6 +131,7 @@
     }
 
     function renderDetail(data) {
+        selectedSource = data.channel_id;
         var available = Math.max(0, data.video_count - data.unavailable - data.suspected);
         var pct = data.video_count ? Math.round((available / data.video_count) * 100) : 0;
         $id('sentinel-detail-name').textContent = data.channel_name;
@@ -133,6 +142,7 @@
         var link = $id('sentinel-detail-link');
         link.href = '/creator.html?creator=' + encodeURIComponent(data.channel_id);
         link.hidden = false;
+        $id('sentinel-scan-now').hidden = false;
         var affected = data.affected_videos.length
             ? '<div class="vt-sentinel-affected-list">' + data.affected_videos.map(affectedVideo).join('') + '</div>'
             : '<div class="vt-empty vt-sentinel-detail-empty">No archived videos currently need attention.</div>';
@@ -170,7 +180,67 @@
             + '<div><strong>' + data.unavailable + '</strong><span>Unavailable</span></div>'
             + '<div><strong>' + data.suspected + '</strong><span>Suspected</span></div>'
             + '<div><strong>' + data.event_count + '</strong><span>Events</span></div>'
-            + '</div>' + affected + '</div>';
+            + '</div>' + affected + '</div>'
+            + '<section class="vt-rescue-preview">'
+            + '<div><strong>Rescue preview</strong><span>Planning only · creates no downloads</span></div>'
+            + '<div class="vt-rescue-controls">'
+            + '<label><span>Maximum videos</span><input class="vt-input" id="rescue-max-videos" type="number" min="1" max="1000" value="100"></label>'
+            + '<label><span>Storage cap (GB)</span><input class="vt-input" id="rescue-max-gb" type="number" min="0" step="0.1" placeholder="No cap"></label>'
+            + '<label><span>Order</span><select class="vt-select" id="rescue-order"><option value="oldest">Oldest first</option><option value="newest">Newest first</option><option value="inventory">Inventory order</option></select></label>'
+            + '<button type="button" class="vt-btn" id="rescue-preview-button">Build preview</button>'
+            + '</div><div id="rescue-preview-result"></div></section>';
+        $id('rescue-preview-button').addEventListener('click', buildPreview);
+    }
+
+    function previewItem(item) {
+        return '<a href="' + esc(item.url) + '" target="_blank" rel="noopener noreferrer">'
+            + '<span><strong>' + item.rank + '. ' + esc(item.id) + '</strong><small>' + esc(fmtDate(item.remote_published_at, false)) + '</small></span>'
+            + '<span>' + esc(fmtBytes(item.estimated_bytes_low)) + '–' + esc(fmtBytes(item.estimated_bytes_high)) + '</span></a>';
+    }
+
+    function renderPreview(data) {
+        var target = $id('rescue-preview-result');
+        if (!target) return;
+        if (data.blocked_reason) {
+            target.innerHTML = '<div class="vt-sentinel-census-note">Preview blocked: ' + esc(data.blocked_reason.replace(/_/g, ' ')) + '. Refresh the source evidence before planning.</div>';
+            return;
+        }
+        target.innerHTML = '<div class="vt-rescue-summary">'
+            + '<div><strong>' + data.selected_count + '</strong><span>Selected</span></div>'
+            + '<div><strong>' + data.eligible_count + '</strong><span>Eligible</span></div>'
+            + '<div><strong>' + fmtBytes(data.estimated_bytes_low) + '–' + fmtBytes(data.estimated_bytes_high) + '</strong><span>Estimated storage</span></div>'
+            + '</div><p class="vt-rescue-confidence">' + esc(data.estimate.confidence) + ' confidence from ' + data.estimate.sample_count + ' archived duration/bitrate samples. '
+            + data.excluded.archived + ' archived · ' + data.excluded.ignored + ' ignored · ' + data.excluded.unavailable + ' unavailable · ' + data.excluded.queued + ' already queued. No downloads were created.</p>'
+            + '<div class="vt-rescue-items">' + data.items.slice(0, 20).map(previewItem).join('') + '</div>'
+            + (data.items.length > 20 ? '<div class="vt-rescue-more">+' + (data.items.length - 20) + ' more in saved preview ' + esc(data.id) + '</div>' : '');
+    }
+
+    function buildPreview() {
+        if (!selectedSource) return;
+        var button = $id('rescue-preview-button');
+        var result = $id('rescue-preview-result');
+        var maxGb = parseFloat($id('rescue-max-gb').value);
+        var body = {
+            max_videos: parseInt($id('rescue-max-videos').value, 10),
+            order: $id('rescue-order').value
+        };
+        if (maxGb > 0) body.max_bytes = Math.floor(maxGb * 1024 * 1024 * 1024);
+        button.disabled = true;
+        button.textContent = 'Building…';
+        result.innerHTML = '';
+        fetch('/api/sentinel/source/channel/' + encodeURIComponent(selectedSource) + '/rescue-preview', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        }).then(function (response) {
+            return response.json().then(function (payload) {
+                if (!response.ok || !payload.success) throw new Error(payload.error || 'Preview failed');
+                return payload.data;
+            });
+        }).then(renderPreview).catch(function (error) {
+            result.innerHTML = '<div class="vt-sentinel-census-note">' + esc(error.message) + '</div>';
+        }).finally(function () {
+            button.disabled = false;
+            button.textContent = 'Build preview';
+        });
     }
 
     function selectSource(channelId, filterActivity) {
@@ -247,6 +317,20 @@
     });
     $id('sentinel-event-filter').addEventListener('change', function () { loadEvents(true); });
     $id('sentinel-load-more').addEventListener('click', function () { loadEvents(false); });
+    $id('sentinel-scan-now').addEventListener('click', function () {
+        if (!selectedSource) return;
+        var button = this;
+        button.disabled = true;
+        button.textContent = 'Scanning…';
+        fetch('/api/sentinel/source/channel/' + encodeURIComponent(selectedSource) + '/scan', { method: 'POST' })
+            .then(function (response) { return response.json().then(function (body) {
+                if (!response.ok || !body.success) throw new Error(body.error || 'Census failed');
+                return body.data;
+            }); })
+            .then(function () { selectSource(selectedSource, true); })
+            .catch(function (error) { window.alert(error.message); })
+            .finally(function () { button.disabled = false; button.textContent = 'Refresh census'; });
+    });
     $id('sentinel-all-activity').addEventListener('click', function () {
         $id('sentinel-channel-filter').value = '';
         Object.keys(sourceButtons).forEach(function (id) { sourceButtons[id].classList.remove('selected'); });

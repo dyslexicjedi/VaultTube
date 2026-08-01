@@ -74,6 +74,7 @@ Optional:
 | `VAULTTUBE_SENTINEL_CENSUS_INTERVAL` | Seconds between complete remote inventory censuses (default 604800 / 7 days) |
 | `VAULTTUBE_SENTINEL_CENSUS_BUDGET` | YouTube API requests reserved for each Sentinel census pass (default 500) |
 | `VAULTTUBE_SENTINEL_CENSUS_MAX_PAGES` | Safety cap per remote inventory snapshot (default 2000 pages) |
+| `VAULTTUBE_SENTINEL_MANUAL_CENSUS_BUDGET` | YouTube API request cap for an explicitly requested Sentinel census (default 2000) |
 
 ## Contributing / Architecture
 

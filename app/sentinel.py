@@ -713,13 +713,15 @@ def export_sentinel_data():
         ]
         cur.execute(
             "SELECT scan_run_id, provider, source_type, source_id, entity_id, "
-            "position, observed_at FROM sentinel_inventory ORDER BY scan_run_id, position"
+            "position, remote_published_at, observed_at FROM sentinel_inventory "
+            "ORDER BY scan_run_id, position"
         )
         inventory = [
             {
                 'scan_run_id': int(r[0]), 'provider': r[1],
                 'source_type': r[2], 'source_id': r[3], 'entity_id': r[4],
-                'position': r[5], 'observed_at': _iso(r[6]),
+                'position': r[5], 'remote_published_at': _iso(r[6]),
+                'observed_at': _iso(r[7]),
             }
             for r in cur.fetchall()
         ]
@@ -745,11 +747,43 @@ def export_sentinel_data():
             }
             for r in cur.fetchall()
         ]
+        cur.execute(
+            "SELECT id, provider, source_type, source_id, inventory_run_id, "
+            "request_json, summary_json, created_at "
+            "FROM sentinel_rescue_previews ORDER BY created_at, id"
+        )
+        rescue_previews = [
+            {
+                'id': r[0], 'provider': r[1], 'source_type': r[2],
+                'source_id': r[3], 'inventory_run_id': int(r[4]),
+                'request': json.loads(r[5]), 'summary': json.loads(r[6]),
+                'created_at': _iso(r[7]),
+            }
+            for r in cur.fetchall()
+        ]
+        cur.execute(
+            "SELECT preview_id, entity_id, rank_order, remote_published_at, "
+            "estimated_duration_seconds, estimated_bytes_low, "
+            "estimated_bytes_high, estimate_basis "
+            "FROM sentinel_rescue_preview_items ORDER BY preview_id, rank_order"
+        )
+        rescue_preview_items = [
+            {
+                'preview_id': r[0], 'entity_id': r[1], 'rank': int(r[2]),
+                'remote_published_at': _iso(r[3]),
+                'estimated_duration_seconds': r[4],
+                'estimated_bytes_low': int(r[5]),
+                'estimated_bytes_high': int(r[6]), 'estimate_basis': r[7],
+            }
+            for r in cur.fetchall()
+        ]
         cur.close()
         return {
             'scan_runs': scans, 'video_states': states, 'events': events,
             'inventory_runs': inventory_runs, 'inventory': inventory,
             'sources': sources,
+            'rescue_previews': rescue_previews,
+            'rescue_preview_items': rescue_preview_items,
         }
     finally:
         con.close()

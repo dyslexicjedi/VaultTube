@@ -19,8 +19,10 @@ bounded rescue plan.
 - Phase 4 complete: deterministic source scores, stored evidence and reasons,
   two-check source availability, risk-change history, and High/Critical alerts
   in observation-only mode.
-- Phase 5 next: deterministic rescue previews and storage estimates, with no
-  enqueueing.
+- Phase 5 complete: restart-safe rescue previews, deterministic exclusions and
+  limits, transparent storage ranges, exact inventory ordering/date ranges,
+  and manual census controls. Previewing never enqueues downloads.
+- Phase 6 next: persistent manual rescue sessions and priority-aware execution.
 
 ## Design principles
 
@@ -69,11 +71,13 @@ Existing `isDeleted=1` rows are imported as `unavailable` with an
 `imported_existing_state` event. The import timestamp records when Sentinel
 learned about the legacy state, not when the video originally disappeared.
 
-### Phases 3-4
+### Phases 3-5
 
 - `sentinel_inventory` stores the latest complete remote inventory, including
   known videos that are not locally archived.
 - `sentinel_sources` stores explainable source risk and its contributing facts.
+- `sentinel_rescue_previews` and `sentinel_rescue_preview_items` preserve the
+  exact Phase 5 plan and estimates so it can be reopened after restart.
 
 Source-level availability has its own two-check state machine. A successful
 `youtube.channels.list` response with no matching channel is a negative
@@ -126,6 +130,7 @@ GET  /api/sentinel/sources
 GET  /api/sentinel/source/<type>/<id>
 POST /api/sentinel/source/<type>/<id>/scan
 POST /api/sentinel/source/<type>/<id>/rescue-preview
+GET  /api/sentinel/rescue-previews/<id>
 POST /api/sentinel/rescues
 GET  /api/sentinel/rescues/<id>
 POST /api/sentinel/rescues/<id>/pause
@@ -209,6 +214,12 @@ produce stable expected scores without false mass-deletion events.
 
 Exit criterion: previews are deterministic, restart-safe, and exclude archived,
 ignored, unavailable, and already queued videos.
+
+Phase 5 stores immutable previews but never imports or calls the download queue.
+Count and high-end byte caps are applied before an item enters a preview. The
+storage range uses archived duration and bytes-per-second samples from the
+source when possible, then vault-wide samples, and finally conservative
+defaults; every preview records its sample scope, count, and confidence.
 
 ### Phase 6 - Manual Rescue Mode
 

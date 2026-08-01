@@ -383,6 +383,17 @@ def iter_playlist_pages(playlist_id, request_budget=None,
                 if isinstance(v, dict)
                 and v.get('contentDetails', {}).get('videoId')
             ]
+            inventory_items = [
+                {
+                    'video_id': item['contentDetails']['videoId'],
+                    'published_at': item['contentDetails'].get(
+                        'videoPublishedAt'
+                    ),
+                }
+                for item in raw_items
+                if isinstance(item, dict)
+                and item.get('contentDetails', {}).get('videoId')
+            ]
             items_seen += len(raw_items)
 
             page_info = retj.get('pageInfo', {})
@@ -401,6 +412,7 @@ def iter_playlist_pages(playlist_id, request_budget=None,
             if include_page_info:
                 yield {
                     'video_ids': video_ids,
+                    'items': inventory_items,
                     'requested_page_token': page_token,
                     'next_page_token': None if complete else next_token,
                     'complete': complete,

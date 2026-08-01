@@ -3,6 +3,8 @@ import logging
 from flask import Blueprint, jsonify, request
 
 from sentinel import get_events, get_source_detail, get_sources, get_summary
+from sentinel_inventory import manual_census
+from sentinel_rescue import create_rescue_preview, get_rescue_preview
 
 
 logger = logging.getLogger('sentinel_api')
@@ -74,4 +76,47 @@ def source(source_type, source_id):
         return _success(data)
     except Exception as e:
         logger.error('Sentinel source detail failed for %s: %s', source_id, e)
+        return _error(str(e), 500)
+
+
+@sentinel_bp.route(
+    '/source/<string:source_type>/<string:source_id>/scan', methods=['POST'],
+)
+def scan_source(source_type, source_id):
+    try:
+        return _success(manual_census(source_type, source_id))
+    except ValueError as e:
+        return _error(str(e), 400)
+    except Exception as e:
+        logger.error('Manual Sentinel census failed for %s: %s', source_id, e)
+        return _error(str(e), 502)
+
+
+@sentinel_bp.route(
+    '/source/<string:source_type>/<string:source_id>/rescue-preview',
+    methods=['POST'],
+)
+def rescue_preview(source_type, source_id):
+    try:
+        data = create_rescue_preview(
+            source_type, source_id, request.get_json(silent=True) or {},
+        )
+        return _success(data)
+    except ValueError as e:
+        status = 409 if 'complete inventory' in str(e).lower() else 400
+        return _error(str(e), status)
+    except Exception as e:
+        logger.error('Sentinel rescue preview failed for %s: %s', source_id, e)
+        return _error(str(e), 500)
+
+
+@sentinel_bp.route('/rescue-previews/<string:preview_id>')
+def saved_rescue_preview(preview_id):
+    try:
+        data = get_rescue_preview(preview_id)
+        if data is None:
+            return _error('Sentinel rescue preview not found', 404)
+        return _success(data)
+    except Exception as e:
+        logger.error('Sentinel rescue preview read failed for %s: %s', preview_id, e)
         return _error(str(e), 500)
