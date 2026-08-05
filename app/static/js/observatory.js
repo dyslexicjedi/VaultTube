@@ -188,7 +188,9 @@
                     ? '<div class="vt-sentinel-unarchived"><strong>Known remotely, not archived</strong><div>'
                         + inventory.unarchived_video_ids.map(function (id) {
                             return '<a href="https://www.youtube.com/watch?v=' + encodeURIComponent(id) + '" target="_blank" rel="noopener noreferrer">' + esc(id) + '</a>';
-                        }).join('') + '</div></div>'
+                        }).join('') + '</div>'
+                        + '<button type="button" class="vt-btn" id="queue-unarchived-button">Queue all ' + inventory.remote_unarchived + ' for download</button>'
+                        + '<div id="queue-unarchived-result"></div></div>'
                     : '')
             : '<div class="vt-sentinel-census-note">No complete remote census yet. Partial scans are intentionally excluded.</div>';
         var archaeology = data.archaeology;
@@ -221,11 +223,36 @@
             + '<button type="submit" class="vt-btn">Compare</button></form>'
             + '<p>Read-only comparison. This does not change Sentinel evidence, risk, downloads, or ignored videos.</p>'
             + '<div id="history-import-result"></div></details>';
+        var queueButton = $id('queue-unarchived-button');
+        if (queueButton) queueButton.addEventListener('click', function () { queueUnarchived(queueButton); });
         $id('rescue-preview-button').addEventListener('click', buildPreview);
         $id('history-import-form').addEventListener('submit', compareHistoricalImport);
         Array.prototype.forEach.call(document.querySelectorAll('[data-wayback-search]'), function (button) {
             button.addEventListener('click', function () { searchWayback(button); });
         });
+    }
+
+    function queueUnarchived(button) {
+        if (!selectedSource) return;
+        var result = $id('queue-unarchived-result');
+        button.disabled = true;
+        button.textContent = 'Queueing…';
+        postJson('/api/sentinel/source/channel/' + encodeURIComponent(selectedSource)
+            + '/queue-unarchived', {})
+            .then(function (data) {
+                button.textContent = 'Queued';
+                if (!result) return;
+                var notes = [];
+                if (data.already_queued) notes.push(data.already_queued + ' already queued');
+                if (data.skipped_ignored) notes.push(data.skipped_ignored + ' ignored');
+                if (data.skipped_unavailable) notes.push(data.skipped_unavailable + ' unavailable');
+                result.textContent = 'Queued ' + data.queued
+                    + (notes.length ? ' (' + notes.join(', ') + ')' : '');
+            }).catch(function (error) {
+                if (result) result.textContent = error.message;
+                button.textContent = 'Try again';
+                button.disabled = false;
+            });
     }
 
     function searchWayback(button) {

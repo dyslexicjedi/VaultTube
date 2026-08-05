@@ -9,6 +9,8 @@ import json
 import logging
 
 from database import get_connection
+from queue_utils import enqueue
+from QueueObject import QueueObject
 
 
 logger = logging.getLogger('sentinel')
@@ -685,6 +687,75 @@ def get_source_detail(channel_id, event_limit=20):
             ) if known_remote else 0,
             'unarchived_video_ids': remote_unarchived,
         },
+    }
+
+
+def queue_unarchived_videos(channel_id, download_queue):
+    """Enqueue every video the latest complete census saw remotely but that is
+    not archived locally. Queueing goes through queue_utils.enqueue so each
+    item gets a durable queue row and URLs already pending are skipped.
+
+    Ignored (tombstoned) videos and videos confirmed unavailable since the
+    census are skipped and counted, exactly as the rescue preview excludes
+    them: total_unarchived == queued + already_queued + the skipped counts."""
+    con = get_connection(logger)
+    if con is None:
+        raise RuntimeError(
+            'Unable to get database connection for Sentinel queueing'
+        )
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT r.id FROM sentinel_inventory_runs r "
+            "WHERE r.provider='youtube' AND r.source_type='channel' "
+            "AND r.source_id=%s AND r.status='complete' "
+            "ORDER BY r.id DESC LIMIT 1",
+            (channel_id,),
+        )
+        run = cur.fetchone()
+        if run is None:
+            cur.close()
+            raise ValueError('No complete inventory for this source')
+        cur.execute(
+            "SELECT i.entity_id, ignored.id, state.state "
+            "FROM sentinel_inventory i "
+            "LEFT JOIN videos v ON v.id=i.entity_id "
+            "LEFT JOIN IgnoreVid ignored ON ignored.id=i.entity_id "
+            "LEFT JOIN sentinel_video_state state ON state.video_id=i.entity_id "
+            "WHERE i.scan_run_id=%s AND v.id IS NULL "
+            "ORDER BY i.position",
+            (run[0],),
+        )
+        rows = cur.fetchall()
+        cur.close()
+    finally:
+        con.close()
+
+    video_ids = []
+    skipped_ignored = 0
+    skipped_unavailable = 0
+    for entity_id, ignored, state in rows:
+        if ignored:
+            skipped_ignored += 1
+        elif state == UNAVAILABLE:
+            skipped_unavailable += 1
+        else:
+            video_ids.append(entity_id)
+
+    queued = 0
+    for video_id in video_ids:
+        qo = QueueObject(
+            'https://www.youtube.com/watch?v=%s' % video_id,
+            channel_id, 'youtube',
+        )
+        if enqueue(qo, download_queue):
+            queued += 1
+    return {
+        'total_unarchived': len(rows),
+        'queued': queued,
+        'already_queued': len(video_ids) - queued,
+        'skipped_ignored': skipped_ignored,
+        'skipped_unavailable': skipped_unavailable,
     }
 
 

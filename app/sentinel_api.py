@@ -2,7 +2,10 @@ import logging
 
 from flask import Blueprint, current_app, jsonify, request
 
-from sentinel import get_events, get_source_detail, get_sources, get_summary
+from sentinel import (
+    get_events, get_source_detail, get_sources, get_summary,
+    queue_unarchived_videos,
+)
 from sentinel_inventory import manual_census
 from sentinel_import import (
     MAX_IMPORT_BYTES, compare_historical_ids, parse_historical_export,
@@ -195,6 +198,27 @@ def scan_source(source_type, source_id):
     except Exception as e:
         logger.error('Manual Sentinel census failed for %s: %s', source_id, e)
         return _error(str(e), 502)
+
+
+@sentinel_bp.route(
+    '/source/<string:source_type>/<string:source_id>/queue-unarchived',
+    methods=['POST'],
+)
+def queue_unarchived(source_type, source_id):
+    """Explicitly queue every unarchived ID from the latest complete census."""
+    try:
+        if source_type != 'channel':
+            raise ValueError('Queueing currently supports YouTube channels')
+        return _success(queue_unarchived_videos(
+            source_id, current_app.config['queue'],
+        ))
+    except ValueError as e:
+        return _error(str(e), 400)
+    except Exception as e:
+        logger.error(
+            'Sentinel unarchived queueing failed for %s: %s', source_id, e,
+        )
+        return _error(str(e), 500)
 
 
 @sentinel_bp.route(

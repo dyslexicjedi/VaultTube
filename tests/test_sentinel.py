@@ -890,6 +890,161 @@ def test_complete_inventory_exposes_coverage_and_unarchived_ids(
     assert source['remote_unarchived'] == 1
 
 
+def _census_with_unarchived(monkeypatch, source_id='UCQueueUnarchived',
+                            extra_ids=()):
+    import sentinel_inventory
+
+    _insert_channel(source_id, 'Queue Unarchived Films')
+    _insert_video('QueueSaved001', channel_id=source_id)
+    ids = [
+        'QueueSaved001', 'QueueMissing01', 'QueueMissing02',
+    ] + list(extra_ids)
+    monkeypatch.setattr(
+        sentinel_inventory, 'iter_playlist_pages',
+        lambda *args, **kwargs: iter([_inventory_page(ids)]),
+    )
+    result = sentinel_inventory.census_source(
+        'channel', source_id, 'UU' + source_id[2:],
+    )
+    assert result['status'] == 'complete'
+    return source_id
+
+
+def _queue_rows():
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT url, status, channel_id, source FROM queue ORDER BY id")
+    rows = cur.fetchall()
+    cur.close()
+    con.close()
+    return rows
+
+
+def test_queue_unarchived_endpoint_enqueues_only_missing_videos(
+        client, monkeypatch):
+    from queue_utils import PriorityDownloadQueue
+
+    source_id = _census_with_unarchived(monkeypatch)
+    q = PriorityDownloadQueue()
+    client.application.config['queue'] = q
+
+    response = client.post(
+        '/api/sentinel/source/channel/%s/queue-unarchived' % source_id
+    )
+    assert response.status_code == 200
+    assert response.get_json()['data'] == {
+        'total_unarchived': 2, 'queued': 2, 'already_queued': 0,
+        'skipped_ignored': 0, 'skipped_unavailable': 0,
+    }
+    assert [item.url for item in q.snapshot()] == [
+        'https://www.youtube.com/watch?v=QueueMissing01',
+        'https://www.youtube.com/watch?v=QueueMissing02',
+    ]
+    assert _queue_rows() == [
+        ('https://www.youtube.com/watch?v=QueueMissing01', 'pending',
+         source_id, 'youtube'),
+        ('https://www.youtube.com/watch?v=QueueMissing02', 'pending',
+         source_id, 'youtube'),
+    ]
+
+
+def test_queue_unarchived_endpoint_does_not_duplicate_pending_downloads(
+        client, monkeypatch):
+    from queue_utils import PriorityDownloadQueue
+
+    source_id = _census_with_unarchived(monkeypatch)
+    q = PriorityDownloadQueue()
+    client.application.config['queue'] = q
+    path = '/api/sentinel/source/channel/%s/queue-unarchived' % source_id
+    assert client.post(path).status_code == 200
+
+    repeat = client.post(path)
+    assert repeat.status_code == 200
+    assert repeat.get_json()['data'] == {
+        'total_unarchived': 2, 'queued': 0, 'already_queued': 2,
+        'skipped_ignored': 0, 'skipped_unavailable': 0,
+    }
+    assert q.qsize() == 2
+    assert len(_queue_rows()) == 2
+
+
+def test_queue_unarchived_endpoint_queues_more_than_the_preview_limit(
+        client, monkeypatch):
+    from queue_utils import PriorityDownloadQueue
+
+    extra = ['QueueBulk%04d' % index for index in range(23)]
+    source_id = _census_with_unarchived(monkeypatch, extra_ids=extra)
+    q = PriorityDownloadQueue()
+    client.application.config['queue'] = q
+
+    data = client.post(
+        '/api/sentinel/source/channel/%s/queue-unarchived' % source_id
+    ).get_json()['data']
+    assert data['total_unarchived'] == 25
+    assert data['queued'] == 25
+    assert data['already_queued'] == 0
+    assert q.qsize() == 25
+    rows = _queue_rows()
+    assert len(rows) == 25
+    assert all(row[1] == 'pending' for row in rows)
+    detail = client.get(
+        '/api/sentinel/source/channel/%s' % source_id
+    ).get_json()['data']
+    assert detail['inventory']['remote_unarchived'] == 25
+    assert len(detail['inventory']['unarchived_video_ids']) == 20
+
+
+def test_queue_unarchived_endpoint_skips_ignored_and_unavailable_videos(
+        client, monkeypatch):
+    from queue_utils import PriorityDownloadQueue
+
+    source_id = _census_with_unarchived(
+        monkeypatch, extra_ids=['QueueIgnored01', 'QueueGoneAway1'],
+    )
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("INSERT INTO IgnoreVid(id) VALUES('QueueIgnored01')")
+    cur.execute(
+        "INSERT INTO sentinel_video_state "
+        "(video_id, provider, state, consecutive_negative_checks) "
+        "VALUES('QueueGoneAway1','youtube','unavailable',2)"
+    )
+    cur.close()
+    con.close()
+    q = PriorityDownloadQueue()
+    client.application.config['queue'] = q
+
+    data = client.post(
+        '/api/sentinel/source/channel/%s/queue-unarchived' % source_id
+    ).get_json()['data']
+    assert data == {
+        'total_unarchived': 4, 'queued': 2, 'already_queued': 0,
+        'skipped_ignored': 1, 'skipped_unavailable': 1,
+    }
+    assert [item.url for item in q.snapshot()] == [
+        'https://www.youtube.com/watch?v=QueueMissing01',
+        'https://www.youtube.com/watch?v=QueueMissing02',
+    ]
+    assert [row[0] for row in _queue_rows()] == [
+        'https://www.youtube.com/watch?v=QueueMissing01',
+        'https://www.youtube.com/watch?v=QueueMissing02',
+    ]
+
+
+def test_queue_unarchived_endpoint_requires_a_complete_census(client):
+    from queue_utils import PriorityDownloadQueue
+
+    _insert_channel('UCQueueNoCensus', 'No Census Films')
+    client.application.config['queue'] = PriorityDownloadQueue()
+    response = client.post(
+        '/api/sentinel/source/channel/UCQueueNoCensus/queue-unarchived'
+    )
+    assert response.status_code == 400
+    assert 'complete inventory' in response.get_json()['error'].lower()
+    assert client.application.config['queue'].qsize() == 0
+    assert _queue_rows() == []
+
+
 def test_inventory_removal_is_not_source_unavailability(client, monkeypatch):
     import sentinel_inventory
 
