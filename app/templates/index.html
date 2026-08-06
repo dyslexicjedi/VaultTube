@@ -46,6 +46,15 @@
     <div class="vt-rail-track" id="new-rail"></div>
 </section>
 
+<section class="vt-section" id="added-section" hidden>
+    <div class="vt-rail-header">
+        <h2>Recently added</h2>
+        <span class="vt-sub" id="added-sub"></span>
+        <a class="vt-all" id="added-browse-all" href="/browse.html">Browse all</a>
+    </div>
+    <div class="vt-rail-track" id="added-rail"></div>
+</section>
+
 <div id="channel-rails"></div>
 
 <div class="vt-empty" id="home-empty" aria-live="polite" hidden>
@@ -84,7 +93,7 @@
     }
 
     function resetHome(mode) {
-        ['hero', 'resume-section', 'new-section', 'home-empty', 'home-error'].forEach(function (id) {
+        ['hero', 'resume-section', 'new-section', 'added-section', 'home-empty', 'home-error'].forEach(function (id) {
             document.getElementById(id).hidden = true;
         });
         document.getElementById('hero-img').removeAttribute('src');
@@ -96,6 +105,8 @@
         document.getElementById('resume-rail').replaceChildren();
         document.getElementById('new-rail').replaceChildren();
         document.getElementById('new-sub').textContent = '';
+        document.getElementById('added-rail').replaceChildren();
+        document.getElementById('added-sub').textContent = '';
         document.getElementById('channel-rails').replaceChildren();
         document.getElementById('home-empty-copy').textContent = mode === 'nsfw'
             ? 'No videos matching the NSFW filter are available on Home.'
@@ -173,6 +184,10 @@
             if (v.channelId) ch.href = '/creator.html?creator=' + encodeURIComponent(v.channelId);
             else ch.hidden = true;
             show('hero', state);
+
+            document.getElementById('added-sub').textContent = vids.length >= 40 ? '40+ videos' : vids.length + (vids.length === 1 ? ' video' : ' videos');
+            VT.render(document.getElementById('added-rail'), vids, { dot: true });
+            show('added-section', state);
         });
 
         var resumeDone = getJSON(
