@@ -99,6 +99,8 @@ Optional:
 | `VAULTTUBE_COMPOSITE_LOUDNESS` | Composite post-mix integrated loudness target in LUFS (default `-16`) |
 | `VAULTTUBE_COMPOSITE_LOUDNESS_RANGE` | Composite loudness-range target in LU (default `11`) |
 | `VAULTTUBE_COMPOSITE_TRUE_PEAK` | Composite maximum true peak in dBTP (default `-1.5`) |
+| `VAULTTUBE_COMPOSITE_REACTION_GAIN_DB` | Reaction input gain before the final mix (default `+6` dB) |
+| `VAULTTUBE_COMPOSITE_COMPANION_GAIN_DB` | Jellyfin input gain before the final mix (default `-3` dB) |
 
 ## Contributing / Architecture
 

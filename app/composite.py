@@ -91,6 +91,12 @@ def _session_payload(reaction_id, item_id, reaction_start, companion_start):
         "audio_true_peak": _audio_target(
             "VAULTTUBE_COMPOSITE_TRUE_PEAK", -1.5, -9.0, 0.0
         ),
+        "reaction_gain_db": _audio_target(
+            "VAULTTUBE_COMPOSITE_REACTION_GAIN_DB", 6.0, -30.0, 30.0
+        ),
+        "companion_gain_db": _audio_target(
+            "VAULTTUBE_COMPOSITE_COMPANION_GAIN_DB", -3.0, -30.0, 30.0
+        ),
     }
 
 
@@ -158,7 +164,8 @@ def create_session(reaction_id, item_id, reaction_start, companion_start):
         for key in (
             "reaction_id", "item_id", "reaction_start", "companion_start",
             "width", "height", "pipeline_version", "audio_loudness_i",
-            "audio_loudness_lra", "audio_true_peak",
+            "audio_loudness_lra", "audio_true_peak", "reaction_gain_db",
+            "companion_gain_db",
         )
     })
     _write_metadata(session_id, payload)
@@ -202,15 +209,17 @@ def _ffmpeg_command(metadata, cache_dir):
         "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v1];"
         "[v0][v1]hstack=inputs=2[vout];"
         "[0:a:0]asetpts=PTS-STARTPTS,aresample=async=1,"
-        "aformat=sample_fmts=fltp:channel_layouts=stereo[a0];"
+        "aformat=sample_fmts=fltp:channel_layouts=stereo,volume=%.1fdB[a0];"
         "[1:a:0]asetpts=PTS-STARTPTS,aresample=async=1,"
-        "aformat=sample_fmts=fltp:channel_layouts=stereo[a1];"
+        "aformat=sample_fmts=fltp:channel_layouts=stereo,volume=%.1fdB[a1];"
         "[a0][a1]amix=inputs=2:duration=shortest:normalize=0,"
         "loudnorm=I=%.1f:LRA=%.1f:TP=%.1f:linear=false,"
         "aresample=48000[aout]"
     ) % (
         pane_width, pane_height, pane_width, pane_height,
         pane_width, pane_height, pane_width, pane_height,
+        metadata.get("reaction_gain_db", 6.0),
+        metadata.get("companion_gain_db", -3.0),
         metadata.get("audio_loudness_i", -16.0),
         metadata.get("audio_loudness_lra", 11.0),
         metadata.get("audio_true_peak", -1.5),
