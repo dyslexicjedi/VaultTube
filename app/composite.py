@@ -92,10 +92,10 @@ def _session_payload(reaction_id, item_id, reaction_start, companion_start):
             "VAULTTUBE_COMPOSITE_TRUE_PEAK", -1.5, -9.0, 0.0
         ),
         "reaction_gain_db": _audio_target(
-            "VAULTTUBE_COMPOSITE_REACTION_GAIN_DB", 8.0, -30.0, 30.0
+            "VAULTTUBE_COMPOSITE_REACTION_GAIN_DB", 12.0, -30.0, 30.0
         ),
         "companion_gain_db": _audio_target(
-            "VAULTTUBE_COMPOSITE_COMPANION_GAIN_DB", -5.0, -30.0, 30.0
+            "VAULTTUBE_COMPOSITE_COMPANION_GAIN_DB", -8.0, -30.0, 30.0
         ),
     }
 
@@ -218,8 +218,8 @@ def _ffmpeg_command(metadata, cache_dir):
     ) % (
         pane_width, pane_height, pane_width, pane_height,
         pane_width, pane_height, pane_width, pane_height,
-        metadata.get("reaction_gain_db", 8.0),
-        metadata.get("companion_gain_db", -5.0),
+        metadata.get("reaction_gain_db", 12.0),
+        metadata.get("companion_gain_db", -8.0),
         metadata.get("audio_loudness_i", -16.0),
         metadata.get("audio_loudness_lra", 11.0),
         metadata.get("audio_true_peak", -1.5),
