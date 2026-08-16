@@ -1054,6 +1054,8 @@ a {
 }
 .vt-modal-wide {
   max-width: 520px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
 }
 .vt-modal-head {
   display: flex;
@@ -1113,6 +1115,38 @@ a {
 }
 .vt-modal-status.err {
   color: var(--vt-danger);
+}
+.vt-companion-library-search {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.vt-companion-library-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.vt-companion-episode-field {
+  grid-column: 1 / -1;
+}
+.vt-companion-manual {
+  margin: 14px 0;
+  color: var(--vt-text-dim);
+  font-size: 12.5px;
+}
+.vt-companion-manual summary {
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+@media (max-width: 560px) {
+  .vt-companion-library-grid {
+    grid-template-columns: 1fr;
+  }
+  .vt-companion-episode-field {
+    grid-column: auto;
+  }
 }
 .vt-form-grid {
   display: grid;

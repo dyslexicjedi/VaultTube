@@ -180,7 +180,12 @@ Acceptance coverage:
 
 ## Phase 3 — Library selection and durable configuration
 
-- Replace manual item IDs with a server-side Jellyfin search/browser.
+Status: in progress. The first library-selection slice is implemented.
+
+- Server-side Jellyfin show search plus cascading season and episode browsing is
+  available in the Companion dialog. Results contain sanitized metadata only;
+  the browser never receives the Jellyfin URL or token. Manual item IDs remain a
+  fallback for unusual library layouts.
 - Support named Jellyfin server profiles without exposing credentials.
 - Add polished **Change companion** and **Resync** actions. Pairing removal is
   already available from the Companion dialog.

@@ -18,7 +18,7 @@ from vault_paths import public_video_path, resolve_vault_path
 from sentinel import export_sentinel_data
 from jellyfin import (
     JellyfinConfigError, JellyfinProxyError, decode_asset_url, get_config,
-    is_configured, item_info, manifest_params, manifest_url, rewrite_manifest,
+    is_configured, item_info, library_items, manifest_params, manifest_url, rewrite_manifest,
     upstream_get, validate_item_id,
 )
 from composite import (
@@ -97,6 +97,24 @@ ALLOWED_DIRECTIONS = {'asc', 'desc'}
 def jellyfin_phase1_status():
     """Report whether the optional companion playback spike is configured."""
     return api_success({'configured': is_configured()})
+
+
+@api_bp.route('/jellyfin/library/<string:kind>')
+def jellyfin_library(kind):
+    """Expose sanitized library metadata without exposing Jellyfin credentials."""
+    try:
+        rows = library_items(
+            get_config(), kind,
+            parent_id=request.args.get('parent_id'),
+            search=request.args.get('search'),
+            limit=request.args.get('limit', 200),
+        )
+        return api_success(rows)
+    except (JellyfinConfigError, JellyfinProxyError) as e:
+        return api_error(str(e), 400)
+    except requests.RequestException as e:
+        logger.warning('Jellyfin library request failed for %s: %s', kind, e)
+        return api_error('Jellyfin is unavailable', 502)
 
 
 def _finite_companion_number(value, name, minimum=None, maximum=86400.0):

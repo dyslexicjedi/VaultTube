@@ -14,6 +14,11 @@ import requests
 
 _ITEM_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _SECRET_QUERY_KEYS = {"api_key", "token", "x-emby-token"}
+_LIBRARY_ITEM_TYPES = {
+    "series": "Series",
+    "seasons": "Season",
+    "episodes": "Episode",
+}
 
 
 class JellyfinConfigError(RuntimeError):
@@ -107,6 +112,75 @@ def item_info(config, item_id):
         "name": data.get("Name") or item_id,
         "duration": (float(ticks) / 10_000_000) if ticks else None,
     }
+
+
+def library_items(config, kind, *, parent_id=None, search=None, limit=200):
+    """Return sanitized Series/Season/Episode rows for the companion picker."""
+    item_type = _LIBRARY_ITEM_TYPES.get(kind)
+    if not item_type:
+        raise JellyfinProxyError("Invalid Jellyfin library item type")
+    if kind != "series" and not parent_id:
+        raise JellyfinProxyError("A Jellyfin parent item ID is required")
+    if parent_id:
+        validate_item_id(parent_id)
+    search = (search or "").strip()
+    if len(search) > 200:
+        raise JellyfinProxyError("Jellyfin search is too long")
+    try:
+        limit = max(1, min(int(limit), 500))
+    except (TypeError, ValueError) as exc:
+        raise JellyfinProxyError("Invalid Jellyfin result limit") from exc
+
+    params = {
+        "IncludeItemTypes": item_type,
+        "Recursive": "true" if kind == "series" else "false",
+        "SortBy": (
+            "SortName" if kind == "series"
+            else "IndexNumber,SortName" if kind == "seasons"
+            else "ParentIndexNumber,IndexNumber,SortName"
+        ),
+        "SortOrder": "Ascending",
+        "StartIndex": 0,
+        "Limit": limit,
+        "Fields": "DateCreated",
+    }
+    if config.get("user_id"):
+        params["UserId"] = config["user_id"]
+    if parent_id:
+        params["ParentId"] = parent_id
+    if search:
+        params["SearchTerm"] = search
+
+    response = requests.get(
+        "%s/Items" % config["base_url"],
+        params=params,
+        headers=auth_headers(config),
+        timeout=(5, 30),
+        verify=config["verify_tls"],
+        allow_redirects=False,
+    )
+    try:
+        response.raise_for_status()
+        payload = response.json()
+    finally:
+        response.close()
+
+    rows = []
+    for item in payload.get("Items", []):
+        item_id = item.get("Id")
+        if not item_id:
+            continue
+        ticks = item.get("RunTimeTicks")
+        rows.append({
+            "id": item_id,
+            "name": item.get("Name") or item_id,
+            "type": item.get("Type") or item_type,
+            "index_number": item.get("IndexNumber"),
+            "parent_index_number": item.get("ParentIndexNumber"),
+            "production_year": item.get("ProductionYear"),
+            "duration": (float(ticks) / 10_000_000) if ticks else None,
+        })
+    return rows
 
 
 def _strip_secrets(url):

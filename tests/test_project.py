@@ -2141,6 +2141,106 @@ def test_jellyfin_phase1_status_is_optional(client, monkeypatch):
     assert response.get_json()["data"]["configured"] is False
 
 
+def test_jellyfin_library_items_are_user_scoped_and_sanitized(monkeypatch):
+    import jellyfin
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"Items": [{
+                "Id": "Episode123",
+                "Name": "The Episode",
+                "Type": "Episode",
+                "IndexNumber": 2,
+                "ParentIndexNumber": 1,
+                "ProductionYear": 2025,
+                "RunTimeTicks": 3_600_000_000,
+                "Path": "/private/media/file.mkv",
+            }]}
+
+        def close(self):
+            captured["closed"] = True
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return FakeResponse()
+
+    monkeypatch.setattr(jellyfin.requests, "get", fake_get)
+    rows = jellyfin.library_items({
+        "base_url": "http://jellyfin:8096",
+        "token": "secret",
+        "user_id": "User123",
+        "verify_tls": True,
+    }, "episodes", parent_id="Season123")
+
+    assert captured["url"] == "http://jellyfin:8096/Items"
+    assert captured["kwargs"]["params"]["UserId"] == "User123"
+    assert captured["kwargs"]["params"]["ParentId"] == "Season123"
+    assert captured["kwargs"]["params"]["IncludeItemTypes"] == "Episode"
+    assert captured["kwargs"]["headers"] == {"X-Emby-Token": "secret"}
+    assert captured["closed"] is True
+    assert rows == [{
+        "id": "Episode123",
+        "name": "The Episode",
+        "type": "Episode",
+        "index_number": 2,
+        "parent_index_number": 1,
+        "production_year": 2025,
+        "duration": 360.0,
+    }]
+
+
+def test_jellyfin_library_requires_parent_for_seasons(monkeypatch):
+    import jellyfin
+
+    with pytest.raises(jellyfin.JellyfinProxyError, match="parent"):
+        jellyfin.library_items({"token": "secret"}, "seasons")
+
+
+def test_jellyfin_library_api_returns_sanitized_rows(client, monkeypatch):
+    import api
+
+    calls = []
+    monkeypatch.setattr(api, "get_config", lambda: {"token": "secret"})
+    monkeypatch.setattr(
+        api, "library_items",
+        lambda config, kind, **kwargs: calls.append((config, kind, kwargs)) or [{
+            "id": "Series123", "name": "Pluribus", "type": "Series",
+        }],
+    )
+
+    response = client.get("/api/jellyfin/library/series?search=Pluribus&limit=25")
+
+    assert response.status_code == 200
+    assert response.get_json()["data"][0]["id"] == "Series123"
+    assert calls == [({"token": "secret"}, "series", {
+        "parent_id": None, "search": "Pluribus", "limit": "25",
+    })]
+
+
+def test_jellyfin_library_api_rejects_missing_parent(client, monkeypatch):
+    import api
+    import jellyfin
+
+    monkeypatch.setattr(api, "get_config", lambda: {"token": "secret"})
+    monkeypatch.setattr(
+        api, "library_items",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            jellyfin.JellyfinProxyError("A Jellyfin parent item ID is required")
+        ),
+    )
+
+    response = client.get("/api/jellyfin/library/episodes")
+
+    assert response.status_code == 400
+    assert "parent" in response.get_json()["error"]
+
+
 def test_jellyfin_phase1_rewrites_manifest_without_exposing_token(client, monkeypatch):
     import api
 
@@ -2469,6 +2569,10 @@ def test_player_contains_phase1_companion_controls(client):
     assert b"keepalive: !!force" in response.data
     assert b"window.addEventListener('pagehide'" in response.data
     assert b'id="companion-remove"' in response.data
+    assert b'id="companion-series"' in response.data
+    assert b'id="companion-season"' in response.data
+    assert b'id="companion-episode"' in response.data
+    assert b"/api/jellyfin/library/" in response.data
 
 
 def test_companion_players_use_equal_letterboxed_viewports():

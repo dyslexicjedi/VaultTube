@@ -83,14 +83,38 @@
 </div>
 
 <div class="vt-modal-backdrop" id="companion-modal" hidden>
-    <div class="vt-modal" role="dialog" aria-labelledby="companion-modal-title">
+    <div class="vt-modal vt-modal-wide" role="dialog" aria-labelledby="companion-modal-title">
         <h3 id="companion-modal-title">Jellyfin companion</h3>
-        <p class="vt-modal-text">Enter the Jellyfin item ID for the episode you own. The pairing and synchronized position will be saved.</p>
+        <p class="vt-modal-text">Choose the episode you own. The pairing and synchronized position will be saved.</p>
         <form id="companion-form">
+            <div class="vt-companion-library-search">
+                <label class="vt-field">
+                    <span>Find a show</span>
+                    <input class="vt-input" id="companion-series-search" type="search" autocomplete="off" placeholder="Search your Jellyfin library">
+                </label>
+                <button type="button" class="vt-btn-ghost" id="companion-series-search-button">Search</button>
+            </div>
+            <div class="vt-companion-library-grid">
+                <label class="vt-field">
+                    <span>Show</span>
+                    <select class="vt-select" id="companion-series"><option value="">Loading shows…</option></select>
+                </label>
+                <label class="vt-field">
+                    <span>Season</span>
+                    <select class="vt-select" id="companion-season" disabled><option value="">Choose a show first</option></select>
+                </label>
+                <label class="vt-field vt-companion-episode-field">
+                    <span>Episode</span>
+                    <select class="vt-select" id="companion-episode" disabled><option value="">Choose a season first</option></select>
+                </label>
+            </div>
+            <details class="vt-companion-manual">
+                <summary>Enter an item ID manually</summary>
             <label class="vt-field">
                 <span>Jellyfin item ID</span>
-                <input class="vt-input" id="companion-item-id" name="item_id" required autocomplete="off" placeholder="Item ID">
+                <input class="vt-input" id="companion-item-id" name="item_id" autocomplete="off" placeholder="Item ID">
             </label>
+            </details>
             <label class="vt-field">
                 <span>Companion start time in seconds</span>
                 <input class="vt-input" id="companion-initial-offset" name="offset" type="number" step="0.001" value="0">
@@ -140,11 +164,67 @@
     var companionItemId = null;
     var companionStateSavedAt = 0;
     var companionLastSavedPosition = -1;
+    var companionLibraryLoaded = false;
 
     function getJSON(url) {
         return fetch(url).then(function (r) { return r.json(); });
     }
     function $id(x) { return document.getElementById(x); }
+
+    function companionModalStatus(message, isError) {
+        var el = $id('companion-modal-status');
+        el.textContent = message || '';
+        el.className = 'vt-modal-status' + (isError ? ' err' : '');
+    }
+
+    function episodeLabel(item) {
+        var prefix = Number.isFinite(item.index_number) ? 'E' + item.index_number + ' · ' : '';
+        return prefix + item.name;
+    }
+
+    function fillCompanionSelect(select, items, placeholder, labeler) {
+        select.textContent = '';
+        var prompt = document.createElement('option');
+        prompt.value = '';
+        prompt.textContent = placeholder;
+        select.appendChild(prompt);
+        items.forEach(function (item) {
+            var option = document.createElement('option');
+            option.value = item.id;
+            option.textContent = labeler ? labeler(item) : item.name;
+            select.appendChild(option);
+        });
+        select.disabled = !items.length;
+    }
+
+    function fetchCompanionLibrary(kind, options) {
+        options = options || {};
+        var query = new URLSearchParams();
+        if (options.parentId) query.set('parent_id', options.parentId);
+        if (options.search) query.set('search', options.search);
+        return fetch('/api/jellyfin/library/' + kind + '?' + query.toString()).then(function (response) {
+            return response.json().then(function (body) {
+                if (!response.ok || !body.success) throw new Error(body.error || 'Could not load Jellyfin library');
+                return body.data || [];
+            });
+        });
+    }
+
+    function loadCompanionSeries() {
+        companionModalStatus('Loading Jellyfin shows…', false);
+        $id('companion-series').disabled = true;
+        return fetchCompanionLibrary('series', { search: $id('companion-series-search').value.trim() })
+            .then(function (items) {
+                fillCompanionSelect($id('companion-series'), items, items.length ? 'Choose a show' : 'No shows found');
+                fillCompanionSelect($id('companion-season'), [], 'Choose a show first');
+                fillCompanionSelect($id('companion-episode'), [], 'Choose a season first');
+                companionLibraryLoaded = true;
+                companionModalStatus(items.length + (items.length === 1 ? ' show found' : ' shows found'), false);
+            }).catch(function (error) {
+                fillCompanionSelect($id('companion-series'), [], 'Library unavailable');
+                companionModalStatus(error.message, true);
+            });
+    }
 
     function reactionSource(v, filepath, ext) {
         var directType = {
@@ -425,10 +505,43 @@
     }
 
     $id('btn-companion').addEventListener('click', function () {
-        $id('companion-modal-status').textContent = '';
+        companionModalStatus('', false);
         $id('companion-remove').hidden = !companionItemId;
         $id('companion-modal').hidden = false;
-        $id('companion-item-id').focus();
+        if (companionItemId) $id('companion-item-id').value = companionItemId;
+        if (!companionLibraryLoaded) loadCompanionSeries();
+        $id('companion-series-search').focus();
+    });
+    $id('companion-series-search-button').addEventListener('click', loadCompanionSeries);
+    $id('companion-series-search').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); loadCompanionSeries(); }
+    });
+    $id('companion-series').addEventListener('change', function () {
+        fillCompanionSelect($id('companion-season'), [], this.value ? 'Loading seasons…' : 'Choose a show first');
+        fillCompanionSelect($id('companion-episode'), [], 'Choose a season first');
+        if (!this.value) return;
+        companionModalStatus('Loading seasons…', false);
+        fetchCompanionLibrary('seasons', { parentId: this.value }).then(function (items) {
+            fillCompanionSelect($id('companion-season'), items, items.length ? 'Choose a season' : 'No seasons found', function (item) {
+                return Number.isFinite(item.index_number) ? 'Season ' + item.index_number : item.name;
+            });
+            companionModalStatus('', false);
+        }).catch(function (error) { companionModalStatus(error.message, true); });
+    });
+    $id('companion-season').addEventListener('change', function () {
+        fillCompanionSelect($id('companion-episode'), [], this.value ? 'Loading episodes…' : 'Choose a season first');
+        if (!this.value) return;
+        companionModalStatus('Loading episodes…', false);
+        fetchCompanionLibrary('episodes', { parentId: this.value }).then(function (items) {
+            fillCompanionSelect($id('companion-episode'), items, items.length ? 'Choose an episode' : 'No episodes found', episodeLabel);
+            companionModalStatus('', false);
+        }).catch(function (error) { companionModalStatus(error.message, true); });
+    });
+    $id('companion-episode').addEventListener('change', function () {
+        if (this.value) {
+            $id('companion-item-id').value = this.value;
+            companionModalStatus('Episode selected', false);
+        }
     });
     $id('companion-cancel').addEventListener('click', function () { $id('companion-modal').hidden = true; });
     $id('companion-modal').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
@@ -441,7 +554,8 @@
     $id('companion-form').addEventListener('submit', function (e) {
         e.preventDefault();
         var offset = parseFloat($id('companion-initial-offset').value);
-        activateCompanion($id('companion-item-id').value.trim(), Number.isFinite(offset) ? offset : 0);
+        var itemId = $id('companion-episode').value || $id('companion-item-id').value.trim();
+        activateCompanion(itemId, Number.isFinite(offset) ? offset : 0);
     });
     $id('companion-play').addEventListener('click', playBoth);
     $id('companion-pause').addEventListener('click', function () { pauseBoth('Paused'); });

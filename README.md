@@ -22,8 +22,9 @@ in MariaDB. Reopening the reaction creates a fresh composite session at the save
 position and leaves it paused for the next user gesture. Jellyfin credentials are
 applied only on the server and are not included in browser URLs or manifests.
 
-Current setup uses a Jellyfin item ID from the player's **Companion** dialog.
-Library browsing and multi-server profiles remain future work. See
+The player's **Companion** dialog can search the configured Jellyfin library and
+browse from show to season to episode. A manual item-ID field remains available
+as a fallback. Multi-server profiles remain future work. See
 [COMPANION_PLAYER_PLAN.md](COMPANION_PLAYER_PLAN.md) for architecture, routes,
 verification, limitations, and the remaining roadmap.
 
@@ -94,7 +95,7 @@ Optional:
 | `VAULTTUBE_SENTINEL_MANUAL_CENSUS_BUDGET` | YouTube API request cap for an explicitly requested Sentinel census (default 2000) |
 | `VAULTTUBE_JELLYFIN_URL` | Jellyfin server base URL for companion playback |
 | `VAULTTUBE_JELLYFIN_TOKEN` | Access token for a dedicated, restricted Jellyfin user; kept server-side |
-| `VAULTTUBE_JELLYFIN_USER_ID` | Optional Jellyfin user ID sent with companion playback requests |
+| `VAULTTUBE_JELLYFIN_USER_ID` | Optional Jellyfin user ID used to scope companion playback and library browsing |
 | `VAULTTUBE_JELLYFIN_VERIFY_TLS` | Verify Jellyfin TLS certificates (default `true`; disable only for a trusted local test server) |
 | `VAULTTUBE_COMPOSITE_LOUDNESS` | Composite post-mix integrated loudness target in LUFS (default `-16`) |
 | `VAULTTUBE_COMPOSITE_LOUDNESS_RANGE` | Composite loudness-range target in LU (default `11`) |
