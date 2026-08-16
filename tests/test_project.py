@@ -2281,8 +2281,8 @@ def test_composite_ffmpeg_command_builds_side_by_side_mixed_audio(monkeypatch, t
     assert "scale=640:360" in filter_graph
     assert "volume=0.8" not in filter_graph
     assert "channel_layouts=stereo" in filter_graph
-    assert "volume=6.0dB[a0]" in filter_graph
-    assert "volume=-3.0dB[a1]" in filter_graph
+    assert "volume=8.0dB[a0]" in filter_graph
+    assert "volume=-5.0dB[a1]" in filter_graph
     assert "loudnorm=I=-16.0:LRA=11.0:TP=-1.5:linear=false" in filter_graph
     assert "aresample=48000" in filter_graph
     assert "api_key" not in " ".join(command)
@@ -2309,8 +2309,8 @@ def test_composite_audio_targets_change_the_cache_key(monkeypatch, tmp_path):
 
     assert original["pipeline_version"] == 2
     assert original["audio_loudness_i"] == -16.0
-    assert original["reaction_gain_db"] == 6.0
-    assert original["companion_gain_db"] == -3.0
+    assert original["reaction_gain_db"] == 8.0
+    assert original["companion_gain_db"] == -5.0
     assert louder["audio_loudness_i"] == -14.0
     assert louder_id != original_id
 

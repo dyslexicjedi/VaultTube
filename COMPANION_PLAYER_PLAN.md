@@ -169,7 +169,7 @@ Acceptance coverage:
   peak remained below full scale at approximately -0.9 dB. Browser playback and
   saved-session restoration were reverified, and the full suite passed with 242
   tests.
-- The first balance adjustment applies +6 dB to the reaction and -3 dB to the
+- The current balance adjustment applies +8 dB to the reaction and -5 dB to the
   Jellyfin input before mixing and final normalization. Both gains are configurable
   through `VAULTTUBE_COMPOSITE_REACTION_GAIN_DB` and
   `VAULTTUBE_COMPOSITE_COMPANION_GAIN_DB`, and both participate in the composite
