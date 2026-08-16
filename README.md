@@ -10,6 +10,23 @@ VaultTube is current pre-alpha (hot code!), expect bugs, crashes and similar iss
 
 Who should use this: Alpha testers, people who don't mind "early-access" to help improve software.
 
+## Jellyfin companion playback
+
+VaultTube can pair a reaction video with an episode owned and hosted in Jellyfin.
+Before synchronization, the reaction and episode are positioned independently.
+Pressing **Sync here** creates one side-by-side H.264/AAC HLS stream, so desktop
+and iPad browsers use the same playback path and one play/pause action.
+
+The pairing, fractional-second offset, and canonical reaction position are saved
+in MariaDB. Reopening the reaction creates a fresh composite session at the saved
+position and leaves it paused for the next user gesture. Jellyfin credentials are
+applied only on the server and are not included in browser URLs or manifests.
+
+Current setup uses a Jellyfin item ID from the player's **Companion** dialog.
+Library browsing and multi-server profiles remain future work. See
+[COMPANION_PLAYER_PLAN.md](COMPANION_PLAYER_PLAN.md) for architecture, routes,
+verification, limitations, and the remaining roadmap.
+
 ## How-TO:
 Below is a docker compose entry for the database and vaulttube
 
@@ -75,6 +92,10 @@ Optional:
 | `VAULTTUBE_SENTINEL_CENSUS_BUDGET` | YouTube API requests reserved for each Sentinel census pass (default 500) |
 | `VAULTTUBE_SENTINEL_CENSUS_MAX_PAGES` | Safety cap per remote inventory snapshot (default 2000 pages) |
 | `VAULTTUBE_SENTINEL_MANUAL_CENSUS_BUDGET` | YouTube API request cap for an explicitly requested Sentinel census (default 2000) |
+| `VAULTTUBE_JELLYFIN_URL` | Jellyfin server base URL for companion playback |
+| `VAULTTUBE_JELLYFIN_TOKEN` | Access token for a dedicated, restricted Jellyfin user; kept server-side |
+| `VAULTTUBE_JELLYFIN_USER_ID` | Optional Jellyfin user ID sent with companion playback requests |
+| `VAULTTUBE_JELLYFIN_VERIFY_TLS` | Verify Jellyfin TLS certificates (default `true`; disable only for a trusted local test server) |
 
 ## Contributing / Architecture
 

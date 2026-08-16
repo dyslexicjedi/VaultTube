@@ -624,7 +624,8 @@ a {
   flex-direction: column;
   gap: 5px;
 }
-.vt-field > label {
+.vt-field > label,
+.vt-field > span {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -754,6 +755,12 @@ a {
   gap: 28px;
   align-items: start;
 }
+.vt-player-layout.companion-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+.vt-player-layout.companion-mode > aside {
+  display: none;
+}
 @media (max-width: 1100px) {
   .vt-player-layout {
     grid-template-columns: 1fr;
@@ -774,6 +781,79 @@ a {
   max-width: 100%;
   height: auto;
   margin: 0 auto;
+}
+.vt-companion-stage.active {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+.vt-companion-stage.active .vt-player-frame {
+  min-width: 0;
+}
+.vt-companion-stage.active .vt-player-frame::before {
+  content: "";
+  display: block;
+  padding-top: 56.25%;
+}
+.vt-companion-stage.active .vt-player-frame > .video-js {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  padding-top: 0 !important;
+}
+.vt-companion-stage.active .vt-player-frame .vjs-tech {
+  object-fit: contain;
+}
+.vt-companion-stage.active.composite-playing {
+  grid-template-columns: minmax(0, 1fr);
+}
+.vt-companion-stage.active.composite-playing #playerdiv::before {
+  padding-top: 28.125%;
+}
+.vt-companion-stage.active .vt-player-frame.vertical {
+  max-width: none;
+  margin: 0;
+}
+.vt-companion-frame[hidden] {
+  display: none;
+}
+.vt-video-label {
+  position: absolute;
+  z-index: 5;
+  top: 9px;
+  left: 9px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+}
+.vt-companion-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 2px;
+}
+.vt-companion-controls[hidden] {
+  display: none;
+}
+.vt-companion-offset,
+.vt-companion-status {
+  color: var(--vt-text-dim);
+  font-size: 12px;
+}
+.vt-companion-status.err {
+  color: var(--vt-danger);
+}
+@media (max-width: 800px) {
+  .vt-companion-stage.active {
+    grid-template-columns: 1fr;
+  }
 }
 .vt-player-title {
   font-size: 20px;

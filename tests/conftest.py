@@ -104,6 +104,7 @@ def client():
 
 
 _TABLES = [
+    'companion_links',
     'rescue_items', 'rescue_sessions',
     'sentinel_rescue_preview_items', 'sentinel_rescue_previews',
     'sentinel_archaeology_candidates',

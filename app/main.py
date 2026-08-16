@@ -9,6 +9,7 @@ from scanner import start_scanner
 from sentinel_inventory import start_census
 from downloader import start_dl_queue
 from transcoder import start_reaper_thread, start_cleanup_thread, shutdown_transcoder
+from composite import shutdown_composites
 from QueueObject import QueueObject
 from queue_utils import PriorityDownloadQueue
 from dotenv import load_dotenv
@@ -76,6 +77,10 @@ def _graceful_exit(signum, frame):
         shutdown_transcoder()
     except Exception as e:
         logger.error("Transcoder shutdown error: %s", e)
+    try:
+        shutdown_composites()
+    except Exception as e:
+        logger.error("Composite shutdown error: %s", e)
     sys.exit(0)
 
 signal.signal(signal.SIGTERM, _graceful_exit)
