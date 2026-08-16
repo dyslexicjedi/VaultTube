@@ -123,7 +123,7 @@
                 <span class="vt-modal-status" id="companion-modal-status"></span>
                 <button type="button" class="vt-btn-ghost danger" id="companion-remove" hidden>Remove pairing</button>
                 <button type="button" class="vt-btn-ghost" id="companion-cancel">Cancel</button>
-                <button type="submit" class="vt-btn">Load companion</button>
+                <button type="submit" class="vt-btn" id="companion-submit">Load companion</button>
             </div>
         </form>
     </div>
@@ -165,6 +165,7 @@
     var companionStateSavedAt = 0;
     var companionLastSavedPosition = -1;
     var companionLibraryLoaded = false;
+    var reactionSourceConfig = null;
 
     function getJSON(url) {
         return fetch(url).then(function (r) { return r.json(); });
@@ -427,6 +428,21 @@
             $id('companion-modal-status').className = 'vt-modal-status err';
             return;
         }
+        var reactionPosition = canonicalReactionPosition();
+        if (compositeMode && reactionSourceConfig) {
+            vPlayer.pause();
+            compositeMode = false;
+            compositeSessionId = null;
+            compositeReady = false;
+            $id('companion-stage').classList.remove('composite-playing');
+            $id('reaction-label').textContent = 'Reaction';
+            $id('companion-play').textContent = 'Play both';
+            $id('companion-pause').textContent = 'Pause both';
+            vPlayer.one('loadedmetadata', function () {
+                vPlayer.currentTime(reactionPosition);
+            });
+            vPlayer.src([reactionSourceConfig]);
+        }
         companionSynced = false;
         companionOffset = 0;
         companionItemId = itemId;
@@ -507,8 +523,14 @@
     $id('btn-companion').addEventListener('click', function () {
         companionModalStatus('', false);
         $id('companion-remove').hidden = !companionItemId;
+        $id('companion-submit').textContent = companionItemId ? 'Change / resync' : 'Load companion';
         $id('companion-modal').hidden = false;
-        if (companionItemId) $id('companion-item-id').value = companionItemId;
+        if (companionItemId) {
+            $id('companion-item-id').value = companionItemId;
+            $id('companion-initial-offset').value = Math.max(
+                0, canonicalReactionPosition() + companionOffset
+            ).toFixed(3);
+        }
         if (!companionLibraryLoaded) loadCompanionSeries();
         $id('companion-series-search').focus();
     });
@@ -643,7 +665,8 @@
         }
 
         vPlayer = videojs('player', { techOrder: ['html5'], autoplay: false });
-        vPlayer.src([reactionSource(v, filepath, ext)]);
+        reactionSourceConfig = reactionSource(v, filepath, ext);
+        vPlayer.src([reactionSourceConfig]);
         vPlayer.fluid(true);
         vPlayer.on('error', function () {
             var error = vPlayer.error();

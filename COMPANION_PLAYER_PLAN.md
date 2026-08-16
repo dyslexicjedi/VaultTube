@@ -186,8 +186,11 @@ Status: in progress. The first library-selection slice is implemented.
   available in the Companion dialog. Results contain sanitized metadata only;
   the browser never receives the Jellyfin URL or token. Manual item IDs remain a
   fallback for unusual library layouts.
+- Opening the picker from a saved composite restores the original reaction at
+  its canonical position before staging the selected episode, supporting the
+  initial **Change / resync** flow without losing the saved pairing.
 - Support named Jellyfin server profiles without exposing credentials.
-- Add polished **Change companion** and **Resync** actions. Pairing removal is
+- Further polish the combined **Change / resync** flow. Pairing removal is
   already available from the Companion dialog.
 - Report optional Jellyfin play progress and watched state.
 - Add operational limits, structured proxy errors, and transcode/session cleanup.

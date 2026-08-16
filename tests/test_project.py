@@ -2573,6 +2573,8 @@ def test_player_contains_phase1_companion_controls(client):
     assert b'id="companion-season"' in response.data
     assert b'id="companion-episode"' in response.data
     assert b"/api/jellyfin/library/" in response.data
+    assert b"reactionSourceConfig" in response.data
+    assert b"Change / resync" in response.data
 
 
 def test_companion_players_use_equal_letterboxed_viewports():
