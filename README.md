@@ -96,6 +96,9 @@ Optional:
 | `VAULTTUBE_JELLYFIN_TOKEN` | Access token for a dedicated, restricted Jellyfin user; kept server-side |
 | `VAULTTUBE_JELLYFIN_USER_ID` | Optional Jellyfin user ID sent with companion playback requests |
 | `VAULTTUBE_JELLYFIN_VERIFY_TLS` | Verify Jellyfin TLS certificates (default `true`; disable only for a trusted local test server) |
+| `VAULTTUBE_COMPOSITE_LOUDNESS` | Composite post-mix integrated loudness target in LUFS (default `-16`) |
+| `VAULTTUBE_COMPOSITE_LOUDNESS_RANGE` | Composite loudness-range target in LU (default `11`) |
+| `VAULTTUBE_COMPOSITE_TRUE_PEAK` | Composite maximum true peak in dBTP (default `-1.5`) |
 
 ## Contributing / Architecture
 

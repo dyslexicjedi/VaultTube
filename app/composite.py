@@ -8,6 +8,7 @@ VaultTube's existing transcode cache root.
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import subprocess
@@ -26,6 +27,7 @@ _SESSION_ID_RE = re.compile(r"^[a-f0-9]{24}$")
 _active = {}
 _lock = threading.Lock()
 _reaper_started = False
+_PIPELINE_VERSION = 2
 
 
 class CompositeError(RuntimeError):
@@ -57,6 +59,17 @@ def _validate_start(value, name):
     return round(value, 3)
 
 
+def _audio_target(env_name, default, minimum, maximum):
+    raw = os.environ.get(env_name, str(default))
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise CompositeError("%s must be a number" % env_name) from exc
+    if not math.isfinite(value) or value < minimum or value > maximum:
+        raise CompositeError("%s is out of range" % env_name)
+    return value
+
+
 def _session_payload(reaction_id, item_id, reaction_start, companion_start):
     if not _VIDEO_ID_RE.fullmatch(reaction_id or ""):
         raise CompositeError("Invalid reaction video ID")
@@ -68,6 +81,16 @@ def _session_payload(reaction_id, item_id, reaction_start, companion_start):
         "companion_start": _validate_start(companion_start, "companion_start"),
         "width": 1280,
         "height": 360,
+        "pipeline_version": _PIPELINE_VERSION,
+        "audio_loudness_i": _audio_target(
+            "VAULTTUBE_COMPOSITE_LOUDNESS", -16.0, -70.0, -5.0
+        ),
+        "audio_loudness_lra": _audio_target(
+            "VAULTTUBE_COMPOSITE_LOUDNESS_RANGE", 11.0, 1.0, 50.0
+        ),
+        "audio_true_peak": _audio_target(
+            "VAULTTUBE_COMPOSITE_TRUE_PEAK", -1.5, -9.0, 0.0
+        ),
     }
 
 
@@ -134,7 +157,8 @@ def create_session(reaction_id, item_id, reaction_start, companion_start):
         key: payload[key]
         for key in (
             "reaction_id", "item_id", "reaction_start", "companion_start",
-            "width", "height",
+            "width", "height", "pipeline_version", "audio_loudness_i",
+            "audio_loudness_lra", "audio_true_peak",
         )
     })
     _write_metadata(session_id, payload)
@@ -177,13 +201,19 @@ def _ffmpeg_command(metadata, cache_dir):
         "scale=%d:%d:force_original_aspect_ratio=decrease,"
         "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v1];"
         "[v0][v1]hstack=inputs=2[vout];"
-        "[0:a:0]asetpts=PTS-STARTPTS,aresample=async=1,volume=0.8[a0];"
-        "[1:a:0]asetpts=PTS-STARTPTS,aresample=async=1,volume=0.8[a1];"
+        "[0:a:0]asetpts=PTS-STARTPTS,aresample=async=1,"
+        "aformat=sample_fmts=fltp:channel_layouts=stereo[a0];"
+        "[1:a:0]asetpts=PTS-STARTPTS,aresample=async=1,"
+        "aformat=sample_fmts=fltp:channel_layouts=stereo[a1];"
         "[a0][a1]amix=inputs=2:duration=shortest:normalize=0,"
-        "alimiter=limit=0.95[aout]"
+        "loudnorm=I=%.1f:LRA=%.1f:TP=%.1f:linear=false,"
+        "aresample=48000[aout]"
     ) % (
         pane_width, pane_height, pane_width, pane_height,
         pane_width, pane_height, pane_width, pane_height,
+        metadata.get("audio_loudness_i", -16.0),
+        metadata.get("audio_loudness_lra", 11.0),
+        metadata.get("audio_true_peak", -1.5),
     )
     return [
         "ffmpeg", "-y",

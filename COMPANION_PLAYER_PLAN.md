@@ -155,10 +155,20 @@ Acceptance coverage:
 
 - Jellyfin items are entered by ID; library browsing/search is Phase 3.
 - Only one configured Jellyfin server profile is active, stored as `default`.
-- The post-mix audio is quieter than typical streaming sources. A measured sample
-  peaked around -10.4 dB versus -6.6 dB for the episode source. The planned fix is
-  post-mix loudness normalization (approximately -16 LUFS, -1.5 dB true peak) and
-  removal of the current per-input 80% reduction.
+- The original post-mix audio was quieter than typical streaming sources. A
+  measured sample peaked around -10.4 dB versus -6.6 dB for the episode source.
+  Pipeline version 2 removes the per-input 80% reduction, explicitly downmixes
+  both inputs to stereo, and applies single-pass EBU R128 normalization after the
+  mix (default -16 LUFS, 11 LU range, and -1.5 dB true peak). The targets are
+  configurable through `VAULTTUBE_COMPOSITE_LOUDNESS`,
+  `VAULTTUBE_COMPOSITE_LOUDNESS_RANGE`, and
+  `VAULTTUBE_COMPOSITE_TRUE_PEAK`. Audio settings and pipeline version participate
+  in the session cache key so old quiet segments are never reused. On the same
+  synchronized one-minute sample, pipeline v2 increased average level from
+  approximately -36.5 dB to -22.8 dB (about 14 dB) while the measured encoded
+  peak remained below full scale at approximately -0.9 dB. Browser playback and
+  saved-session restoration were reverified, and the full suite passed with 242
+  tests.
 - Offset corrections after synchronization create a new composite session;
   playback seeking within the current composite uses its HLS VOD timeline.
 

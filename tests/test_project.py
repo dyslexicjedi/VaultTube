@@ -2277,9 +2277,46 @@ def test_composite_ffmpeg_command_builds_side_by_side_mixed_audio(monkeypatch, t
 
     assert "hstack=inputs=2" in filter_graph
     assert "amix=inputs=2" in filter_graph
+    assert "amix=inputs=2:duration=shortest:normalize=0" in filter_graph
     assert "scale=640:360" in filter_graph
+    assert "volume=0.8" not in filter_graph
+    assert "channel_layouts=stereo" in filter_graph
+    assert "loudnorm=I=-16.0:LRA=11.0:TP=-1.5:linear=false" in filter_graph
+    assert "aresample=48000" in filter_graph
     assert "api_key" not in " ".join(command)
     assert any(part.startswith("X-Emby-Token: server-token") for part in command)
+
+
+def test_composite_audio_targets_change_the_cache_key(monkeypatch, tmp_path):
+    import composite
+
+    source = tmp_path / "reaction.mp4"
+    source.write_bytes(b"test")
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
+    monkeypatch.setattr(composite, "get_duration", lambda path: 100.0)
+    monkeypatch.setattr(composite, "get_config", lambda: {"token": "secret"})
+    monkeypatch.setattr(
+        composite, "item_info",
+        lambda config, item_id: {"id": item_id, "name": "Episode", "duration": 80.0},
+    )
+
+    original_id, original = composite.create_session("Reaction1", "Item123", 10, 5)
+    monkeypatch.setenv("VAULTTUBE_COMPOSITE_LOUDNESS", "-14")
+    louder_id, louder = composite.create_session("Reaction1", "Item123", 10, 5)
+
+    assert original["pipeline_version"] == 2
+    assert original["audio_loudness_i"] == -16.0
+    assert louder["audio_loudness_i"] == -14.0
+    assert louder_id != original_id
+
+
+def test_composite_rejects_invalid_audio_target(monkeypatch):
+    import composite
+
+    monkeypatch.setenv("VAULTTUBE_COMPOSITE_TRUE_PEAK", "2")
+    with pytest.raises(composite.CompositeError, match="TRUE_PEAK is out of range"):
+        composite._session_payload("Reaction1", "Item123", 10, 5)
 
 
 def test_composite_create_api_returns_playlist(client, monkeypatch):
