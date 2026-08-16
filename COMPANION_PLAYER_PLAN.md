@@ -153,7 +153,9 @@ Acceptance coverage:
 
 ### Known limitations
 
-- Jellyfin items are entered by ID; library browsing/search is Phase 3.
+- The Phase 3 picker supports the configured default profile and the standard
+  Series → Season → Episode hierarchy. Manual item IDs remain available for
+  unusual library layouts; named profiles and broader media types are pending.
 - Only one configured Jellyfin server profile is active, stored as `default`.
 - The original post-mix audio was quieter than typical streaming sources. A
   measured sample peaked around -10.4 dB versus -6.6 dB for the episode source.
