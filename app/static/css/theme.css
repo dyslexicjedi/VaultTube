@@ -1123,6 +1123,10 @@ a {
   gap: 8px;
   margin-bottom: 12px;
 }
+
+#companion-profile-field {
+  margin-bottom: 14px;
+}
 .vt-companion-library-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

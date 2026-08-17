@@ -18,11 +18,12 @@ from vault_paths import public_video_path, resolve_vault_path
 from sentinel import export_sentinel_data
 from jellyfin import (
     JellyfinConfigError, JellyfinProxyError, decode_asset_url, get_config,
-    is_configured, item_info, library_items, manifest_params, manifest_url, rewrite_manifest,
-    upstream_get, validate_item_id,
+    item_info, library_items, manifest_params, manifest_url,
+    profile_summaries, report_playback, rewrite_manifest, upstream_get,
+    validate_item_id,
 )
 from composite import (
-    CompositeError, cache_dir_for as composite_cache_dir,
+    CompositeBusyError, CompositeError, cache_dir_for as composite_cache_dir,
     create_session as create_composite_session,
     ensure_running as ensure_composite_running,
     load_session as load_composite_session,
@@ -53,8 +54,12 @@ def parse_response(cur,con):
 def api_success(data=None):
     return jsonify({"success": True, "data": data})
 
-def api_error(error, status_code=400):
-    return jsonify({"success": False, "error": error}), status_code
+def api_error(error, status_code=400, *, code=None, retryable=False):
+    payload = {"success": False, "error": error}
+    if code:
+        payload["code"] = code
+        payload["retryable"] = bool(retryable)
+    return jsonify(payload), status_code
 
 
 def _jellyfin_response(upstream, item_id, config):
@@ -96,7 +101,11 @@ ALLOWED_DIRECTIONS = {'asc', 'desc'}
 @api_bp.route('/jellyfin/phase1/status')
 def jellyfin_phase1_status():
     """Report whether the optional companion playback spike is configured."""
-    return api_success({'configured': is_configured()})
+    try:
+        profiles = profile_summaries()
+        return api_success({'configured': bool(profiles), 'profiles': profiles})
+    except JellyfinConfigError as e:
+        return api_error(str(e), 500, code='jellyfin_configuration')
 
 
 @api_bp.route('/jellyfin/library/<string:kind>')
@@ -104,17 +113,20 @@ def jellyfin_library(kind):
     """Expose sanitized library metadata without exposing Jellyfin credentials."""
     try:
         rows = library_items(
-            get_config(), kind,
+            get_config(request.args.get('profile', 'default')), kind,
             parent_id=request.args.get('parent_id'),
             search=request.args.get('search'),
             limit=request.args.get('limit', 200),
         )
         return api_success(rows)
     except (JellyfinConfigError, JellyfinProxyError) as e:
-        return api_error(str(e), 400)
+        return api_error(str(e), 400, code='jellyfin_request')
     except requests.RequestException as e:
         logger.warning('Jellyfin library request failed for %s: %s', kind, e)
-        return api_error('Jellyfin is unavailable', 502)
+        return api_error(
+            'Jellyfin is unavailable', 502,
+            code='jellyfin_unavailable', retryable=True,
+        )
 
 
 def _finite_companion_number(value, name, minimum=None, maximum=86400.0):
@@ -144,6 +156,9 @@ def companion_state(reaction_id):
     try:
         payload = request.get_json(silent=True) or {}
         existing = get_companion_link(reaction_id)
+        profile_id = payload.get('server_profile_id') or (
+            existing and existing['server_profile_id']
+        ) or 'default'
         item_id = payload.get('jellyfin_item_id') or (
             existing and existing['jellyfin_item_id']
         )
@@ -164,6 +179,12 @@ def companion_state(reaction_id):
         synced = payload.get('synced', existing['synced'] if existing else True)
         if not isinstance(synced, bool):
             return api_error('synced must be a boolean', 400)
+        playback_event = payload.get('playback_event')
+        if playback_event not in (None, 'progress', 'pause', 'stop', 'ended'):
+            return api_error('Invalid Jellyfin playback event', 400)
+        jellyfin_watched = payload.get('jellyfin_watched', False)
+        if not isinstance(jellyfin_watched, bool):
+            return api_error('jellyfin_watched must be a boolean', 400)
 
         con = get_connection()
         cur = con.cursor()
@@ -177,18 +198,36 @@ def companion_state(reaction_id):
 
         # Metadata validation is needed when a pairing is first created or its
         # item changes, but not for every coalesced progress update.
-        if not existing or existing['jellyfin_item_id'] != item_id:
-            item_info(get_config(), item_id)
+        config = get_config(profile_id)
+        if (not existing or existing['jellyfin_item_id'] != item_id
+                or existing['server_profile_id'] != profile_id):
+            item_info(config, item_id)
         saved = save_companion_link(
             reaction_id, item_id, offset, position, synced,
-            server_profile_id='default',
+            server_profile_id=profile_id,
         )
+        if playback_event:
+            try:
+                report_playback(
+                    config, item_id, max(0, position + offset),
+                    watched=jellyfin_watched,
+                )
+            except (JellyfinProxyError, requests.RequestException) as e:
+                # Jellyfin history is optional; never lose canonical VaultTube
+                # progress because its secondary reporting endpoint is down.
+                logger.warning(
+                    'Optional Jellyfin progress report failed for %s: %s',
+                    reaction_id, e,
+                )
         return api_success(saved)
     except (ValueError, JellyfinConfigError, JellyfinProxyError) as e:
-        return api_error(str(e), 400)
+        return api_error(str(e), 400, code='jellyfin_request')
     except requests.RequestException as e:
         logger.warning('Companion item validation failed for %s: %s', reaction_id, e)
-        return api_error('Jellyfin is unavailable', 502)
+        return api_error(
+            'Jellyfin is unavailable', 502,
+            code='jellyfin_unavailable', retryable=True,
+        )
 
 
 @api_bp.route('/jellyfin/phase1/<string:item_id>/manifest.m3u8')
@@ -197,7 +236,7 @@ def jellyfin_phase1_manifest(item_id):
     upstream = None
     try:
         validate_item_id(item_id)
-        config = get_config()
+        config = get_config(request.args.get('profile', 'default'))
         upstream = upstream_get(
             config, manifest_url(config, item_id),
             params=manifest_params(config, item_id))
@@ -205,12 +244,15 @@ def jellyfin_phase1_manifest(item_id):
     except (JellyfinConfigError, JellyfinProxyError) as e:
         if upstream is not None:
             upstream.close()
-        return api_error(str(e), 400)
+        return api_error(str(e), 400, code='jellyfin_request')
     except requests.RequestException as e:
         if upstream is not None:
             upstream.close()
         logger.warning('Jellyfin manifest request failed for %s: %s', item_id, e)
-        return api_error('Jellyfin is unavailable', 502)
+        return api_error(
+            'Jellyfin is unavailable', 502,
+            code='jellyfin_unavailable', retryable=True,
+        )
 
 
 @api_bp.route('/jellyfin/phase1/<string:item_id>/asset/<string:encoded>')
@@ -219,7 +261,7 @@ def jellyfin_phase1_asset(item_id, encoded):
     upstream = None
     try:
         validate_item_id(item_id)
-        config = get_config()
+        config = get_config(request.args.get('profile', 'default'))
         upstream_url = decode_asset_url(config, item_id, encoded)
         upstream = upstream_get(
             config, upstream_url,
@@ -228,12 +270,15 @@ def jellyfin_phase1_asset(item_id, encoded):
     except (JellyfinConfigError, JellyfinProxyError) as e:
         if upstream is not None:
             upstream.close()
-        return api_error(str(e), 400)
+        return api_error(str(e), 400, code='jellyfin_request')
     except requests.RequestException as e:
         if upstream is not None:
             upstream.close()
         logger.warning('Jellyfin asset request failed for %s: %s', item_id, e)
-        return api_error('Jellyfin is unavailable', 502)
+        return api_error(
+            'Jellyfin is unavailable', 502,
+            code='jellyfin_unavailable', retryable=True,
+        )
 
 
 @api_bp.route('/companion/composite', methods=['POST'])
@@ -246,6 +291,7 @@ def companion_composite_create():
             payload.get('jellyfin_item_id'),
             payload.get('reaction_start'),
             payload.get('companion_start'),
+            payload.get('server_profile_id', 'default'),
         )
         ensure_composite_running(session_id)
         return api_success({
@@ -255,14 +301,27 @@ def companion_composite_create():
             'height': metadata['height'],
             'playlist': '/api/companion/composite/%s/playlist.m3u8' % session_id,
         })
-    except (CompositeError, JellyfinConfigError, JellyfinProxyError) as e:
-        return api_error(str(e), 400)
+    except CompositeBusyError as e:
+        response, status = api_error(
+            str(e), e.status, code=e.code, retryable=e.retryable,
+        )
+        response.headers['Retry-After'] = '5'
+        return response, status
+    except CompositeError as e:
+        return api_error(
+            str(e), e.status, code=e.code, retryable=e.retryable,
+        )
+    except (JellyfinConfigError, JellyfinProxyError) as e:
+        return api_error(str(e), 400, code='jellyfin_request')
     except requests.RequestException as e:
         logger.warning('Composite Jellyfin metadata request failed: %s', e)
-        return api_error('Jellyfin is unavailable', 502)
+        return api_error(
+            'Jellyfin is unavailable', 502,
+            code='jellyfin_unavailable', retryable=True,
+        )
     except Exception as e:
         logger.exception('Composite session creation failed')
-        return api_error(str(e), 500)
+        return api_error(str(e), 500, code='composite_internal')
 
 
 @api_bp.route('/companion/composite/<string:session_id>/playlist.m3u8')
@@ -277,10 +336,12 @@ def companion_composite_playlist(session_id):
     except HTTPException:
         raise
     except CompositeError as e:
-        return api_error(str(e), 404)
+        return api_error(
+            str(e), e.status, code=e.code, retryable=e.retryable,
+        )
     except Exception as e:
         logger.exception('Composite playlist failed for %s', session_id)
-        return api_error(str(e), 500)
+        return api_error(str(e), 500, code='composite_internal')
 
 
 @api_bp.route('/companion/composite/<string:session_id>/seg_<string:segment>.ts')
@@ -297,7 +358,10 @@ def companion_composite_segment(session_id, segment):
             session_id, index, timeout=_segment_wait_timeout())
         if not path:
             logger.warning('Composite segment %s unavailable for %s', index, session_id)
-            abort(404)
+            return api_error(
+                'Composite segment is not available', 503,
+                code='composite_segment_unavailable', retryable=True,
+            )
         cache_dir = os.path.realpath(composite_cache_dir(session_id))
         real_path = os.path.realpath(path)
         if not real_path.startswith(cache_dir + os.sep):
@@ -308,10 +372,12 @@ def companion_composite_segment(session_id, segment):
     except HTTPException:
         raise
     except CompositeError as e:
-        return api_error(str(e), 404)
+        return api_error(
+            str(e), e.status, code=e.code, retryable=e.retryable,
+        )
     except Exception as e:
         logger.exception('Composite segment failed for %s/%s', session_id, segment)
-        return api_error(str(e), 500)
+        return api_error(str(e), 500, code='composite_internal')
 
 # Conservative, unmistakable adult-content terms used by Home's content
 # selector.  Each fragment is wrapped in a non-word boundary by

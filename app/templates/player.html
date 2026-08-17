@@ -32,6 +32,8 @@
             <button type="button" class="vt-btn" id="companion-play">Play both</button>
             <button type="button" class="vt-btn-ghost" id="companion-pause">Pause both</button>
             <button type="button" class="vt-btn-ghost" id="companion-sync">Sync here</button>
+            <button type="button" class="vt-btn-ghost" id="companion-retry" hidden>Retry composite</button>
+            <button type="button" class="vt-btn-ghost" id="companion-cancel-change" hidden>Restore saved pairing</button>
             <button type="button" class="vt-btn-ghost" id="companion-minus">−1s</button>
             <button type="button" class="vt-btn-ghost" id="companion-plus">+1s</button>
             <span class="vt-companion-offset" id="companion-offset">Offset 0.000s</span>
@@ -87,6 +89,10 @@
         <h3 id="companion-modal-title">Jellyfin companion</h3>
         <p class="vt-modal-text">Choose the episode you own. The pairing and synchronized position will be saved.</p>
         <form id="companion-form">
+            <label class="vt-field" id="companion-profile-field" hidden>
+                <span>Jellyfin server</span>
+                <select class="vt-select" id="companion-profile"></select>
+            </label>
             <div class="vt-companion-library-search">
                 <label class="vt-field">
                     <span>Find a show</span>
@@ -162,6 +168,10 @@
     var compositeReactionStart = 0;
     var compositeReady = false;
     var companionItemId = null;
+    var companionProfileId = 'default';
+    var companionProfilesLoaded = false;
+    var savedCompanionState = null;
+    var companionChangePending = false;
     var companionStateSavedAt = 0;
     var companionLastSavedPosition = -1;
     var companionLibraryLoaded = false;
@@ -198,9 +208,39 @@
         select.disabled = !items.length;
     }
 
+    function loadCompanionProfiles() {
+        return fetch('/api/jellyfin/phase1/status').then(function (response) {
+            return response.json().then(function (body) {
+                if (!response.ok || !body.success) {
+                    throw new Error(body.error || 'Could not load Jellyfin configuration');
+                }
+                var profiles = (body.data && body.data.profiles) || [];
+                if (!profiles.length) throw new Error('Jellyfin is not configured');
+                var select = $id('companion-profile');
+                select.textContent = '';
+                profiles.forEach(function (profile) {
+                    var option = document.createElement('option');
+                    option.value = profile.id;
+                    option.textContent = profile.name;
+                    select.appendChild(option);
+                });
+                if (profiles.some(function (profile) { return profile.id === companionProfileId; })) {
+                    select.value = companionProfileId;
+                } else {
+                    companionProfileId = profiles[0].id;
+                    select.value = companionProfileId;
+                }
+                $id('companion-profile-field').hidden = profiles.length < 2;
+                companionProfilesLoaded = true;
+                return profiles;
+            });
+        });
+    }
+
     function fetchCompanionLibrary(kind, options) {
         options = options || {};
         var query = new URLSearchParams();
+        query.set('profile', companionProfileId);
         if (options.parentId) query.set('parent_id', options.parentId);
         if (options.search) query.set('search', options.search);
         return fetch('/api/jellyfin/library/' + kind + '?' + query.toString()).then(function (response) {
@@ -283,7 +323,7 @@
         }
         return Math.max(0, vPlayer.currentTime() || 0);
     }
-    function saveCompanionState(force, explicitPosition) {
+    function saveCompanionState(force, explicitPosition, playbackEvent) {
         if (!companionActive || !companionSynced || !companionItemId) return;
         var position = Number.isFinite(explicitPosition)
             ? Math.max(0, explicitPosition) : canonicalReactionPosition();
@@ -297,10 +337,13 @@
             headers: { 'Content-Type': 'application/json' },
             keepalive: !!force,
             body: JSON.stringify({
+                server_profile_id: companionProfileId,
                 jellyfin_item_id: companionItemId,
                 sync_offset: companionOffset,
                 reaction_position: position,
-                synced: true
+                synced: true,
+                playback_event: playbackEvent || (force ? 'pause' : 'progress'),
+                jellyfin_watched: playbackEvent === 'ended'
             })
         }).catch(function () { /* the next progress flush retries */ });
     }
@@ -355,6 +398,10 @@
 
     function startCompositeSession(reactionStart, companionStart, options) {
         options = options || {};
+        var previousComposite = compositeMode && compositeSessionId ? {
+            synced: companionSynced,
+            offset: companionOffset
+        } : null;
         var requestedOffset = Number.isFinite(options.syncOffset)
             ? options.syncOffset : companionStart - reactionStart;
         companionGuard = true;
@@ -364,6 +411,7 @@
         companionSynced = false;
         setSharedControlsEnabled(false);
         $id('companion-sync').disabled = true;
+        $id('companion-retry').hidden = true;
         setCompanionStatus('Preparing synchronized composite stream…', false);
 
         fetch('/api/companion/composite', {
@@ -371,13 +419,18 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 reaction_id: id,
+                server_profile_id: companionProfileId,
                 jellyfin_item_id: companionItemId,
                 reaction_start: reactionStart,
                 companion_start: companionStart
             })
         }).then(function (response) {
             return response.json().then(function (body) {
-                if (!response.ok || !body.success) throw new Error(body.error || 'Composite session failed');
+                if (!response.ok || !body.success) {
+                    var message = body.error || 'Composite session failed';
+                    if (body.retryable) message += ' You can retry without losing the saved pairing.';
+                    throw new Error(message);
+                }
                 return body.data;
             });
         }).then(function (session) {
@@ -387,6 +440,9 @@
             compositeReady = false;
             companionOffset = requestedOffset;
             companionSynced = true;
+            companionChangePending = false;
+            $id('companion-cancel-change').hidden = true;
+            $id('companion-retry').hidden = true;
             clearInterval(companionDriftTimer);
             $id('companion-frame').hidden = true;
             $id('companion-stage').classList.add('composite-playing');
@@ -399,6 +455,7 @@
             saveCompanionState(true, reactionStart);
             var cleanParams = new URLSearchParams(window.location.search);
             cleanParams.delete('jellyfin');
+            cleanParams.delete('jellyfinProfile');
             cleanParams.delete('companionTime');
             cleanParams.delete('offset');
             history.replaceState(null, '', window.location.pathname + '?' + cleanParams.toString());
@@ -416,19 +473,31 @@
                 src: session.playlist
             });
         }).catch(function (error) {
-            companionSynced = false;
-            setSharedControlsEnabled(false);
-            $id('companion-sync').disabled = !companionPlayer;
+            if (previousComposite) {
+                companionSynced = previousComposite.synced;
+                companionOffset = previousComposite.offset;
+                setSharedControlsEnabled(true);
+                $id('companion-sync').disabled = true;
+                updateCompanionOffset();
+            } else {
+                companionSynced = false;
+                setSharedControlsEnabled(false);
+                $id('companion-sync').disabled = !companionPlayer;
+            }
+            $id('companion-retry').hidden = false;
             setCompanionStatus(error.message || 'Composite session failed', true);
         });
     }
-    function activateCompanion(itemId, companionStartTime) {
+    function activateCompanion(itemId, companionStartTime, profileId) {
         if (!/^[A-Za-z0-9_-]{1,128}$/.test(itemId)) {
             $id('companion-modal-status').textContent = 'Enter a valid Jellyfin item ID.';
             $id('companion-modal-status').className = 'vt-modal-status err';
             return;
         }
         var reactionPosition = canonicalReactionPosition();
+        companionProfileId = profileId || companionProfileId || 'default';
+        companionChangePending = !!savedCompanionState;
+        $id('companion-cancel-change').hidden = !companionChangePending;
         if (compositeMode && reactionSourceConfig) {
             vPlayer.pause();
             compositeMode = false;
@@ -484,10 +553,12 @@
         setCompanionStatus('Loading companion…', false);
         companionPlayer.src({
             type: 'application/x-mpegURL',
-            src: '/api/jellyfin/phase1/' + encodeURIComponent(itemId) + '/manifest.m3u8'
+            src: '/api/jellyfin/phase1/' + encodeURIComponent(itemId)
+                + '/manifest.m3u8?profile=' + encodeURIComponent(companionProfileId)
         });
         var params = new URLSearchParams(window.location.search);
         params.set('jellyfin', itemId);
+        params.set('jellyfinProfile', companionProfileId);
         params.set('companionTime', String(companionPendingStartTime));
         params.delete('offset');
         history.replaceState(null, '', window.location.pathname + '?' + params.toString());
@@ -501,8 +572,11 @@
 
     function restoreSavedCompanion(state) {
         var reactionPosition = Math.max(0, Number(state.reaction_position) || 0);
+        savedCompanionState = state;
         companionItemId = state.jellyfin_item_id;
+        companionProfileId = state.server_profile_id || 'default';
         companionOffset = Number(state.sync_offset) || 0;
+        companionChangePending = false;
         companionActive = true;
         companionSynced = false;
         $id('companion-controls').hidden = false;
@@ -511,6 +585,7 @@
         $id('companion-stage').classList.add('active');
         document.querySelector('.vt-player-layout').classList.add('companion-mode');
         $id('companion-remove').hidden = false;
+        $id('companion-cancel-change').hidden = true;
         vPlayer.currentTime(reactionPosition);
         setCompanionStatus('Restoring saved companion position…', false);
         startCompositeSession(
@@ -531,8 +606,21 @@
                 0, canonicalReactionPosition() + companionOffset
             ).toFixed(3);
         }
-        if (!companionLibraryLoaded) loadCompanionSeries();
+        var ready = companionProfilesLoaded
+            ? Promise.resolve()
+            : loadCompanionProfiles();
+        ready.then(function () {
+            $id('companion-profile').value = companionProfileId;
+            if (!companionLibraryLoaded) loadCompanionSeries();
+        }).catch(function (error) {
+            companionModalStatus(error.message, true);
+        });
         $id('companion-series-search').focus();
+    });
+    $id('companion-profile').addEventListener('change', function () {
+        companionProfileId = this.value;
+        companionLibraryLoaded = false;
+        loadCompanionSeries();
     });
     $id('companion-series-search-button').addEventListener('click', loadCompanionSeries);
     $id('companion-series-search').addEventListener('keydown', function (e) {
@@ -568,22 +656,41 @@
     $id('companion-cancel').addEventListener('click', function () { $id('companion-modal').hidden = true; });
     $id('companion-modal').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
     $id('companion-remove').addEventListener('click', function () {
+        companionModalStatus('Removing saved pairing…', false);
         fetch('/api/companion/state/' + encodeURIComponent(id), { method: 'DELETE' })
-            .then(function () {
+            .then(function (response) {
+                if (!response.ok) throw new Error('Could not remove pairing');
                 window.location.href = '/player.html?id=' + encodeURIComponent(id);
-            });
+            }).catch(function (error) { companionModalStatus(error.message, true); });
+    });
+    $id('companion-cancel-change').addEventListener('click', function () {
+        window.location.href = '/player.html?id=' + encodeURIComponent(id);
     });
     $id('companion-form').addEventListener('submit', function (e) {
         e.preventDefault();
         var offset = parseFloat($id('companion-initial-offset').value);
         var itemId = $id('companion-episode').value || $id('companion-item-id').value.trim();
-        activateCompanion(itemId, Number.isFinite(offset) ? offset : 0);
+        activateCompanion(
+            itemId,
+            Number.isFinite(offset) ? offset : 0,
+            $id('companion-profile').value || companionProfileId
+        );
     });
     $id('companion-play').addEventListener('click', playBoth);
     $id('companion-pause').addEventListener('click', function () { pauseBoth('Paused'); });
     $id('companion-sync').addEventListener('click', function () {
         if (!vPlayer || !companionPlayer) return;
         startCompositeSession(vPlayer.currentTime(), companionPlayer.currentTime());
+    });
+    $id('companion-retry').addEventListener('click', function () {
+        var reactionPosition = canonicalReactionPosition();
+        var companionPosition = companionPlayer && !$id('companion-frame').hidden
+            ? companionPlayer.currentTime()
+            : Math.max(0, reactionPosition + companionOffset);
+        startCompositeSession(
+            reactionPosition, companionPosition,
+            { syncOffset: companionOffset, restored: !companionPlayer }
+        );
     });
     $id('companion-minus').addEventListener('click', function () {
         var position = canonicalReactionPosition();
@@ -681,7 +788,7 @@
         video.addEventListener('pause', function () {
             clearInterval(tspoll);
             fetch('/api/set_timestamp/' + canonicalReactionPosition() + '/' + encodeURIComponent(id));
-            saveCompanionState(true);
+            saveCompanionState(true, undefined, 'pause');
             if (!compositeMode && companionSynced && !companionGuard && companionPlayer && !companionPlayer.paused()) {
                 pauseBoth('Paused');
             }
@@ -701,7 +808,7 @@
             clearInterval(tspoll);
             fetch('/api/watched/' + encodeURIComponent(id)).then(function () { setWatchedUI(true); });
             fetch('/api/set_timestamp/0/' + encodeURIComponent(id));
-            saveCompanionState(true, 0);
+            saveCompanionState(true, 0, 'ended');
             maybeAutoplayNext();
         });
         video.addEventListener('canplay', function () {
@@ -920,7 +1027,8 @@
             var companionTime = parseFloat(companionParams.get('companionTime') || companionParams.get('offset') || '0');
             activateCompanion(
                 companionParams.get('jellyfin'),
-                Number.isFinite(companionTime) ? companionTime : 0
+                Number.isFinite(companionTime) ? companionTime : 0,
+                companionParams.get('jellyfinProfile') || 'default'
             );
             return;
         }
@@ -933,7 +1041,7 @@
     setTimeout(function () { clearInterval(companionTry); }, 5000);
 
     window.addEventListener('pagehide', function () {
-        saveCompanionState(true);
+        saveCompanionState(true, undefined, 'stop');
     });
 
     // --- Delete with confirm modal ---

@@ -22,9 +22,9 @@ in MariaDB. Reopening the reaction creates a fresh composite session at the save
 position and leaves it paused for the next user gesture. Jellyfin credentials are
 applied only on the server and are not included in browser URLs or manifests.
 
-The player's **Companion** dialog can search the configured Jellyfin library and
-browse from show to season to episode. A manual item-ID field remains available
-as a fallback. Multi-server profiles remain future work. See
+The player's **Companion** dialog can select a named Jellyfin server, search its
+library, and browse from show to season to episode. A manual item-ID field
+remains available as a fallback. See
 [COMPANION_PLAYER_PLAN.md](COMPANION_PLAYER_PLAN.md) for architecture, routes,
 verification, limitations, and the remaining roadmap.
 
@@ -97,11 +97,37 @@ Optional:
 | `VAULTTUBE_JELLYFIN_TOKEN` | Access token for a dedicated, restricted Jellyfin user; kept server-side |
 | `VAULTTUBE_JELLYFIN_USER_ID` | Optional Jellyfin user ID used to scope companion playback and library browsing |
 | `VAULTTUBE_JELLYFIN_VERIFY_TLS` | Verify Jellyfin TLS certificates (default `true`; disable only for a trusted local test server) |
+| `VAULTTUBE_JELLYFIN_NAME` | Display name for the legacy/default Jellyfin profile (default `Default`) |
+| `VAULTTUBE_JELLYFIN_REPORT_PLAYBACK` | Opt in to updating the configured Jellyfin user's resume position and watched state (default `false`; requires `USER_ID`) |
+| `VAULTTUBE_JELLYFIN_PROFILES` | JSON object of named Jellyfin profiles; each entry accepts `name`, `url`, `token`, `user_id`, `verify_tls`, and `report_playback` |
 | `VAULTTUBE_COMPOSITE_LOUDNESS` | Composite post-mix integrated loudness target in LUFS (default `-16`) |
 | `VAULTTUBE_COMPOSITE_LOUDNESS_RANGE` | Composite loudness-range target in LU (default `11`) |
 | `VAULTTUBE_COMPOSITE_TRUE_PEAK` | Composite maximum true peak in dBTP (default `-1.5`) |
 | `VAULTTUBE_COMPOSITE_REACTION_GAIN_DB` | Reaction input gain before the final mix (default `+12` dB) |
 | `VAULTTUBE_COMPOSITE_COMPANION_GAIN_DB` | Jellyfin input gain before the final mix (default `-8` dB) |
+| `VAULTTUBE_MAX_CONCURRENT_COMPOSITES` | Maximum simultaneous companion FFmpeg processes (default `1`, capped at `16`) |
+| `VAULTTUBE_COMPOSITE_MAX_SESSIONS` | Maximum inactive composite session caches retained before oldest-first eviction (default `50`) |
+
+The original `VAULTTUBE_JELLYFIN_*` URL/token/user variables remain supported
+as the `default` profile. Named profiles can be supplied without exposing their
+credentials to the browser, for example:
+
+```json
+{
+  "default": {
+    "name": "Home",
+    "url": "http://jellyfin:8096",
+    "token": "server-only-token",
+    "user_id": "jellyfin-user-id",
+    "report_playback": true
+  },
+  "remote": {
+    "name": "Remote library",
+    "url": "https://media.example.com",
+    "token": "another-server-only-token"
+  }
+}
+```
 
 ## Contributing / Architecture
 

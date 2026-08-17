@@ -2141,6 +2141,52 @@ def test_jellyfin_phase1_status_is_optional(client, monkeypatch):
     assert response.get_json()["data"]["configured"] is False
 
 
+def test_jellyfin_named_profiles_are_sanitized_and_legacy_default_survives(
+        client, monkeypatch):
+    import jellyfin
+
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_URL", "http://legacy:8096")
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_TOKEN", "legacy-secret")
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_PROFILES", json.dumps({
+        "remote": {
+            "name": "Remote library",
+            "url": "https://media.example.test",
+            "token": "remote-secret",
+            "user_id": "UserRemote",
+            "verify_tls": True,
+        },
+    }))
+
+    assert jellyfin.get_config("default")["base_url"] == "http://legacy:8096"
+    assert jellyfin.get_config("remote")["token"] == "remote-secret"
+    response = client.get("/api/jellyfin/phase1/status")
+    body = response.get_json()
+
+    assert response.status_code == 200
+    assert body["data"]["profiles"] == [
+        {"id": "remote", "name": "Remote library"},
+        {"id": "default", "name": "Default"},
+    ]
+    assert "secret" not in response.get_data(as_text=True)
+    assert "media.example" not in response.get_data(as_text=True)
+
+
+def test_jellyfin_rejects_invalid_profile_configuration(monkeypatch):
+    import jellyfin
+
+    monkeypatch.delenv("VAULTTUBE_JELLYFIN_URL", raising=False)
+    monkeypatch.delenv("VAULTTUBE_JELLYFIN_TOKEN", raising=False)
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_PROFILES", "[]")
+    with pytest.raises(jellyfin.JellyfinConfigError, match="JSON object"):
+        jellyfin.profile_summaries()
+
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_PROFILES", json.dumps({
+        "not valid": {"url": "http://jellyfin", "token": "secret"},
+    }))
+    with pytest.raises(jellyfin.JellyfinConfigError, match="profile ID"):
+        jellyfin.profile_summaries()
+
+
 def test_jellyfin_library_items_are_user_scoped_and_sanitized(monkeypatch):
     import jellyfin
 
@@ -2206,7 +2252,7 @@ def test_jellyfin_library_api_returns_sanitized_rows(client, monkeypatch):
     import api
 
     calls = []
-    monkeypatch.setattr(api, "get_config", lambda: {"token": "secret"})
+    monkeypatch.setattr(api, "get_config", lambda profile_id="default": {"token": "secret"})
     monkeypatch.setattr(
         api, "library_items",
         lambda config, kind, **kwargs: calls.append((config, kind, kwargs)) or [{
@@ -2223,11 +2269,27 @@ def test_jellyfin_library_api_returns_sanitized_rows(client, monkeypatch):
     })]
 
 
+def test_jellyfin_library_api_selects_named_profile(client, monkeypatch):
+    import api
+
+    profiles = []
+    monkeypatch.setattr(
+        api, "get_config",
+        lambda profile_id="default": profiles.append(profile_id) or {"token": "secret"},
+    )
+    monkeypatch.setattr(api, "library_items", lambda *args, **kwargs: [])
+
+    response = client.get("/api/jellyfin/library/series?profile=remote")
+
+    assert response.status_code == 200
+    assert profiles == ["remote"]
+
+
 def test_jellyfin_library_api_rejects_missing_parent(client, monkeypatch):
     import api
     import jellyfin
 
-    monkeypatch.setattr(api, "get_config", lambda: {"token": "secret"})
+    monkeypatch.setattr(api, "get_config", lambda profile_id="default": {"token": "secret"})
     monkeypatch.setattr(
         api, "library_items",
         lambda *args, **kwargs: (_ for _ in ()).throw(
@@ -2334,6 +2396,40 @@ def test_jellyfin_asset_rejects_other_hosts(monkeypatch):
             config, "Item123", "https://attacker.example/Videos/Item123/0.ts")
 
 
+def test_jellyfin_playback_reporting_is_opt_in_and_user_scoped(monkeypatch):
+    import jellyfin
+
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        jellyfin.requests, "post",
+        lambda url, **kwargs: calls.append((url, kwargs)) or FakeResponse(),
+    )
+    disabled = {
+        "base_url": "http://jellyfin:8096", "token": "secret",
+        "user_id": "User123", "verify_tls": True,
+        "report_playback": False,
+    }
+    assert jellyfin.report_playback(disabled, "Item123", 12.5) is False
+    assert calls == []
+
+    enabled = dict(disabled, report_playback=True)
+    assert jellyfin.report_playback(
+        enabled, "Item123", 12.5, watched=True
+    ) is True
+    assert calls[0][0].endswith("/Users/User123/Items/Item123/UserData")
+    assert calls[0][1]["json"] == {"PlaybackPositionTicks": 125000000}
+    assert calls[1][0].endswith("/Users/User123/PlayedItems/Item123")
+    assert all(call[1]["headers"] == {"X-Emby-Token": "secret"} for call in calls)
+
+
 def test_composite_session_is_deterministic_and_bounded(monkeypatch, tmp_path):
     import composite
 
@@ -2342,7 +2438,7 @@ def test_composite_session_is_deterministic_and_bounded(monkeypatch, tmp_path):
     monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
     monkeypatch.setattr(composite, "get_duration", lambda path: 100.0)
-    monkeypatch.setattr(composite, "get_config", lambda: {"token": "secret"})
+    monkeypatch.setattr(composite, "get_config", lambda profile_id="default": {"token": "secret"})
     monkeypatch.setattr(
         composite, "item_info",
         lambda config, item_id: {"id": item_id, "name": "Episode", "duration": 80.0},
@@ -2357,13 +2453,113 @@ def test_composite_session_is_deterministic_and_bounded(monkeypatch, tmp_path):
     assert composite.load_session(first_id)["companion_start"] == 5.0
 
 
+def test_composite_profile_participates_in_cache_key(monkeypatch, tmp_path):
+    import composite
+
+    source = tmp_path / "reaction.mp4"
+    source.write_bytes(b"test")
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
+    monkeypatch.setattr(composite, "get_duration", lambda path: 100.0)
+    monkeypatch.setattr(
+        composite, "get_config",
+        lambda profile_id="default": {"token": profile_id},
+    )
+    monkeypatch.setattr(
+        composite, "item_info",
+        lambda config, item_id: {"id": item_id, "duration": 80.0},
+    )
+
+    default_id, _ = composite.create_session(
+        "Reaction1", "Item123", 10, 5, "default"
+    )
+    remote_id, remote = composite.create_session(
+        "Reaction1", "Item123", 10, 5, "remote"
+    )
+
+    assert remote_id != default_id
+    assert remote["server_profile_id"] == "remote"
+
+
+def test_composite_concurrency_limit_returns_retryable_error(client, monkeypatch):
+    import api
+
+    monkeypatch.setattr(
+        api, "create_composite_session",
+        lambda *args: ("a" * 24, {"duration": 10, "width": 1280, "height": 360}),
+    )
+    monkeypatch.setattr(
+        api, "ensure_composite_running",
+        lambda session_id: (_ for _ in ()).throw(api.CompositeBusyError()),
+    )
+
+    response = client.post("/api/companion/composite", json={
+        "reaction_id": "Reaction1", "jellyfin_item_id": "Item123",
+        "reaction_start": 0, "companion_start": 0,
+    })
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "5"
+    assert response.get_json()["code"] == "composite_capacity"
+    assert response.get_json()["retryable"] is True
+
+
+def test_composite_runtime_enforces_concurrency_limit(monkeypatch, tmp_path):
+    import composite
+
+    class RunningProcess:
+        def poll(self):
+            return None
+
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("VAULTTUBE_MAX_CONCURRENT_COMPOSITES", "1")
+    waiting_id = "b" * 24
+    composite._write_metadata(waiting_id, {
+        "reaction_id": "Reaction1", "item_id": "Item123",
+        "reaction_start": 0, "companion_start": 0,
+        "duration": 10, "width": 1280, "height": 360,
+        "server_profile_id": "default",
+    })
+    with composite._lock:
+        composite._active.clear()
+        composite._active["a" * 24] = {
+            "process": RunningProcess(), "last_request": time.time(),
+            "dir": str(tmp_path / ("a" * 24)),
+        }
+    try:
+        with pytest.raises(composite.CompositeBusyError):
+            composite.ensure_running(waiting_id)
+    finally:
+        with composite._lock:
+            composite._active.clear()
+
+
+def test_composite_cleanup_removes_only_stale_inactive_sessions(monkeypatch, tmp_path):
+    import composite
+
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path))
+    root = tmp_path / "composite"
+    stale = root / ("a" * 24)
+    fresh = root / ("b" * 24)
+    stale.mkdir(parents=True)
+    fresh.mkdir()
+    old = time.time() - 3600
+    os.utime(stale, (old, old))
+
+    removed = composite.cleanup_sessions(ttl_seconds=60)
+
+    assert removed == 1
+    assert not stale.exists()
+    assert fresh.exists()
+
+
 def test_composite_ffmpeg_command_builds_side_by_side_mixed_audio(monkeypatch, tmp_path):
     import composite
 
     source = tmp_path / "reaction.mp4"
     source.write_bytes(b"test")
     monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
-    monkeypatch.setattr(composite, "get_config", lambda: {
+    monkeypatch.setattr(composite, "get_config", lambda profile_id="default": {
         "base_url": "http://jellyfin:8096", "token": "server-token"
     })
     metadata = {
@@ -2397,7 +2593,7 @@ def test_composite_audio_targets_change_the_cache_key(monkeypatch, tmp_path):
     monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
     monkeypatch.setattr(composite, "get_duration", lambda path: 100.0)
-    monkeypatch.setattr(composite, "get_config", lambda: {"token": "secret"})
+    monkeypatch.setattr(composite, "get_config", lambda profile_id="default": {"token": "secret"})
     monkeypatch.setattr(
         composite, "item_info",
         lambda config, item_id: {"id": item_id, "name": "Episode", "duration": 80.0},
@@ -2431,7 +2627,7 @@ def test_composite_source_gains_change_the_cache_key(monkeypatch, tmp_path):
     monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
     monkeypatch.setattr(composite, "get_duration", lambda path: 100.0)
-    monkeypatch.setattr(composite, "get_config", lambda: {"token": "secret"})
+    monkeypatch.setattr(composite, "get_config", lambda profile_id="default": {"token": "secret"})
     monkeypatch.setattr(
         composite, "item_info",
         lambda config, item_id: {"id": item_id, "name": "Episode", "duration": 80.0},
@@ -2502,7 +2698,7 @@ def test_companion_state_api_validates_once_and_coalesces_progress(client, monke
 
     _insert_companion_reaction()
     validated = []
-    monkeypatch.setattr(api, "get_config", lambda: {"token": "test"})
+    monkeypatch.setattr(api, "get_config", lambda profile_id="default": {"token": "test"})
     monkeypatch.setattr(
         api, "item_info",
         lambda config, item_id: validated.append(item_id) or {"id": item_id},
@@ -2523,6 +2719,7 @@ def test_companion_state_api_validates_once_and_coalesces_progress(client, monke
     assert progressed.status_code == 200
     assert validated == ["Item123"]
     state = loaded.get_json()["data"]
+    assert state["server_profile_id"] == "default"
     assert state["sync_offset"] == -4.5
     assert state["reaction_position"] == 140.75
 
@@ -2531,11 +2728,47 @@ def test_companion_state_api_validates_once_and_coalesces_progress(client, monke
     assert client.get("/api/companion/state/Reaction1").get_json()["data"] is None
 
 
+def test_companion_state_persists_profile_and_reports_optional_progress(
+        client, monkeypatch):
+    import api
+
+    _insert_companion_reaction()
+    configs = []
+    reports = []
+    monkeypatch.setattr(
+        api, "get_config",
+        lambda profile_id="default": configs.append(profile_id) or {
+            "id": profile_id, "token": "test", "report_playback": True,
+        },
+    )
+    monkeypatch.setattr(api, "item_info", lambda config, item_id: {"id": item_id})
+    monkeypatch.setattr(
+        api, "report_playback",
+        lambda config, item_id, position, **kwargs: reports.append(
+            (config["id"], item_id, position, kwargs)
+        ),
+    )
+
+    response = client.post("/api/companion/state/Reaction1", json={
+        "server_profile_id": "remote",
+        "jellyfin_item_id": "Item123",
+        "sync_offset": -5,
+        "reaction_position": 30,
+        "synced": True,
+        "playback_event": "progress",
+    })
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["server_profile_id"] == "remote"
+    assert configs == ["remote"]
+    assert reports == [("remote", "Item123", 25.0, {"watched": False})]
+
+
 def test_companion_state_api_rejects_invalid_progress(client, monkeypatch):
     import api
 
     _insert_companion_reaction()
-    monkeypatch.setattr(api, "get_config", lambda: {"token": "test"})
+    monkeypatch.setattr(api, "get_config", lambda profile_id="default": {"token": "test"})
     monkeypatch.setattr(api, "item_info", lambda config, item_id: {"id": item_id})
 
     response = client.post("/api/companion/state/Reaction1", json={
@@ -2572,7 +2805,12 @@ def test_player_contains_phase1_companion_controls(client):
     assert b'id="companion-series"' in response.data
     assert b'id="companion-season"' in response.data
     assert b'id="companion-episode"' in response.data
+    assert b'id="companion-profile"' in response.data
+    assert b'id="companion-cancel-change"' in response.data
     assert b"/api/jellyfin/library/" in response.data
+    assert b"server_profile_id: companionProfileId" in response.data
+    assert b"jellyfin_watched: playbackEvent === 'ended'" in response.data
+    assert b"body.retryable" in response.data
     assert b"reactionSourceConfig" in response.data
     assert b"Change / resync" in response.data
 

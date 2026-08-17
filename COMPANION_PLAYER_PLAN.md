@@ -153,10 +153,9 @@ Acceptance coverage:
 
 ### Known limitations
 
-- The Phase 3 picker supports the configured default profile and the standard
-  Series → Season → Episode hierarchy. Manual item IDs remain available for
-  unusual library layouts; named profiles and broader media types are pending.
-- Only one configured Jellyfin server profile is active, stored as `default`.
+- The Phase 3 picker supports named profiles and the standard Series → Season →
+  Episode hierarchy. Manual item IDs remain available for unusual library
+  layouts; broader media types are not currently exposed by the picker.
 - The original post-mix audio was quieter than typical streaming sources. A
   measured sample peaked around -10.4 dB versus -6.6 dB for the episode source.
   Pipeline version 2 removes the per-input 80% reduction, explicitly downmixes
@@ -182,7 +181,9 @@ Acceptance coverage:
 
 ## Phase 3 — Library selection and durable configuration
 
-Status: in progress. The first library-selection slice is implemented.
+Status: implemented. Phase 3 is complete with named profiles, optional Jellyfin
+history reporting, recoverable Change/resync behavior, structured errors, and
+bounded composite resources.
 
 - Server-side Jellyfin show search plus cascading season and episode browsing is
   available in the Companion dialog. Results contain sanitized metadata only;
@@ -191,11 +192,19 @@ Status: in progress. The first library-selection slice is implemented.
 - Opening the picker from a saved composite restores the original reaction at
   its canonical position before staging the selected episode, supporting the
   initial **Change / resync** flow without losing the saved pairing.
-- Support named Jellyfin server profiles without exposing credentials.
-- Further polish the combined **Change / resync** flow. Pairing removal is
-  already available from the Companion dialog.
-- Report optional Jellyfin play progress and watched state.
-- Add operational limits, structured proxy errors, and transcode/session cleanup.
+- Named Jellyfin server profiles are selected with sanitized IDs and labels;
+  URLs, tokens, and user IDs remain server-side. Existing single-server
+  environment variables continue to define the backward-compatible `default`.
+- The combined **Change / resync** flow keeps the durable pairing until the new
+  synchronization succeeds, can restore the saved pairing during staging, and
+  offers an explicit retry after a recoverable composite failure.
+- Profiles can opt in to Jellyfin resume-position and watched-state reporting.
+  Reporting is best-effort and never prevents VaultTube's canonical position
+  from being saved.
+- Composite concurrency and retained inactive-session counts are bounded.
+  Expired sessions are pruned, oldest inactive sessions are evicted at the cap,
+  and capacity/upstream/transcode failures return structured retry metadata.
+- Full automated suite: 256 tests passing at the Phase 3 checkpoint.
 
 ## Phase 4 — Mobile and production hardening
 

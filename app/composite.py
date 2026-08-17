@@ -11,12 +11,13 @@ import logging
 import math
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
 from pathlib import Path
 
-from jellyfin import get_config, item_info, validate_item_id
+from jellyfin import get_config, item_info, validate_item_id, validate_profile_id
 from transcoder import SEGMENT_SECONDS, get_duration, source_path_for
 
 
@@ -26,12 +27,26 @@ _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _SESSION_ID_RE = re.compile(r"^[a-f0-9]{24}$")
 _active = {}
 _lock = threading.Lock()
+_cache_lock = threading.Lock()
 _reaper_started = False
 _PIPELINE_VERSION = 2
 
 
 class CompositeError(RuntimeError):
-    pass
+    def __init__(self, message, code="composite_error", status=400,
+                 retryable=False):
+        super().__init__(message)
+        self.code = code
+        self.status = status
+        self.retryable = retryable
+
+
+class CompositeBusyError(CompositeError):
+    def __init__(self):
+        super().__init__(
+            "All composite transcode slots are busy; try again shortly",
+            code="composite_capacity", status=429, retryable=True,
+        )
 
 
 def _cache_root():
@@ -70,13 +85,16 @@ def _audio_target(env_name, default, minimum, maximum):
     return value
 
 
-def _session_payload(reaction_id, item_id, reaction_start, companion_start):
+def _session_payload(reaction_id, item_id, reaction_start, companion_start,
+                     server_profile_id="default"):
     if not _VIDEO_ID_RE.fullmatch(reaction_id or ""):
         raise CompositeError("Invalid reaction video ID")
     validate_item_id(item_id)
+    validate_profile_id(server_profile_id)
     return {
         "reaction_id": reaction_id,
         "item_id": item_id,
+        "server_profile_id": server_profile_id,
         "reaction_start": _validate_start(reaction_start, "reaction_start"),
         "companion_start": _validate_start(companion_start, "companion_start"),
         "width": 1280,
@@ -130,18 +148,23 @@ def load_session(session_id):
         with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except (OSError, ValueError) as exc:
-        raise CompositeError("Composite session was not found") from exc
+        raise CompositeError(
+            "Composite session was not found",
+            code="composite_session_not_found", status=404,
+        ) from exc
 
 
-def create_session(reaction_id, item_id, reaction_start, companion_start):
+def create_session(reaction_id, item_id, reaction_start, companion_start,
+                   server_profile_id="default"):
     payload = _session_payload(
-        reaction_id, item_id, reaction_start, companion_start
+        reaction_id, item_id, reaction_start, companion_start,
+        server_profile_id,
     )
     source_path = source_path_for(reaction_id)
     if not source_path or not os.path.isfile(source_path):
         raise CompositeError("Reaction video was not found")
 
-    config = get_config()
+    config = get_config(server_profile_id)
     details = item_info(config, item_id)
     companion_duration = details.get("duration")
     reaction_duration = get_duration(source_path)
@@ -162,13 +185,17 @@ def create_session(reaction_id, item_id, reaction_start, companion_start):
     session_id = _session_id({
         key: payload[key]
         for key in (
-            "reaction_id", "item_id", "reaction_start", "companion_start",
+            "reaction_id", "item_id", "server_profile_id", "reaction_start",
+            "companion_start",
             "width", "height", "pipeline_version", "audio_loudness_i",
             "audio_loudness_lra", "audio_true_peak", "reaction_gain_db",
             "companion_gain_db",
         )
     })
-    _write_metadata(session_id, payload)
+    with _cache_lock:
+        _cleanup_sessions()
+        _enforce_session_cap(session_id)
+        _write_metadata(session_id, payload)
     _ensure_reaper()
     return session_id, payload
 
@@ -191,7 +218,7 @@ def _touch(session_id):
 
 
 def _ffmpeg_command(metadata, cache_dir):
-    config = get_config()
+    config = get_config(metadata.get("server_profile_id", "default"))
     source_path = source_path_for(metadata["reaction_id"])
     if not source_path or not os.path.isfile(source_path):
         raise CompositeError("Reaction video was not found")
@@ -257,10 +284,17 @@ def ensure_running(session_id, require_index=0):
         return metadata
 
     with _lock:
+        finished = [key for key, item in _active.items()
+                    if item["process"].poll() is not None]
+        for key in finished:
+            _active.pop(key, None)
         current = _active.get(session_id)
         if current and current["process"].poll() is None:
             current["last_request"] = time.time()
             return metadata
+
+        if len(_active) >= _max_concurrent_composites():
+            raise CompositeBusyError()
 
         os.makedirs(cache_dir, exist_ok=True)
         log_path = os.path.join(cache_dir, "ffmpeg.log")
@@ -333,6 +367,81 @@ def _ensure_reaper():
                     _kill(_active.pop(key))
 
     threading.Thread(target=loop, daemon=True).start()
+
+
+def _bounded_env_int(name, default, minimum, maximum):
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+def _max_concurrent_composites():
+    return _bounded_env_int(
+        "VAULTTUBE_MAX_CONCURRENT_COMPOSITES", 1, 1, 16
+    )
+
+
+def _max_session_caches():
+    return _bounded_env_int("VAULTTUBE_COMPOSITE_MAX_SESSIONS", 50, 1, 1000)
+
+
+def _inactive_cache_dirs():
+    root = _cache_root()
+    if not os.path.isdir(root):
+        return []
+    with _lock:
+        active_ids = {
+            key for key, item in _active.items()
+            if item["process"].poll() is None
+        }
+    entries = []
+    for path in Path(root).iterdir():
+        if not path.is_dir() or path.name in active_ids:
+            continue
+        try:
+            accessed = max(path.stat().st_atime, path.stat().st_mtime)
+        except OSError:
+            accessed = 0
+        entries.append((accessed, path))
+    return sorted(entries)
+
+
+def _cleanup_sessions(ttl_seconds=None):
+    if ttl_seconds is None:
+        ttl_seconds = _bounded_env_int(
+            "VAULTTUBE_TRANSCODE_TTL", 86400, 60, 31 * 86400
+        )
+    cutoff = time.time() - ttl_seconds
+    removed = 0
+    for accessed, path in _inactive_cache_dirs():
+        if accessed >= cutoff:
+            continue
+        shutil.rmtree(str(path), ignore_errors=True)
+        removed += 1
+    if removed:
+        logger.info("Pruned %d stale composite session cache(s)", removed)
+    return removed
+
+
+def cleanup_sessions(ttl_seconds=None):
+    """Remove expired composite caches without touching live FFmpeg sessions."""
+    with _cache_lock:
+        return _cleanup_sessions(ttl_seconds)
+
+
+def _enforce_session_cap(incoming_session_id):
+    if os.path.isdir(cache_dir_for(incoming_session_id)):
+        return
+    entries = _inactive_cache_dirs()
+    existing = {path.name for _, path in entries}
+    if incoming_session_id in existing:
+        return
+    excess = len(entries) - _max_session_caches() + 1
+    for _, path in entries[:max(0, excess)]:
+        shutil.rmtree(str(path), ignore_errors=True)
+        logger.info("Evicted composite session cache %s", path.name)
 
 
 def shutdown_composites():
