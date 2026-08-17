@@ -2869,6 +2869,8 @@ def test_player_contains_phase1_companion_controls(client):
     assert b"canonicalReactionPosition" in response.data
     assert b"restoreSavedCompanion" in response.data
     assert b"keepalive: !!force" in response.data
+    assert b"if (companionRemovalPending ||" in response.data
+    assert b"companionRemovalPending = true;" in response.data
     assert b"window.addEventListener('pagehide'" in response.data
     assert b'id="companion-remove"' in response.data
     assert b'id="companion-series"' in response.data

@@ -179,6 +179,7 @@
     var compositeStallTimer = null;
     var companionStateSavedAt = 0;
     var companionLastSavedPosition = -1;
+    var companionRemovalPending = false;
     var companionLibraryLoaded = false;
     var reactionSourceConfig = null;
 
@@ -372,7 +373,7 @@
         setCompanionStatus(message, !navigator.onLine);
     }
     function saveCompanionState(force, explicitPosition, playbackEvent) {
-        if (!companionActive || !companionSynced || !companionItemId) return;
+        if (companionRemovalPending || !companionActive || !companionSynced || !companionItemId) return;
         var position = Number.isFinite(explicitPosition)
             ? Math.max(0, explicitPosition) : canonicalReactionPosition();
         var now = Date.now();
@@ -714,11 +715,17 @@
     $id('companion-modal').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
     $id('companion-remove').addEventListener('click', function () {
         companionModalStatus('Removing saved pairing…', false);
+        // Navigation pauses the player and fires pagehide. Suppress those
+        // final progress writes or they recreate the row we just deleted.
+        companionRemovalPending = true;
         fetch('/api/companion/state/' + encodeURIComponent(id), { method: 'DELETE' })
             .then(function (response) {
                 if (!response.ok) throw new Error('Could not remove pairing');
                 window.location.href = '/player.html?id=' + encodeURIComponent(id);
-            }).catch(function (error) { companionModalStatus(error.message, true); });
+            }).catch(function (error) {
+                companionRemovalPending = false;
+                companionModalStatus(error.message, true);
+            });
     });
     $id('companion-cancel-change').addEventListener('click', function () {
         window.location.href = '/player.html?id=' + encodeURIComponent(id);
