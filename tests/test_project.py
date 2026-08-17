@@ -2662,6 +2662,29 @@ def test_composite_create_api_returns_playlist(client, monkeypatch):
     assert data["playlist"].endswith("/playlist.m3u8")
 
 
+def test_composite_playlist_can_be_reloaded_for_mobile_recovery(client, monkeypatch):
+    import api
+
+    calls = []
+    monkeypatch.setattr(
+        api, "ensure_composite_running",
+        lambda session_id: calls.append(session_id) or {"duration": 60.0},
+    )
+    monkeypatch.setattr(
+        api, "build_vod_playlist",
+        lambda duration: "#EXTM3U\n#EXT-X-ENDLIST\n",
+    )
+
+    response = client.get(
+        "/api/companion/composite/" + ("a" * 24)
+        + "/playlist.m3u8?recover=123"
+    )
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/vnd.apple.mpegurl"
+    assert calls == ["a" * 24]
+
+
 def _insert_companion_reaction(video_id="Reaction1"):
     import database
 
@@ -2811,6 +2834,14 @@ def test_player_contains_phase1_companion_controls(client):
     assert b"server_profile_id: companionProfileId" in response.data
     assert b"jellyfin_watched: playbackEvent === 'ended'" in response.data
     assert b"body.retryable" in response.data
+    assert b"reloadCurrentComposite" in response.data
+    assert b"document.addEventListener('visibilitychange'" in response.data
+    assert b"window.addEventListener('offline'" in response.data
+    assert b"window.addEventListener('online'" in response.data
+    assert b"window.addEventListener('pageshow'" in response.data
+    assert b"window.addEventListener('orientationchange'" in response.data
+    assert b"video.addEventListener('waiting'" in response.data
+    assert b"Composite restored and paused" in response.data
     assert b"reactionSourceConfig" in response.data
     assert b"Change / resync" in response.data
 
@@ -2827,6 +2858,9 @@ def test_companion_players_use_equal_letterboxed_viewports():
     assert ".vt-player-layout.companion-mode > aside" in css
     assert ".vt-companion-stage.active.composite-playing" in css
     assert "padding-top: 28.125%" in css
+    assert "@media (pointer: coarse)" in css
+    assert "min-height: 44px" in css
+    assert ".vt-companion-controls > button" in css
 
 
 def test_video_getvids_unwatched(client):

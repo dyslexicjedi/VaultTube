@@ -208,9 +208,25 @@ bounded composite resources.
 
 ## Phase 4 — Mobile and production hardening
 
+Status: in progress. The first browser-lifecycle and responsive-control slice is
+implemented; real-device validation, fixture integration, and deployment
+documentation remain.
+
+- Composite playback now pauses and saves canonical progress when the page is
+  backgrounded or the network drops. Returning to the page, reconnecting, or
+  restoring from the back-forward cache reloads the same deterministic HLS
+  session at its prior timeline position and remains paused for a user gesture.
+- A prolonged buffering event triggers bounded automatic recovery, then exposes
+  the existing manual retry path instead of looping indefinitely.
+- Rotation explicitly refreshes both Video.js layouts. Coarse-pointer controls
+  use 44px minimum targets, narrow screens stack the staging players, and mobile
+  companion controls wrap into larger two-column actions.
+- Automated coverage verifies lifecycle/network hooks, recovery playlist reuse,
+  touch-target rules, and the paused recovery contract. Full suite: 257 tests.
 - Exercise Brave on iPad/iPhone across rotation, background/foreground, lock-screen,
   and interrupted-network scenarios.
-- Verify touch targets, stacked layout, fullscreen behavior, and audio focus.
+- Complete real-device verification of stacked layout, fullscreen behavior, and
+  audio focus.
 - Add integration tests against a disposable Jellyfin fixture with direct-play and
   audio-transcode media.
 - Document reverse-proxy timeouts, trusted-network deployment, backups, and rollout.

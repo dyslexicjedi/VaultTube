@@ -854,6 +854,34 @@ a {
   .vt-companion-stage.active {
     grid-template-columns: 1fr;
   }
+  .vt-companion-controls {
+    gap: 10px;
+  }
+  .vt-companion-status {
+    flex-basis: 100%;
+    line-height: 1.4;
+  }
+}
+@media (max-width: 560px) {
+  .vt-companion-controls > button {
+    flex: 1 1 calc(50% - 10px);
+    justify-content: center;
+  }
+  .vt-companion-offset {
+    flex-basis: 100%;
+  }
+}
+@media (pointer: coarse) {
+  .vt-companion-controls .vt-btn,
+  .vt-companion-controls .vt-btn-ghost,
+  .vt-player-row .vt-btn,
+  .vt-player-row .vt-btn-ghost,
+  #companion-modal .vt-btn,
+  #companion-modal .vt-btn-ghost,
+  #companion-modal .vt-input,
+  #companion-modal .vt-select {
+    min-height: 44px;
+  }
 }
 .vt-player-title {
   font-size: 20px;

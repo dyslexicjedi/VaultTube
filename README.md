@@ -21,6 +21,8 @@ The pairing, fractional-second offset, and canonical reaction position are saved
 in MariaDB. Reopening the reaction creates a fresh composite session at the saved
 position and leaves it paused for the next user gesture. Jellyfin credentials are
 applied only on the server and are not included in browser URLs or manifests.
+Backgrounding the browser or losing the network pauses and checkpoints the
+composite; returning reloads it at the same position without autoplaying.
 
 The player's **Companion** dialog can select a named Jellyfin server, search its
 library, and browse from show to season to episode. A manual item-ID field

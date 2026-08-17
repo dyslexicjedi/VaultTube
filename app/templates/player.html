@@ -37,7 +37,7 @@
             <button type="button" class="vt-btn-ghost" id="companion-minus">−1s</button>
             <button type="button" class="vt-btn-ghost" id="companion-plus">+1s</button>
             <span class="vt-companion-offset" id="companion-offset">Offset 0.000s</span>
-            <span class="vt-companion-status" id="companion-status">Loading companion…</span>
+            <span class="vt-companion-status" id="companion-status" aria-live="polite">Loading companion…</span>
         </div>
 
         <h1 class="vt-player-title" id="title"></h1>
@@ -172,6 +172,11 @@
     var companionProfilesLoaded = false;
     var savedCompanionState = null;
     var companionChangePending = false;
+    var compositeRecoveryPending = false;
+    var compositeRecoveryInFlight = false;
+    var compositeRecoveryAttempts = 0;
+    var compositeRecoveryTimeline = 0;
+    var compositeStallTimer = null;
     var companionStateSavedAt = 0;
     var companionLastSavedPosition = -1;
     var companionLibraryLoaded = false;
@@ -323,6 +328,49 @@
         }
         return Math.max(0, vPlayer.currentTime() || 0);
     }
+    function reloadCurrentComposite(reason) {
+        if (!compositeMode || !compositeSessionId || !vPlayer
+                || compositeRecoveryInFlight || !navigator.onLine) return;
+        var timelinePosition = compositeReady
+            ? Math.max(0, vPlayer.currentTime() || 0)
+            : compositeRecoveryTimeline;
+        compositeRecoveryTimeline = timelinePosition;
+        var reactionPosition = Math.max(0, compositeReactionStart + timelinePosition);
+        compositeRecoveryInFlight = true;
+        compositeRecoveryAttempts += 1;
+        compositeRecoveryPending = false;
+        clearTimeout(compositeStallTimer);
+        vPlayer.pause();
+        saveCompanionState(true, reactionPosition, 'pause');
+        compositeReady = false;
+        setCompanionStatus('Refreshing composite after ' + reason + '…', false);
+        vPlayer.one('loadedmetadata', function () {
+            var duration = vPlayer.duration();
+            var restoredTimeline = Number.isFinite(duration)
+                ? Math.min(timelinePosition, Math.max(0, duration - 0.25))
+                : timelinePosition;
+            vPlayer.currentTime(restoredTimeline);
+            vPlayer.pause();
+            compositeReady = true;
+            compositeRecoveryInFlight = false;
+            compositeRecoveryAttempts = 0;
+            compositeRecoveryTimeline = restoredTimeline;
+            setCompanionStatus('Composite restored and paused — tap Play composite', false);
+        });
+        vPlayer.src({
+            type: 'application/x-mpegURL',
+            src: '/api/companion/composite/' + encodeURIComponent(compositeSessionId)
+                + '/playlist.m3u8?recover=' + Date.now()
+        });
+    }
+    function markCompositeForRecovery(message) {
+        if (!compositeMode || !companionSynced) return;
+        compositeRecoveryPending = true;
+        var alreadyPaused = vPlayer.paused();
+        pauseBoth();
+        if (alreadyPaused) saveCompanionState(true, undefined, 'pause');
+        setCompanionStatus(message, !navigator.onLine);
+    }
     function saveCompanionState(force, explicitPosition, playbackEvent) {
         if (!companionActive || !companionSynced || !companionItemId) return;
         var position = Number.isFinite(explicitPosition)
@@ -438,6 +486,10 @@
             compositeSessionId = session.session_id;
             compositeReactionStart = reactionStart;
             compositeReady = false;
+            compositeRecoveryPending = false;
+            compositeRecoveryInFlight = false;
+            compositeRecoveryAttempts = 0;
+            compositeRecoveryTimeline = 0;
             companionOffset = requestedOffset;
             companionSynced = true;
             companionChangePending = false;
@@ -473,6 +525,7 @@
                 src: session.playlist
             });
         }).catch(function (error) {
+            compositeRecoveryInFlight = false;
             if (previousComposite) {
                 companionSynced = previousComposite.synced;
                 companionOffset = previousComposite.offset;
@@ -778,7 +831,29 @@
         vPlayer.on('error', function () {
             var error = vPlayer.error();
             var detail = error && error.message ? ': ' + error.message : '';
-            if (companionActive) setCompanionStatus('Reaction stream failed' + detail, true);
+            if (compositeMode) {
+                compositeRecoveryInFlight = false;
+                markCompositeForRecovery(
+                    navigator.onLine
+                        ? 'Composite interrupted' + detail + ' — retrying when ready'
+                        : 'Network offline — composite paused'
+                );
+                if (navigator.onLine && compositeRecoveryAttempts < 2) {
+                    setTimeout(function () {
+                        if (compositeRecoveryPending && !document.hidden) {
+                            reloadCurrentComposite('an interruption');
+                        }
+                    }, 1000);
+                } else if (navigator.onLine) {
+                    $id('companion-retry').hidden = false;
+                    setCompanionStatus(
+                        'Composite could not recover automatically — tap Retry composite',
+                        true
+                    );
+                }
+            } else if (companionActive) {
+                setCompanionStatus('Reaction stream failed' + detail, true);
+            }
         });
         if (v.timestamp && parseInt(v.timestamp, 10) !== 0) {
             vPlayer.currentTime(parseInt(v.timestamp, 10));
@@ -795,6 +870,8 @@
         });
         // Play: poll timestamp to the server every 5s
         video.addEventListener('play', function () {
+            clearTimeout(compositeStallTimer);
+            compositeRecoveryPending = false;
             tspoll = window.setInterval(function () {
                 fetch('/api/set_timestamp/' + canonicalReactionPosition() + '/' + encodeURIComponent(id));
                 saveCompanionState(false);
@@ -812,9 +889,21 @@
             maybeAutoplayNext();
         });
         video.addEventListener('canplay', function () {
+            clearTimeout(compositeStallTimer);
             if (vPlayer.videoHeight() > vPlayer.videoWidth()) {
                 $id('playerdiv').classList.add('vertical');
             }
+        });
+        video.addEventListener('waiting', function () {
+            if (!compositeMode || vPlayer.paused()) return;
+            clearTimeout(compositeStallTimer);
+            setCompanionStatus('Composite buffering…', false);
+            compositeStallTimer = setTimeout(function () {
+                markCompositeForRecovery('Composite stalled — refreshing playback');
+                if (navigator.onLine && !document.hidden) {
+                    reloadCurrentComposite('a playback stall');
+                }
+            }, 12000);
         });
         vPlayer.on('seeked', function () {
             if (companionSynced) alignCompanion(true);
@@ -1041,7 +1130,38 @@
     setTimeout(function () { clearInterval(companionTry); }, 5000);
 
     window.addEventListener('pagehide', function () {
+        clearTimeout(compositeStallTimer);
         saveCompanionState(true, undefined, 'stop');
+    });
+    document.addEventListener('visibilitychange', function () {
+        if (!compositeMode || !companionSynced) return;
+        if (document.hidden) {
+            markCompositeForRecovery('Composite paused while VaultTube is in the background');
+            return;
+        }
+        if (compositeRecoveryPending && navigator.onLine) {
+            reloadCurrentComposite('returning to VaultTube');
+        }
+    });
+    window.addEventListener('offline', function () {
+        markCompositeForRecovery('Network offline — composite paused');
+    });
+    window.addEventListener('online', function () {
+        if (compositeRecoveryPending && !document.hidden) {
+            reloadCurrentComposite('the network reconnecting');
+        }
+    });
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted && compositeMode && companionSynced) {
+            compositeRecoveryPending = true;
+            reloadCurrentComposite('restoring the page');
+        }
+    });
+    window.addEventListener('orientationchange', function () {
+        setTimeout(function () {
+            if (vPlayer) vPlayer.trigger('resize');
+            if (companionPlayer) companionPlayer.trigger('resize');
+        }, 150);
     });
 
     // --- Delete with confirm modal ---
