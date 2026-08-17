@@ -28,7 +28,9 @@ The player's **Companion** dialog can select a named Jellyfin server, search its
 library, and browse from show to season to episode. A manual item-ID field
 remains available as a fallback. See
 [COMPANION_PLAYER_PLAN.md](COMPANION_PLAYER_PLAN.md) for architecture, routes,
-verification, limitations, and the remaining roadmap.
+verification, limitations, and the remaining roadmap. Production and real-device
+acceptance guidance is in
+[docs/COMPANION_DEPLOYMENT.md](docs/COMPANION_DEPLOYMENT.md).
 
 ## How-TO:
 Below is a docker compose entry for the database and vaulttube

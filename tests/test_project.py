@@ -2534,6 +2534,50 @@ def test_composite_runtime_enforces_concurrency_limit(monkeypatch, tmp_path):
             composite._active.clear()
 
 
+def test_composite_replaces_older_encoder_for_same_pairing(monkeypatch, tmp_path):
+    import composite
+
+    class RunningProcess:
+        def __init__(self):
+            self.terminated = False
+
+        def poll(self):
+            return 0 if self.terminated else None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout):
+            return 0
+
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path))
+    old_id = "a" * 24
+    new_id = "b" * 24
+    old_metadata = {
+        "reaction_id": "Reaction1", "server_profile_id": "default",
+        "item_id": "Item123", "reaction_start": 10,
+    }
+    new_metadata = dict(old_metadata, reaction_start=20)
+    composite._write_metadata(old_id, old_metadata)
+    process = RunningProcess()
+    with composite._lock:
+        composite._active.clear()
+        composite._active[old_id] = {
+            "process": process, "last_request": time.time(),
+            "dir": composite.cache_dir_for(old_id),
+        }
+        removed = composite._reap_superseded_pairing_locked(
+            new_id, new_metadata
+        )
+    try:
+        assert removed == 1
+        assert process.terminated is True
+        assert old_id not in composite._active
+    finally:
+        with composite._lock:
+            composite._active.clear()
+
+
 def test_composite_cleanup_removes_only_stale_inactive_sessions(monkeypatch, tmp_path):
     import composite
 
@@ -2819,6 +2863,8 @@ def test_player_contains_phase1_companion_controls(client):
     assert b"navigator.maxTouchPoints > 1" in response.data
     assert b"'/api/companion/composite'" in response.data
     assert b"Play composite" in response.data
+    assert b"Composite playlists start their own timeline at zero" in response.data
+    assert b"vPlayer.currentTime(0);" in response.data
     assert b"/api/companion/state/" in response.data
     assert b"canonicalReactionPosition" in response.data
     assert b"restoreSavedCompanion" in response.data
@@ -2861,6 +2907,7 @@ def test_companion_players_use_equal_letterboxed_viewports():
     assert "@media (pointer: coarse)" in css
     assert "min-height: 44px" in css
     assert ".vt-companion-controls > button" in css
+    assert "justify-content: center;\n    min-height: 44px;" in css
 
 
 def test_video_getvids_unwatched(client):

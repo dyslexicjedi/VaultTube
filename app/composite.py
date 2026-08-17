@@ -294,6 +294,8 @@ def ensure_running(session_id, require_index=0):
             return metadata
 
         if len(_active) >= _max_concurrent_composites():
+            _reap_superseded_pairing_locked(session_id, metadata)
+        if len(_active) >= _max_concurrent_composites():
             raise CompositeBusyError()
 
         os.makedirs(cache_dir, exist_ok=True)
@@ -347,6 +349,33 @@ def _kill(item):
             process.kill()
         except Exception:
             pass
+
+
+def _pairing_key(metadata):
+    return (
+        metadata.get("reaction_id"),
+        metadata.get("server_profile_id", "default"),
+        metadata.get("item_id"),
+    )
+
+
+def _reap_superseded_pairing_locked(session_id, metadata):
+    """Stop older encoders for a pairing before starting its replacement."""
+    target = _pairing_key(metadata)
+    superseded = []
+    for key, item in list(_active.items()):
+        if key == session_id or item["process"].poll() is not None:
+            continue
+        try:
+            old_metadata = load_session(key)
+        except CompositeError:
+            continue
+        if _pairing_key(old_metadata) == target:
+            superseded.append(key)
+    for key in superseded:
+        _kill(_active.pop(key))
+        logger.info("Stopped superseded composite session %s", key)
+    return len(superseded)
 
 
 def _ensure_reaper():

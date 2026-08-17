@@ -512,6 +512,10 @@
             cleanParams.delete('offset');
             history.replaceState(null, '', window.location.pathname + '?' + cleanParams.toString());
             vPlayer.one('loadedmetadata', function () {
+                // A source swap can retain the reaction video's absolute resume
+                // position. Composite playlists start their own timeline at zero.
+                vPlayer.currentTime(0);
+                vPlayer.pause();
                 compositeReady = true;
                 setCompanionStatus(
                     options.restored

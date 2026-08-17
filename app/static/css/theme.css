@@ -866,6 +866,7 @@ a {
   .vt-companion-controls > button {
     flex: 1 1 calc(50% - 10px);
     justify-content: center;
+    min-height: 44px;
   }
   .vt-companion-offset {
     flex-basis: 100%;

@@ -208,9 +208,7 @@ bounded composite resources.
 
 ## Phase 4 — Mobile and production hardening
 
-Status: in progress. The first browser-lifecycle and responsive-control slice is
-implemented; real-device validation, fixture integration, and deployment
-documentation remain.
+Status: implementation complete; ready for human iPhone/iPad acceptance testing.
 
 - Composite playback now pauses and saves canonical progress when the page is
   backgrounded or the network drops. Returning to the page, reconnecting, or
@@ -222,11 +220,12 @@ documentation remain.
   use 44px minimum targets, narrow screens stack the staging players, and mobile
   companion controls wrap into larger two-column actions.
 - Automated coverage verifies lifecycle/network hooks, recovery playlist reuse,
-  touch-target rules, and the paused recovery contract. Full suite: 257 tests.
-- Exercise Brave on iPad/iPhone across rotation, background/foreground, lock-screen,
-  and interrupted-network scenarios.
-- Complete real-device verification of stacked layout, fullscreen behavior, and
-  audio focus.
-- Add integration tests against a disposable Jellyfin fixture with direct-play and
-  audio-transcode media.
-- Document reverse-proxy timeouts, trusted-network deployment, backups, and rollout.
+  touch-target rules, the paused recovery contract, superseded-session capacity,
+  and correct zero-based composite timelines after source swaps. Full suite: 258
+  tests passing.
+- The disposable Docker stack exercises real Jellyfin library browsing, rewritten
+  same-origin HLS manifests, ranged MPEG-TS media, and composite segment creation.
+  `scripts/verify_companion_stack.py` makes this smoke test repeatable.
+- `docs/COMPANION_DEPLOYMENT.md` documents reverse-proxy timeouts, trusted-network
+  operation, cache/concurrency settings, backups, rollout, rollback, and the
+  remaining Brave-on-iPhone/iPad human acceptance checklist.
