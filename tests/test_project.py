@@ -2187,6 +2187,49 @@ def test_jellyfin_rejects_invalid_profile_configuration(monkeypatch):
         jellyfin.profile_summaries()
 
 
+def test_jellyfin_item_info_is_user_scoped(monkeypatch):
+    import jellyfin
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "Id": "Episode123",
+                "Name": "The Episode",
+                "RunTimeTicks": 3_600_000_000,
+            }
+
+        def close(self):
+            captured["closed"] = True
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return FakeResponse()
+
+    monkeypatch.setattr(jellyfin.requests, "get", fake_get)
+    details = jellyfin.item_info({
+        "base_url": "http://jellyfin:8096",
+        "token": "secret",
+        "user_id": "User123",
+        "verify_tls": True,
+    }, "Episode123")
+
+    assert captured["url"] == "http://jellyfin:8096/Items/Episode123"
+    assert captured["kwargs"]["params"] == {"UserId": "User123"}
+    assert captured["kwargs"]["headers"] == {"X-Emby-Token": "secret"}
+    assert captured["closed"] is True
+    assert details == {
+        "id": "Episode123",
+        "name": "The Episode",
+        "duration": 360.0,
+    }
+
+
 def test_jellyfin_library_items_are_user_scoped_and_sanitized(monkeypatch):
     import jellyfin
 

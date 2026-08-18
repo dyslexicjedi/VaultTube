@@ -165,8 +165,15 @@ def manifest_params(config, item_id):
 def item_info(config, item_id):
     """Return the small metadata subset needed for a composite session."""
     item_id = validate_item_id(item_id)
+    params = {}
+    if config.get("user_id"):
+        # Server API keys are not tied to a Jellyfin user.  Scope the item
+        # lookup explicitly, just as the library and manifest requests do,
+        # or Jellyfin rejects the metadata request with HTTP 400.
+        params["UserId"] = config["user_id"]
     response = requests.get(
         "%s/Items/%s" % (config["base_url"], item_id),
+        params=params,
         headers=auth_headers(config),
         timeout=(5, 30),
         verify=config["verify_tls"],
