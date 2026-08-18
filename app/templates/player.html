@@ -5,20 +5,39 @@
 
 <div class="vt-player-layout">
     <div class="vt-player-main">
-        <div class="vt-player-frame" id="playerdiv">
-            <video id="player" class="video-js vjs-default-skin vjs-big-play-centered" data-setup='{}' controls playsinline preload="auto" width="auto" height="auto"></video>
-            <img id="imageplayer" hidden>
-            <div class="vt-countdown" id="countdown" hidden>
-                <div class="vt-countdown-kicker">Up next in <span id="countdown-n">5</span>…</div>
-                <div class="vt-countdown-title" id="countdown-title"></div>
-                <div class="vt-countdown-actions">
-                    <button type="button" class="vt-btn" id="countdown-play">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                        Play now
-                    </button>
-                    <button type="button" class="vt-btn-ghost" id="countdown-cancel">Cancel</button>
+        <div class="vt-companion-stage" id="companion-stage">
+            <div class="vt-player-frame" id="playerdiv">
+                <span class="vt-video-label" id="reaction-label" hidden>Reaction</span>
+                <video id="player" class="video-js vjs-default-skin vjs-big-play-centered" data-setup='{}' controls playsinline preload="auto" width="auto" height="auto"></video>
+                <img id="imageplayer" hidden>
+                <div class="vt-countdown" id="countdown" hidden>
+                    <div class="vt-countdown-kicker">Up next in <span id="countdown-n">5</span>…</div>
+                    <div class="vt-countdown-title" id="countdown-title"></div>
+                    <div class="vt-countdown-actions">
+                        <button type="button" class="vt-btn" id="countdown-play">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                            Play now
+                        </button>
+                        <button type="button" class="vt-btn-ghost" id="countdown-cancel">Cancel</button>
+                    </div>
                 </div>
             </div>
+            <div class="vt-player-frame vt-companion-frame" id="companion-frame" hidden>
+                <span class="vt-video-label">Jellyfin companion</span>
+                <video id="companion-player" class="video-js vjs-default-skin vjs-big-play-centered" controls playsinline preload="metadata" width="auto" height="auto"></video>
+            </div>
+        </div>
+
+        <div class="vt-companion-controls" id="companion-controls" hidden>
+            <button type="button" class="vt-btn" id="companion-play">Play both</button>
+            <button type="button" class="vt-btn-ghost" id="companion-pause">Pause both</button>
+            <button type="button" class="vt-btn-ghost" id="companion-sync">Sync here</button>
+            <button type="button" class="vt-btn-ghost" id="companion-retry" hidden>Retry composite</button>
+            <button type="button" class="vt-btn-ghost" id="companion-cancel-change" hidden>Restore saved pairing</button>
+            <button type="button" class="vt-btn-ghost" id="companion-minus">−1s</button>
+            <button type="button" class="vt-btn-ghost" id="companion-plus">+1s</button>
+            <span class="vt-companion-offset" id="companion-offset">Offset 0.000s</span>
+            <span class="vt-companion-status" id="companion-status" aria-live="polite">Loading companion…</span>
         </div>
 
         <h1 class="vt-player-title" id="title"></h1>
@@ -41,6 +60,7 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 <span id="btn-copy-label">Copy source link</span>
             </button>
+            <button type="button" class="vt-btn-ghost" id="btn-companion">Companion</button>
             <button type="button" class="vt-btn-ghost danger" id="btn-delete">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                 Delete
@@ -64,6 +84,57 @@
     </aside>
 </div>
 
+<div class="vt-modal-backdrop" id="companion-modal" hidden>
+    <div class="vt-modal vt-modal-wide" role="dialog" aria-labelledby="companion-modal-title">
+        <h3 id="companion-modal-title">Jellyfin companion</h3>
+        <p class="vt-modal-text">Choose the episode you own. The pairing and synchronized position will be saved.</p>
+        <form id="companion-form">
+            <label class="vt-field" id="companion-profile-field" hidden>
+                <span>Jellyfin server</span>
+                <select class="vt-select" id="companion-profile"></select>
+            </label>
+            <div class="vt-companion-library-search">
+                <label class="vt-field">
+                    <span>Find a show</span>
+                    <input class="vt-input" id="companion-series-search" type="search" autocomplete="off" placeholder="Search your Jellyfin library">
+                </label>
+                <button type="button" class="vt-btn-ghost" id="companion-series-search-button">Search</button>
+            </div>
+            <div class="vt-companion-library-grid">
+                <label class="vt-field">
+                    <span>Show</span>
+                    <select class="vt-select" id="companion-series"><option value="">Loading shows…</option></select>
+                </label>
+                <label class="vt-field">
+                    <span>Season</span>
+                    <select class="vt-select" id="companion-season" disabled><option value="">Choose a show first</option></select>
+                </label>
+                <label class="vt-field vt-companion-episode-field">
+                    <span>Episode</span>
+                    <select class="vt-select" id="companion-episode" disabled><option value="">Choose a season first</option></select>
+                </label>
+            </div>
+            <details class="vt-companion-manual">
+                <summary>Enter an item ID manually</summary>
+            <label class="vt-field">
+                <span>Jellyfin item ID</span>
+                <input class="vt-input" id="companion-item-id" name="item_id" autocomplete="off" placeholder="Item ID">
+            </label>
+            </details>
+            <label class="vt-field">
+                <span>Companion start time in seconds</span>
+                <input class="vt-input" id="companion-initial-offset" name="offset" type="number" step="0.001" value="0">
+            </label>
+            <div class="vt-modal-actions" style="margin-top:16px">
+                <span class="vt-modal-status" id="companion-modal-status"></span>
+                <button type="button" class="vt-btn-ghost danger" id="companion-remove" hidden>Remove pairing</button>
+                <button type="button" class="vt-btn-ghost" id="companion-cancel">Cancel</button>
+                <button type="submit" class="vt-btn" id="companion-submit">Load companion</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div class="vt-modal-backdrop" id="delete-modal" hidden>
     <div class="vt-modal" role="dialog" aria-labelledby="delete-modal-title">
         <h3 id="delete-modal-title">Delete this video?</h3>
@@ -78,18 +149,623 @@
 <script src="/static/js/cards.js"></script>
 <script>
     const id = new URLSearchParams(window.location.search).get('id');
-    const video = document.querySelector('video');
+    const video = document.getElementById('player');
     const imageExts = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
     var tspoll;
     var vPlayer;
     var watched = false;
     var upNext = [];
     var countdownTimer = null;
+    var companionPlayer = null;
+    var companionActive = false;
+    var companionSynced = false;
+    var companionOffset = 0;
+    var companionPendingStartTime = 0;
+    var companionGuard = false;
+    var companionDriftTimer = null;
+    var compositeMode = false;
+    var compositeSessionId = null;
+    var compositeReactionStart = 0;
+    var compositeReady = false;
+    var companionItemId = null;
+    var companionProfileId = 'default';
+    var companionProfilesLoaded = false;
+    var savedCompanionState = null;
+    var companionChangePending = false;
+    var compositeRecoveryPending = false;
+    var compositeRecoveryInFlight = false;
+    var compositeRecoveryAttempts = 0;
+    var compositeRecoveryTimeline = 0;
+    var compositeStallTimer = null;
+    var companionStateSavedAt = 0;
+    var companionLastSavedPosition = -1;
+    var companionRemovalPending = false;
+    var companionLibraryLoaded = false;
+    var reactionSourceConfig = null;
 
     function getJSON(url) {
         return fetch(url).then(function (r) { return r.json(); });
     }
     function $id(x) { return document.getElementById(x); }
+
+    function companionModalStatus(message, isError) {
+        var el = $id('companion-modal-status');
+        el.textContent = message || '';
+        el.className = 'vt-modal-status' + (isError ? ' err' : '');
+    }
+
+    function episodeLabel(item) {
+        var prefix = Number.isFinite(item.index_number) ? 'E' + item.index_number + ' · ' : '';
+        return prefix + item.name;
+    }
+
+    function fillCompanionSelect(select, items, placeholder, labeler) {
+        select.textContent = '';
+        var prompt = document.createElement('option');
+        prompt.value = '';
+        prompt.textContent = placeholder;
+        select.appendChild(prompt);
+        items.forEach(function (item) {
+            var option = document.createElement('option');
+            option.value = item.id;
+            option.textContent = labeler ? labeler(item) : item.name;
+            select.appendChild(option);
+        });
+        select.disabled = !items.length;
+    }
+
+    function loadCompanionProfiles() {
+        return fetch('/api/jellyfin/phase1/status').then(function (response) {
+            return response.json().then(function (body) {
+                if (!response.ok || !body.success) {
+                    throw new Error(body.error || 'Could not load Jellyfin configuration');
+                }
+                var profiles = (body.data && body.data.profiles) || [];
+                if (!profiles.length) throw new Error('Jellyfin is not configured');
+                var select = $id('companion-profile');
+                select.textContent = '';
+                profiles.forEach(function (profile) {
+                    var option = document.createElement('option');
+                    option.value = profile.id;
+                    option.textContent = profile.name;
+                    select.appendChild(option);
+                });
+                if (profiles.some(function (profile) { return profile.id === companionProfileId; })) {
+                    select.value = companionProfileId;
+                } else {
+                    companionProfileId = profiles[0].id;
+                    select.value = companionProfileId;
+                }
+                $id('companion-profile-field').hidden = profiles.length < 2;
+                companionProfilesLoaded = true;
+                return profiles;
+            });
+        });
+    }
+
+    function fetchCompanionLibrary(kind, options) {
+        options = options || {};
+        var query = new URLSearchParams();
+        query.set('profile', companionProfileId);
+        if (options.parentId) query.set('parent_id', options.parentId);
+        if (options.search) query.set('search', options.search);
+        return fetch('/api/jellyfin/library/' + kind + '?' + query.toString()).then(function (response) {
+            return response.json().then(function (body) {
+                if (!response.ok || !body.success) throw new Error(body.error || 'Could not load Jellyfin library');
+                return body.data || [];
+            });
+        });
+    }
+
+    function loadCompanionSeries() {
+        companionModalStatus('Loading Jellyfin shows…', false);
+        $id('companion-series').disabled = true;
+        return fetchCompanionLibrary('series', { search: $id('companion-series-search').value.trim() })
+            .then(function (items) {
+                fillCompanionSelect($id('companion-series'), items, items.length ? 'Choose a show' : 'No shows found');
+                fillCompanionSelect($id('companion-season'), [], 'Choose a show first');
+                fillCompanionSelect($id('companion-episode'), [], 'Choose a season first');
+                companionLibraryLoaded = true;
+                companionModalStatus(items.length + (items.length === 1 ? ' show found' : ' shows found'), false);
+            }).catch(function (error) {
+                fillCompanionSelect($id('companion-series'), [], 'Library unavailable');
+                companionModalStatus(error.message, true);
+            });
+    }
+
+    function reactionSource(v, filepath, ext) {
+        var directType = {
+            mp4: 'video/mp4',
+            m4v: 'video/mp4',
+            mov: 'video/mp4',
+            webm: 'video/webm'
+        }[ext];
+        var codec = String(v.vcodec || '').toLowerCase();
+        var codecName = null;
+        if (codec.includes('vp9')) codecName = 'vp09';
+        else if (codec.includes('av1')) codecName = 'av01.0.05M.08';
+        else if (codec.includes('h264') || codec.includes('avc')) codecName = 'avc1.42E01E';
+        else if (codec.includes('hevc') || codec.includes('h265')) codecName = 'hvc1';
+        var appleTouchDevice = /iPad|iPhone|iPod/.test(navigator.userAgent)
+            || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        var forceAppleHls = appleTouchDevice && (codec.includes('vp9') || codec.includes('av1'));
+
+        // Let capable desktop browsers use the original file. iPad/WebKit reports
+        // no support for combinations such as VP9-in-MP4, so use VaultTube HLS.
+        if (!forceAppleHls && directType
+                && (!codecName || video.canPlayType(directType + '; codecs="' + codecName + '"'))) {
+            return { type: directType, src: filepath };
+        }
+        return {
+            type: 'application/x-mpegURL',
+            src: '/api/transcode/' + encodeURIComponent(id) + '/playlist.m3u8'
+        };
+    }
+
+    // --- Saved Jellyfin companion playback ---
+    function setCompanionStatus(message, isError) {
+        var el = $id('companion-status');
+        el.textContent = message;
+        el.classList.toggle('err', !!isError);
+    }
+    function updateCompanionOffset() {
+        $id('companion-offset').textContent = companionSynced
+            ? 'Offset ' + (companionOffset >= 0 ? '+' : '') + companionOffset.toFixed(3) + 's'
+            : 'Not synced';
+    }
+    function setSharedControlsEnabled(enabled) {
+        $id('companion-play').disabled = !enabled;
+        $id('companion-pause').disabled = !enabled;
+        $id('companion-minus').disabled = !enabled;
+        $id('companion-plus').disabled = !enabled;
+    }
+    function companionTargetTime() {
+        return Math.max(0, vPlayer.currentTime() + companionOffset);
+    }
+    function canonicalReactionPosition() {
+        if (!vPlayer) return 0;
+        if (compositeMode) {
+            return Math.max(0, compositeReactionStart + (compositeReady ? vPlayer.currentTime() : 0));
+        }
+        return Math.max(0, vPlayer.currentTime() || 0);
+    }
+    function reloadCurrentComposite(reason) {
+        if (!compositeMode || !compositeSessionId || !vPlayer
+                || compositeRecoveryInFlight || !navigator.onLine) return;
+        var timelinePosition = compositeReady
+            ? Math.max(0, vPlayer.currentTime() || 0)
+            : compositeRecoveryTimeline;
+        compositeRecoveryTimeline = timelinePosition;
+        var reactionPosition = Math.max(0, compositeReactionStart + timelinePosition);
+        compositeRecoveryInFlight = true;
+        compositeRecoveryAttempts += 1;
+        compositeRecoveryPending = false;
+        clearTimeout(compositeStallTimer);
+        vPlayer.pause();
+        saveCompanionState(true, reactionPosition, 'pause');
+        compositeReady = false;
+        setCompanionStatus('Refreshing composite after ' + reason + '…', false);
+        vPlayer.one('loadedmetadata', function () {
+            var duration = vPlayer.duration();
+            var restoredTimeline = Number.isFinite(duration)
+                ? Math.min(timelinePosition, Math.max(0, duration - 0.25))
+                : timelinePosition;
+            vPlayer.currentTime(restoredTimeline);
+            vPlayer.pause();
+            compositeReady = true;
+            compositeRecoveryInFlight = false;
+            compositeRecoveryAttempts = 0;
+            compositeRecoveryTimeline = restoredTimeline;
+            setCompanionStatus('Composite restored and paused — tap Play composite', false);
+        });
+        vPlayer.src({
+            type: 'application/x-mpegURL',
+            src: '/api/companion/composite/' + encodeURIComponent(compositeSessionId)
+                + '/playlist.m3u8?recover=' + Date.now()
+        });
+    }
+    function markCompositeForRecovery(message) {
+        if (!compositeMode || !companionSynced) return;
+        compositeRecoveryPending = true;
+        var alreadyPaused = vPlayer.paused();
+        pauseBoth();
+        if (alreadyPaused) saveCompanionState(true, undefined, 'pause');
+        setCompanionStatus(message, !navigator.onLine);
+    }
+    function saveCompanionState(force, explicitPosition, playbackEvent) {
+        if (companionRemovalPending || !companionActive || !companionSynced || !companionItemId) return;
+        var position = Number.isFinite(explicitPosition)
+            ? Math.max(0, explicitPosition) : canonicalReactionPosition();
+        var now = Date.now();
+        if (!force && now - companionStateSavedAt < 15000
+                && Math.abs(position - companionLastSavedPosition) < 5) return;
+        companionStateSavedAt = now;
+        companionLastSavedPosition = position;
+        fetch('/api/companion/state/' + encodeURIComponent(id), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            keepalive: !!force,
+            body: JSON.stringify({
+                server_profile_id: companionProfileId,
+                jellyfin_item_id: companionItemId,
+                sync_offset: companionOffset,
+                reaction_position: position,
+                synced: true,
+                playback_event: playbackEvent || (force ? 'pause' : 'progress'),
+                jellyfin_watched: playbackEvent === 'ended'
+            })
+        }).catch(function () { /* the next progress flush retries */ });
+    }
+    function alignCompanion(force) {
+        if (compositeMode || !companionActive || !companionSynced || !vPlayer || !companionPlayer) return;
+        var target = companionTargetTime();
+        if (force || Math.abs(companionPlayer.currentTime() - target) > 0.5) {
+            companionPlayer.currentTime(target);
+        }
+    }
+    function pauseBoth(message) {
+        if (!companionActive || !companionSynced || companionGuard) return;
+        companionGuard = true;
+        vPlayer.pause();
+        if (!compositeMode && companionPlayer) companionPlayer.pause();
+        companionGuard = false;
+        if (message) setCompanionStatus(message, false);
+    }
+    function playBoth() {
+        if (!companionActive || !companionSynced || !vPlayer) return;
+        if (compositeMode) {
+            Promise.resolve(vPlayer.play()).then(function () {
+                setCompanionStatus('Playing composite stream', false);
+            }).catch(function () {
+                setCompanionStatus('Brave blocked playback. Tap Play composite again.', true);
+            });
+            return;
+        }
+        if (!companionPlayer) return;
+        alignCompanion(true);
+        companionGuard = true;
+        var mainPlay;
+        var secondPlay;
+        try {
+            mainPlay = vPlayer.play();
+            secondPlay = companionPlayer.play();
+        } catch (e) {
+            companionGuard = false;
+            pauseBoth();
+            setCompanionStatus('One stream could not start', true);
+            return;
+        }
+        Promise.all([Promise.resolve(mainPlay), Promise.resolve(secondPlay)]).then(function () {
+            companionGuard = false;
+            setCompanionStatus('Playing together', false);
+        }).catch(function () {
+            companionGuard = false;
+            pauseBoth();
+            setCompanionStatus('Brave blocked one stream. Tap Play both again.', true);
+        });
+    }
+
+    function startCompositeSession(reactionStart, companionStart, options) {
+        options = options || {};
+        var previousComposite = compositeMode && compositeSessionId ? {
+            synced: companionSynced,
+            offset: companionOffset
+        } : null;
+        var requestedOffset = Number.isFinite(options.syncOffset)
+            ? options.syncOffset : companionStart - reactionStart;
+        companionGuard = true;
+        vPlayer.pause();
+        if (companionPlayer) companionPlayer.pause();
+        companionGuard = false;
+        companionSynced = false;
+        setSharedControlsEnabled(false);
+        $id('companion-sync').disabled = true;
+        $id('companion-retry').hidden = true;
+        setCompanionStatus('Preparing synchronized composite stream…', false);
+
+        fetch('/api/companion/composite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                reaction_id: id,
+                server_profile_id: companionProfileId,
+                jellyfin_item_id: companionItemId,
+                reaction_start: reactionStart,
+                companion_start: companionStart
+            })
+        }).then(function (response) {
+            return response.json().then(function (body) {
+                if (!response.ok || !body.success) {
+                    var message = body.error || 'Composite session failed';
+                    if (body.retryable) message += ' You can retry without losing the saved pairing.';
+                    throw new Error(message);
+                }
+                return body.data;
+            });
+        }).then(function (session) {
+            compositeMode = true;
+            compositeSessionId = session.session_id;
+            compositeReactionStart = reactionStart;
+            compositeReady = false;
+            compositeRecoveryPending = false;
+            compositeRecoveryInFlight = false;
+            compositeRecoveryAttempts = 0;
+            compositeRecoveryTimeline = 0;
+            companionOffset = requestedOffset;
+            companionSynced = true;
+            companionChangePending = false;
+            $id('companion-cancel-change').hidden = true;
+            $id('companion-retry').hidden = true;
+            clearInterval(companionDriftTimer);
+            $id('companion-frame').hidden = true;
+            $id('companion-stage').classList.add('composite-playing');
+            $id('reaction-label').textContent = 'Reaction + companion';
+            $id('companion-play').textContent = 'Play composite';
+            $id('companion-pause').textContent = 'Pause composite';
+            setSharedControlsEnabled(true);
+            $id('companion-sync').disabled = true;
+            updateCompanionOffset();
+            saveCompanionState(true, reactionStart);
+            var cleanParams = new URLSearchParams(window.location.search);
+            cleanParams.delete('jellyfin');
+            cleanParams.delete('jellyfinProfile');
+            cleanParams.delete('companionTime');
+            cleanParams.delete('offset');
+            history.replaceState(null, '', window.location.pathname + '?' + cleanParams.toString());
+            vPlayer.one('loadedmetadata', function () {
+                // A source swap can retain the reaction video's absolute resume
+                // position. Composite playlists start their own timeline at zero.
+                vPlayer.currentTime(0);
+                vPlayer.pause();
+                compositeReady = true;
+                setCompanionStatus(
+                    options.restored
+                        ? 'Saved position restored — tap Play composite'
+                        : 'Composite ready — tap Play composite',
+                    false
+                );
+            });
+            vPlayer.src({
+                type: 'application/x-mpegURL',
+                src: session.playlist
+            });
+        }).catch(function (error) {
+            compositeRecoveryInFlight = false;
+            if (previousComposite) {
+                companionSynced = previousComposite.synced;
+                companionOffset = previousComposite.offset;
+                setSharedControlsEnabled(true);
+                $id('companion-sync').disabled = true;
+                updateCompanionOffset();
+            } else {
+                companionSynced = false;
+                setSharedControlsEnabled(false);
+                $id('companion-sync').disabled = !companionPlayer;
+            }
+            $id('companion-retry').hidden = false;
+            setCompanionStatus(error.message || 'Composite session failed', true);
+        });
+    }
+    function activateCompanion(itemId, companionStartTime, profileId) {
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(itemId)) {
+            $id('companion-modal-status').textContent = 'Enter a valid Jellyfin item ID.';
+            $id('companion-modal-status').className = 'vt-modal-status err';
+            return;
+        }
+        var reactionPosition = canonicalReactionPosition();
+        companionProfileId = profileId || companionProfileId || 'default';
+        companionChangePending = !!savedCompanionState;
+        $id('companion-cancel-change').hidden = !companionChangePending;
+        if (compositeMode && reactionSourceConfig) {
+            vPlayer.pause();
+            compositeMode = false;
+            compositeSessionId = null;
+            compositeReady = false;
+            $id('companion-stage').classList.remove('composite-playing');
+            $id('reaction-label').textContent = 'Reaction';
+            $id('companion-play').textContent = 'Play both';
+            $id('companion-pause').textContent = 'Pause both';
+            vPlayer.one('loadedmetadata', function () {
+                vPlayer.currentTime(reactionPosition);
+            });
+            vPlayer.src([reactionSourceConfig]);
+        }
+        companionSynced = false;
+        companionOffset = 0;
+        companionItemId = itemId;
+        companionPendingStartTime = Number.isFinite(companionStartTime) ? companionStartTime : 0;
+        updateCompanionOffset();
+        setSharedControlsEnabled(false);
+        $id('companion-sync').disabled = true;
+        $id('companion-frame').hidden = false;
+        $id('companion-controls').hidden = false;
+        $id('reaction-label').hidden = false;
+        $id('companion-stage').classList.add('active');
+        document.querySelector('.vt-player-layout').classList.add('companion-mode');
+        $id('companion-modal').hidden = true;
+        companionActive = true;
+        if (!companionPlayer) {
+            companionPlayer = videojs('companion-player', { techOrder: ['html5'], autoplay: false });
+            companionPlayer.fluid(true);
+            companionPlayer.on('loadedmetadata', function () {
+                companionGuard = true;
+                companionPlayer.pause();
+                companionPlayer.currentTime(Math.max(0, companionPendingStartTime));
+                companionGuard = false;
+                $id('companion-sync').disabled = false;
+                setCompanionStatus('Unsynced — play the reaction to its sync point, then press Sync here', false);
+            });
+            companionPlayer.on('error', function () {
+                setCompanionStatus('Jellyfin stream failed to load', true);
+            });
+            companionPlayer.on('pause', function () {
+                if (companionSynced && !companionGuard && vPlayer && !vPlayer.paused()) pauseBoth('Paused');
+            });
+            companionPlayer.on('play', function () {
+                if (companionSynced && !companionGuard && vPlayer && vPlayer.paused()) playBoth();
+            });
+            companionPlayer.on('waiting', function () {
+                if (companionSynced && vPlayer && !vPlayer.paused()) pauseBoth('Jellyfin buffering — both paused');
+            });
+        }
+        setCompanionStatus('Loading companion…', false);
+        companionPlayer.src({
+            type: 'application/x-mpegURL',
+            src: '/api/jellyfin/phase1/' + encodeURIComponent(itemId)
+                + '/manifest.m3u8?profile=' + encodeURIComponent(companionProfileId)
+        });
+        var params = new URLSearchParams(window.location.search);
+        params.set('jellyfin', itemId);
+        params.set('jellyfinProfile', companionProfileId);
+        params.set('companionTime', String(companionPendingStartTime));
+        params.delete('offset');
+        history.replaceState(null, '', window.location.pathname + '?' + params.toString());
+        clearInterval(companionDriftTimer);
+        companionDriftTimer = setInterval(function () {
+            if (companionSynced && vPlayer && companionPlayer && !vPlayer.paused() && !companionPlayer.paused()) {
+                alignCompanion(false);
+            }
+        }, 500);
+    }
+
+    function restoreSavedCompanion(state) {
+        var reactionPosition = Math.max(0, Number(state.reaction_position) || 0);
+        savedCompanionState = state;
+        companionItemId = state.jellyfin_item_id;
+        companionProfileId = state.server_profile_id || 'default';
+        companionOffset = Number(state.sync_offset) || 0;
+        companionChangePending = false;
+        companionActive = true;
+        companionSynced = false;
+        $id('companion-controls').hidden = false;
+        $id('reaction-label').hidden = false;
+        $id('companion-frame').hidden = true;
+        $id('companion-stage').classList.add('active');
+        document.querySelector('.vt-player-layout').classList.add('companion-mode');
+        $id('companion-remove').hidden = false;
+        $id('companion-cancel-change').hidden = true;
+        vPlayer.currentTime(reactionPosition);
+        setCompanionStatus('Restoring saved companion position…', false);
+        startCompositeSession(
+            reactionPosition,
+            Math.max(0, reactionPosition + companionOffset),
+            { syncOffset: companionOffset, restored: true }
+        );
+    }
+
+    $id('btn-companion').addEventListener('click', function () {
+        companionModalStatus('', false);
+        $id('companion-remove').hidden = !companionItemId;
+        $id('companion-submit').textContent = companionItemId ? 'Change / resync' : 'Load companion';
+        $id('companion-modal').hidden = false;
+        if (companionItemId) {
+            $id('companion-item-id').value = companionItemId;
+            $id('companion-initial-offset').value = Math.max(
+                0, canonicalReactionPosition() + companionOffset
+            ).toFixed(3);
+        }
+        var ready = companionProfilesLoaded
+            ? Promise.resolve()
+            : loadCompanionProfiles();
+        ready.then(function () {
+            $id('companion-profile').value = companionProfileId;
+            if (!companionLibraryLoaded) loadCompanionSeries();
+        }).catch(function (error) {
+            companionModalStatus(error.message, true);
+        });
+        $id('companion-series-search').focus();
+    });
+    $id('companion-profile').addEventListener('change', function () {
+        companionProfileId = this.value;
+        companionLibraryLoaded = false;
+        loadCompanionSeries();
+    });
+    $id('companion-series-search-button').addEventListener('click', loadCompanionSeries);
+    $id('companion-series-search').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); loadCompanionSeries(); }
+    });
+    $id('companion-series').addEventListener('change', function () {
+        fillCompanionSelect($id('companion-season'), [], this.value ? 'Loading seasons…' : 'Choose a show first');
+        fillCompanionSelect($id('companion-episode'), [], 'Choose a season first');
+        if (!this.value) return;
+        companionModalStatus('Loading seasons…', false);
+        fetchCompanionLibrary('seasons', { parentId: this.value }).then(function (items) {
+            fillCompanionSelect($id('companion-season'), items, items.length ? 'Choose a season' : 'No seasons found', function (item) {
+                return Number.isFinite(item.index_number) ? 'Season ' + item.index_number : item.name;
+            });
+            companionModalStatus('', false);
+        }).catch(function (error) { companionModalStatus(error.message, true); });
+    });
+    $id('companion-season').addEventListener('change', function () {
+        fillCompanionSelect($id('companion-episode'), [], this.value ? 'Loading episodes…' : 'Choose a season first');
+        if (!this.value) return;
+        companionModalStatus('Loading episodes…', false);
+        fetchCompanionLibrary('episodes', { parentId: this.value }).then(function (items) {
+            fillCompanionSelect($id('companion-episode'), items, items.length ? 'Choose an episode' : 'No episodes found', episodeLabel);
+            companionModalStatus('', false);
+        }).catch(function (error) { companionModalStatus(error.message, true); });
+    });
+    $id('companion-episode').addEventListener('change', function () {
+        if (this.value) {
+            $id('companion-item-id').value = this.value;
+            companionModalStatus('Episode selected', false);
+        }
+    });
+    $id('companion-cancel').addEventListener('click', function () { $id('companion-modal').hidden = true; });
+    $id('companion-modal').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
+    $id('companion-remove').addEventListener('click', function () {
+        companionModalStatus('Removing saved pairing…', false);
+        // Navigation pauses the player and fires pagehide. Suppress those
+        // final progress writes or they recreate the row we just deleted.
+        companionRemovalPending = true;
+        fetch('/api/companion/state/' + encodeURIComponent(id), { method: 'DELETE' })
+            .then(function (response) {
+                if (!response.ok) throw new Error('Could not remove pairing');
+                window.location.href = '/player.html?id=' + encodeURIComponent(id);
+            }).catch(function (error) {
+                companionRemovalPending = false;
+                companionModalStatus(error.message, true);
+            });
+    });
+    $id('companion-cancel-change').addEventListener('click', function () {
+        window.location.href = '/player.html?id=' + encodeURIComponent(id);
+    });
+    $id('companion-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var offset = parseFloat($id('companion-initial-offset').value);
+        var itemId = $id('companion-episode').value || $id('companion-item-id').value.trim();
+        activateCompanion(
+            itemId,
+            Number.isFinite(offset) ? offset : 0,
+            $id('companion-profile').value || companionProfileId
+        );
+    });
+    $id('companion-play').addEventListener('click', playBoth);
+    $id('companion-pause').addEventListener('click', function () { pauseBoth('Paused'); });
+    $id('companion-sync').addEventListener('click', function () {
+        if (!vPlayer || !companionPlayer) return;
+        startCompositeSession(vPlayer.currentTime(), companionPlayer.currentTime());
+    });
+    $id('companion-retry').addEventListener('click', function () {
+        var reactionPosition = canonicalReactionPosition();
+        var companionPosition = companionPlayer && !$id('companion-frame').hidden
+            ? companionPlayer.currentTime()
+            : Math.max(0, reactionPosition + companionOffset);
+        startCompositeSession(
+            reactionPosition, companionPosition,
+            { syncOffset: companionOffset, restored: !companionPlayer }
+        );
+    });
+    $id('companion-minus').addEventListener('click', function () {
+        var position = canonicalReactionPosition();
+        var adjusted = companionOffset - 1;
+        startCompositeSession(position, Math.max(0, position + adjusted), { syncOffset: adjusted });
+    });
+    $id('companion-plus').addEventListener('click', function () {
+        var position = canonicalReactionPosition();
+        var adjusted = companionOffset + 1;
+        startCompositeSession(position, Math.max(0, position + adjusted), { syncOffset: adjusted });
+    });
 
     // --- Watched toggle ---
     function setWatchedUI(w) {
@@ -160,8 +836,36 @@
         }
 
         vPlayer = videojs('player', { techOrder: ['html5'], autoplay: false });
-        vPlayer.src([{ type: 'video/mp4', src: filepath }]);
+        reactionSourceConfig = reactionSource(v, filepath, ext);
+        vPlayer.src([reactionSourceConfig]);
         vPlayer.fluid(true);
+        vPlayer.on('error', function () {
+            var error = vPlayer.error();
+            var detail = error && error.message ? ': ' + error.message : '';
+            if (compositeMode) {
+                compositeRecoveryInFlight = false;
+                markCompositeForRecovery(
+                    navigator.onLine
+                        ? 'Composite interrupted' + detail + ' — retrying when ready'
+                        : 'Network offline — composite paused'
+                );
+                if (navigator.onLine && compositeRecoveryAttempts < 2) {
+                    setTimeout(function () {
+                        if (compositeRecoveryPending && !document.hidden) {
+                            reloadCurrentComposite('an interruption');
+                        }
+                    }, 1000);
+                } else if (navigator.onLine) {
+                    $id('companion-retry').hidden = false;
+                    setCompanionStatus(
+                        'Composite could not recover automatically — tap Retry composite',
+                        true
+                    );
+                }
+            } else if (companionActive) {
+                setCompanionStatus('Reaction stream failed' + detail, true);
+            }
+        });
         if (v.timestamp && parseInt(v.timestamp, 10) !== 0) {
             vPlayer.currentTime(parseInt(v.timestamp, 10));
         }
@@ -169,25 +873,51 @@
         // Pause: push timestamp once and stop polling
         video.addEventListener('pause', function () {
             clearInterval(tspoll);
-            fetch('/api/set_timestamp/' + video.currentTime + '/' + encodeURIComponent(id));
+            fetch('/api/set_timestamp/' + canonicalReactionPosition() + '/' + encodeURIComponent(id));
+            saveCompanionState(true, undefined, 'pause');
+            if (!compositeMode && companionSynced && !companionGuard && companionPlayer && !companionPlayer.paused()) {
+                pauseBoth('Paused');
+            }
         });
         // Play: poll timestamp to the server every 5s
         video.addEventListener('play', function () {
+            clearTimeout(compositeStallTimer);
+            compositeRecoveryPending = false;
             tspoll = window.setInterval(function () {
-                fetch('/api/set_timestamp/' + video.currentTime + '/' + encodeURIComponent(id));
+                fetch('/api/set_timestamp/' + canonicalReactionPosition() + '/' + encodeURIComponent(id));
+                saveCompanionState(false);
             }, 5000);
+            if (!compositeMode && companionSynced && !companionGuard && companionPlayer && companionPlayer.paused()) {
+                playBoth();
+            }
         });
         // Ended: mark watched, reset timestamp, maybe autoplay the next one
         video.addEventListener('ended', function () {
             clearInterval(tspoll);
             fetch('/api/watched/' + encodeURIComponent(id)).then(function () { setWatchedUI(true); });
             fetch('/api/set_timestamp/0/' + encodeURIComponent(id));
+            saveCompanionState(true, 0, 'ended');
             maybeAutoplayNext();
         });
         video.addEventListener('canplay', function () {
+            clearTimeout(compositeStallTimer);
             if (vPlayer.videoHeight() > vPlayer.videoWidth()) {
                 $id('playerdiv').classList.add('vertical');
             }
+        });
+        video.addEventListener('waiting', function () {
+            if (!compositeMode || vPlayer.paused()) return;
+            clearTimeout(compositeStallTimer);
+            setCompanionStatus('Composite buffering…', false);
+            compositeStallTimer = setTimeout(function () {
+                markCompositeForRecovery('Composite stalled — refreshing playback');
+                if (navigator.onLine && !document.hidden) {
+                    reloadCurrentComposite('a playback stall');
+                }
+            }, 12000);
+        });
+        vPlayer.on('seeked', function () {
+            if (companionSynced) alignCompanion(true);
         });
 
         // --- Chapters (derived from the stored description, no re-download) ---
@@ -386,6 +1116,64 @@
         }, 200);
         setTimeout(function () { clearInterval(tryPlay); }, 5000);
     }
+
+    // A query parameter remains useful for creating or changing a pairing.
+    // Otherwise restore the durable pairing as a fresh paused composite.
+    var companionParams = new URLSearchParams(window.location.search);
+    var companionTry = window.setInterval(function () {
+        if (!vPlayer) return;
+        clearInterval(companionTry);
+        if (companionParams.get('jellyfin')) {
+            var companionTime = parseFloat(companionParams.get('companionTime') || companionParams.get('offset') || '0');
+            activateCompanion(
+                companionParams.get('jellyfin'),
+                Number.isFinite(companionTime) ? companionTime : 0,
+                companionParams.get('jellyfinProfile') || 'default'
+            );
+            return;
+        }
+        getJSON('/api/companion/state/' + encodeURIComponent(id)).then(function (body) {
+            if (body && body.success && body.data && body.data.synced) {
+                restoreSavedCompanion(body.data);
+            }
+        });
+    }, 200);
+    setTimeout(function () { clearInterval(companionTry); }, 5000);
+
+    window.addEventListener('pagehide', function () {
+        clearTimeout(compositeStallTimer);
+        saveCompanionState(true, undefined, 'stop');
+    });
+    document.addEventListener('visibilitychange', function () {
+        if (!compositeMode || !companionSynced) return;
+        if (document.hidden) {
+            markCompositeForRecovery('Composite paused while VaultTube is in the background');
+            return;
+        }
+        if (compositeRecoveryPending && navigator.onLine) {
+            reloadCurrentComposite('returning to VaultTube');
+        }
+    });
+    window.addEventListener('offline', function () {
+        markCompositeForRecovery('Network offline — composite paused');
+    });
+    window.addEventListener('online', function () {
+        if (compositeRecoveryPending && !document.hidden) {
+            reloadCurrentComposite('the network reconnecting');
+        }
+    });
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted && compositeMode && companionSynced) {
+            compositeRecoveryPending = true;
+            reloadCurrentComposite('restoring the page');
+        }
+    });
+    window.addEventListener('orientationchange', function () {
+        setTimeout(function () {
+            if (vPlayer) vPlayer.trigger('resize');
+            if (companionPlayer) companionPlayer.trigger('resize');
+        }, 150);
+    });
 
     // --- Delete with confirm modal ---
     $id('btn-delete').addEventListener('click', function () { $id('delete-modal').hidden = false; });

@@ -116,6 +116,29 @@ def checkdb():
         if cur.fetchone()[0] == 0:
             logger.info("Adding index idx_AddedAt to videos table...")
             cur.execute("ALTER TABLE videos ADD INDEX `idx_AddedAt` (`AddedAt`);")
+        # One durable Jellyfin companion pairing per VaultTube reaction.
+        # Composite HLS session IDs are intentionally not stored: they are
+        # transient cache keys and are recreated from this canonical state.
+        cur.execute(
+            "SELECT * FROM information_schema.tables WHERE table_schema = %s "
+            "AND table_name = 'companion_links' LIMIT 1",
+            (os.environ['VAULTTUBE_DBNAME'],),
+        )
+        if not cur.fetchone():
+            logger.info("Companion links table not created, creating...")
+            cur.execute("""CREATE TABLE `companion_links` (
+                `reaction_id` varchar(50) COLLATE utf8mb4_bin NOT NULL,
+                `server_profile_id` varchar(100) NOT NULL DEFAULT 'default',
+                `jellyfin_item_id` varchar(128) NOT NULL,
+                `sync_offset` double NOT NULL DEFAULT 0,
+                `reaction_position` double NOT NULL DEFAULT 0,
+                `synced` tinyint(1) NOT NULL DEFAULT 0,
+                `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`reaction_id`),
+                CONSTRAINT `fk_companion_reaction` FOREIGN KEY (`reaction_id`)
+                    REFERENCES `videos` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
         #Ignore
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'IgnoreVid' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
@@ -570,6 +593,83 @@ def get_video_index():
     except Exception as e:
         logger.error("Error during get_video_index: %s"%e)
         return None
+
+
+def get_companion_link(reaction_id):
+    """Return the durable companion state for a reaction, or None."""
+    con = get_connection()
+    cur = con.cursor()
+    try:
+        cur.execute(
+            "SELECT reaction_id, server_profile_id, jellyfin_item_id, "
+            "sync_offset, reaction_position, synced, created_at, updated_at "
+            "FROM companion_links WHERE reaction_id=%s",
+            (reaction_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        keys = (
+            'reaction_id', 'server_profile_id', 'jellyfin_item_id',
+            'sync_offset', 'reaction_position', 'synced', 'created_at',
+            'updated_at',
+        )
+        result = dict(zip(keys, row))
+        result['sync_offset'] = float(result['sync_offset'])
+        result['reaction_position'] = float(result['reaction_position'])
+        result['synced'] = bool(result['synced'])
+        for key in ('created_at', 'updated_at'):
+            if result[key] is not None:
+                result[key] = result[key].isoformat()
+        return result
+    finally:
+        cur.close()
+        con.close()
+
+
+def save_companion_link(reaction_id, jellyfin_item_id, sync_offset,
+                        reaction_position, synced=True,
+                        server_profile_id='default'):
+    """Create or update a reaction's canonical companion state."""
+    con = get_connection()
+    cur = con.cursor()
+    try:
+        cur.execute("""INSERT INTO companion_links
+            (reaction_id, server_profile_id, jellyfin_item_id, sync_offset,
+             reaction_position, synced)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                server_profile_id=VALUES(server_profile_id),
+                jellyfin_item_id=VALUES(jellyfin_item_id),
+                sync_offset=VALUES(sync_offset),
+                reaction_position=VALUES(reaction_position),
+                synced=VALUES(synced),
+                updated_at=CURRENT_TIMESTAMP""",
+            (
+                reaction_id, server_profile_id, jellyfin_item_id,
+                float(sync_offset), float(reaction_position), int(bool(synced)),
+            ),
+        )
+        con.commit()
+    finally:
+        cur.close()
+        con.close()
+    return get_companion_link(reaction_id)
+
+
+def delete_companion_link(reaction_id):
+    con = get_connection()
+    cur = con.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM companion_links WHERE reaction_id=%s", (reaction_id,)
+        )
+        deleted = cur.rowcount > 0
+        con.commit()
+        return deleted
+    finally:
+        cur.close()
+        con.close()
 
 def save_video(id,ret,img,source='youtube'):
     try:

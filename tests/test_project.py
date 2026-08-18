@@ -2133,6 +2133,785 @@ def test_health_reports_deployed_revision(client, monkeypatch):
     assert data["data"]["revision"] == "test-commit-sha"
 
 
+def test_jellyfin_phase1_status_is_optional(client, monkeypatch):
+    monkeypatch.delenv("VAULTTUBE_JELLYFIN_URL", raising=False)
+    monkeypatch.delenv("VAULTTUBE_JELLYFIN_TOKEN", raising=False)
+    response = client.get("/api/jellyfin/phase1/status")
+    assert response.status_code == 200
+    assert response.get_json()["data"]["configured"] is False
+
+
+def test_jellyfin_named_profiles_are_sanitized_and_legacy_default_survives(
+        client, monkeypatch):
+    import jellyfin
+
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_URL", "http://legacy:8096")
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_TOKEN", "legacy-secret")
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_PROFILES", json.dumps({
+        "remote": {
+            "name": "Remote library",
+            "url": "https://media.example.test",
+            "token": "remote-secret",
+            "user_id": "UserRemote",
+            "verify_tls": True,
+        },
+    }))
+
+    assert jellyfin.get_config("default")["base_url"] == "http://legacy:8096"
+    assert jellyfin.get_config("remote")["token"] == "remote-secret"
+    response = client.get("/api/jellyfin/phase1/status")
+    body = response.get_json()
+
+    assert response.status_code == 200
+    assert body["data"]["profiles"] == [
+        {"id": "remote", "name": "Remote library"},
+        {"id": "default", "name": "Default"},
+    ]
+    assert "secret" not in response.get_data(as_text=True)
+    assert "media.example" not in response.get_data(as_text=True)
+
+
+def test_jellyfin_rejects_invalid_profile_configuration(monkeypatch):
+    import jellyfin
+
+    monkeypatch.delenv("VAULTTUBE_JELLYFIN_URL", raising=False)
+    monkeypatch.delenv("VAULTTUBE_JELLYFIN_TOKEN", raising=False)
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_PROFILES", "[]")
+    with pytest.raises(jellyfin.JellyfinConfigError, match="JSON object"):
+        jellyfin.profile_summaries()
+
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_PROFILES", json.dumps({
+        "not valid": {"url": "http://jellyfin", "token": "secret"},
+    }))
+    with pytest.raises(jellyfin.JellyfinConfigError, match="profile ID"):
+        jellyfin.profile_summaries()
+
+
+def test_jellyfin_library_items_are_user_scoped_and_sanitized(monkeypatch):
+    import jellyfin
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"Items": [{
+                "Id": "Episode123",
+                "Name": "The Episode",
+                "Type": "Episode",
+                "IndexNumber": 2,
+                "ParentIndexNumber": 1,
+                "ProductionYear": 2025,
+                "RunTimeTicks": 3_600_000_000,
+                "Path": "/private/media/file.mkv",
+            }]}
+
+        def close(self):
+            captured["closed"] = True
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return FakeResponse()
+
+    monkeypatch.setattr(jellyfin.requests, "get", fake_get)
+    rows = jellyfin.library_items({
+        "base_url": "http://jellyfin:8096",
+        "token": "secret",
+        "user_id": "User123",
+        "verify_tls": True,
+    }, "episodes", parent_id="Season123")
+
+    assert captured["url"] == "http://jellyfin:8096/Items"
+    assert captured["kwargs"]["params"]["UserId"] == "User123"
+    assert captured["kwargs"]["params"]["ParentId"] == "Season123"
+    assert captured["kwargs"]["params"]["IncludeItemTypes"] == "Episode"
+    assert captured["kwargs"]["headers"] == {"X-Emby-Token": "secret"}
+    assert captured["closed"] is True
+    assert rows == [{
+        "id": "Episode123",
+        "name": "The Episode",
+        "type": "Episode",
+        "index_number": 2,
+        "parent_index_number": 1,
+        "production_year": 2025,
+        "duration": 360.0,
+    }]
+
+
+def test_jellyfin_library_requires_parent_for_seasons(monkeypatch):
+    import jellyfin
+
+    with pytest.raises(jellyfin.JellyfinProxyError, match="parent"):
+        jellyfin.library_items({"token": "secret"}, "seasons")
+
+
+def test_jellyfin_library_api_returns_sanitized_rows(client, monkeypatch):
+    import api
+
+    calls = []
+    monkeypatch.setattr(api, "get_config", lambda profile_id="default": {"token": "secret"})
+    monkeypatch.setattr(
+        api, "library_items",
+        lambda config, kind, **kwargs: calls.append((config, kind, kwargs)) or [{
+            "id": "Series123", "name": "Pluribus", "type": "Series",
+        }],
+    )
+
+    response = client.get("/api/jellyfin/library/series?search=Pluribus&limit=25")
+
+    assert response.status_code == 200
+    assert response.get_json()["data"][0]["id"] == "Series123"
+    assert calls == [({"token": "secret"}, "series", {
+        "parent_id": None, "search": "Pluribus", "limit": "25",
+    })]
+
+
+def test_jellyfin_library_api_selects_named_profile(client, monkeypatch):
+    import api
+
+    profiles = []
+    monkeypatch.setattr(
+        api, "get_config",
+        lambda profile_id="default": profiles.append(profile_id) or {"token": "secret"},
+    )
+    monkeypatch.setattr(api, "library_items", lambda *args, **kwargs: [])
+
+    response = client.get("/api/jellyfin/library/series?profile=remote")
+
+    assert response.status_code == 200
+    assert profiles == ["remote"]
+
+
+def test_jellyfin_library_api_rejects_missing_parent(client, monkeypatch):
+    import api
+    import jellyfin
+
+    monkeypatch.setattr(api, "get_config", lambda profile_id="default": {"token": "secret"})
+    monkeypatch.setattr(
+        api, "library_items",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            jellyfin.JellyfinProxyError("A Jellyfin parent item ID is required")
+        ),
+    )
+
+    response = client.get("/api/jellyfin/library/episodes")
+
+    assert response.status_code == 400
+    assert "parent" in response.get_json()["error"]
+
+
+def test_jellyfin_phase1_rewrites_manifest_without_exposing_token(client, monkeypatch):
+    import api
+
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_URL", "http://jellyfin:8096")
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_TOKEN", "super-secret-token")
+
+    class FakeResponse:
+        status_code = 200
+        url = "http://jellyfin:8096/Videos/Item123/master.m3u8"
+        headers = {"Content-Type": "application/vnd.apple.mpegurl"}
+        text = (
+            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\n"
+            "/Videos/Item123/main.m3u8?api_key=super-secret-token&foo=bar\n"
+        )
+
+        def close(self):
+            pass
+
+    calls = []
+
+    def fake_get(config, url, **kwargs):
+        calls.append((config, url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(api, "upstream_get", fake_get)
+    response = client.get("/api/jellyfin/phase1/Item123/manifest.m3u8")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "/api/jellyfin/phase1/Item123/asset/" in body
+    assert "super-secret-token" not in body
+    assert calls[0][0]["token"] == "super-secret-token"
+    assert calls[0][2]["params"]["VideoCodec"] == "h264"
+
+
+def test_jellyfin_phase1_asset_forwards_range(client, monkeypatch):
+    import api
+    import jellyfin
+
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_URL", "http://jellyfin:8096")
+    monkeypatch.setenv("VAULTTUBE_JELLYFIN_TOKEN", "test-token")
+    config = jellyfin.get_config()
+    encoded = jellyfin.encode_asset_url(
+        config, "Item123", "http://jellyfin:8096/Videos/Item123/0.ts")
+
+    class FakeResponse:
+        status_code = 206
+        url = "http://jellyfin:8096/Videos/Item123/0.ts"
+        headers = {
+            "Content-Type": "video/MP2T",
+            "Content-Length": "5",
+            "Content-Range": "bytes 0-4/5",
+            "Accept-Ranges": "bytes",
+        }
+
+        def iter_content(self, chunk_size):
+            yield b"abcde"
+
+        def close(self):
+            pass
+
+    calls = []
+
+    def fake_get(config, url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(api, "upstream_get", fake_get)
+    response = client.get(
+        "/api/jellyfin/phase1/Item123/asset/" + encoded,
+        headers={"Range": "bytes=0-4"},
+    )
+
+    assert response.status_code == 206
+    assert response.data == b"abcde"
+    assert response.headers["Content-Range"] == "bytes 0-4/5"
+    assert calls[0][1]["range_header"] == "bytes=0-4"
+
+
+def test_jellyfin_asset_rejects_other_hosts(monkeypatch):
+    import jellyfin
+
+    config = {
+        "base_url": "http://jellyfin:8096",
+        "token": "test-token",
+        "user_id": "",
+        "verify_tls": True,
+    }
+    with pytest.raises(jellyfin.JellyfinProxyError):
+        jellyfin.encode_asset_url(
+            config, "Item123", "https://attacker.example/Videos/Item123/0.ts")
+
+
+def test_jellyfin_playback_reporting_is_opt_in_and_user_scoped(monkeypatch):
+    import jellyfin
+
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        jellyfin.requests, "post",
+        lambda url, **kwargs: calls.append((url, kwargs)) or FakeResponse(),
+    )
+    disabled = {
+        "base_url": "http://jellyfin:8096", "token": "secret",
+        "user_id": "User123", "verify_tls": True,
+        "report_playback": False,
+    }
+    assert jellyfin.report_playback(disabled, "Item123", 12.5) is False
+    assert calls == []
+
+    enabled = dict(disabled, report_playback=True)
+    assert jellyfin.report_playback(
+        enabled, "Item123", 12.5, watched=True
+    ) is True
+    assert calls[0][0].endswith("/Users/User123/Items/Item123/UserData")
+    assert calls[0][1]["json"] == {"PlaybackPositionTicks": 125000000}
+    assert calls[1][0].endswith("/Users/User123/PlayedItems/Item123")
+    assert all(call[1]["headers"] == {"X-Emby-Token": "secret"} for call in calls)
+
+
+def test_composite_session_is_deterministic_and_bounded(monkeypatch, tmp_path):
+    import composite
+
+    source = tmp_path / "reaction.mp4"
+    source.write_bytes(b"test")
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
+    monkeypatch.setattr(composite, "get_duration", lambda path: 100.0)
+    monkeypatch.setattr(composite, "get_config", lambda profile_id="default": {"token": "secret"})
+    monkeypatch.setattr(
+        composite, "item_info",
+        lambda config, item_id: {"id": item_id, "name": "Episode", "duration": 80.0},
+    )
+
+    first_id, first = composite.create_session("Reaction1", "Item123", 10, 5)
+    second_id, second = composite.create_session("Reaction1", "Item123", 10, 5)
+
+    assert first_id == second_id
+    assert first["duration"] == 75.0
+    assert second["width"] == 1280
+    assert composite.load_session(first_id)["companion_start"] == 5.0
+
+
+def test_composite_profile_participates_in_cache_key(monkeypatch, tmp_path):
+    import composite
+
+    source = tmp_path / "reaction.mp4"
+    source.write_bytes(b"test")
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
+    monkeypatch.setattr(composite, "get_duration", lambda path: 100.0)
+    monkeypatch.setattr(
+        composite, "get_config",
+        lambda profile_id="default": {"token": profile_id},
+    )
+    monkeypatch.setattr(
+        composite, "item_info",
+        lambda config, item_id: {"id": item_id, "duration": 80.0},
+    )
+
+    default_id, _ = composite.create_session(
+        "Reaction1", "Item123", 10, 5, "default"
+    )
+    remote_id, remote = composite.create_session(
+        "Reaction1", "Item123", 10, 5, "remote"
+    )
+
+    assert remote_id != default_id
+    assert remote["server_profile_id"] == "remote"
+
+
+def test_composite_concurrency_limit_returns_retryable_error(client, monkeypatch):
+    import api
+
+    monkeypatch.setattr(
+        api, "create_composite_session",
+        lambda *args: ("a" * 24, {"duration": 10, "width": 1280, "height": 360}),
+    )
+    monkeypatch.setattr(
+        api, "ensure_composite_running",
+        lambda session_id: (_ for _ in ()).throw(api.CompositeBusyError()),
+    )
+
+    response = client.post("/api/companion/composite", json={
+        "reaction_id": "Reaction1", "jellyfin_item_id": "Item123",
+        "reaction_start": 0, "companion_start": 0,
+    })
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "5"
+    assert response.get_json()["code"] == "composite_capacity"
+    assert response.get_json()["retryable"] is True
+
+
+def test_composite_runtime_enforces_concurrency_limit(monkeypatch, tmp_path):
+    import composite
+
+    class RunningProcess:
+        def poll(self):
+            return None
+
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("VAULTTUBE_MAX_CONCURRENT_COMPOSITES", "1")
+    waiting_id = "b" * 24
+    composite._write_metadata(waiting_id, {
+        "reaction_id": "Reaction1", "item_id": "Item123",
+        "reaction_start": 0, "companion_start": 0,
+        "duration": 10, "width": 1280, "height": 360,
+        "server_profile_id": "default",
+    })
+    with composite._lock:
+        composite._active.clear()
+        composite._active["a" * 24] = {
+            "process": RunningProcess(), "last_request": time.time(),
+            "dir": str(tmp_path / ("a" * 24)),
+        }
+    try:
+        with pytest.raises(composite.CompositeBusyError):
+            composite.ensure_running(waiting_id)
+    finally:
+        with composite._lock:
+            composite._active.clear()
+
+
+def test_composite_replaces_older_encoder_for_same_pairing(monkeypatch, tmp_path):
+    import composite
+
+    class RunningProcess:
+        def __init__(self):
+            self.terminated = False
+
+        def poll(self):
+            return 0 if self.terminated else None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout):
+            return 0
+
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path))
+    old_id = "a" * 24
+    new_id = "b" * 24
+    old_metadata = {
+        "reaction_id": "Reaction1", "server_profile_id": "default",
+        "item_id": "Item123", "reaction_start": 10,
+    }
+    new_metadata = dict(old_metadata, reaction_start=20)
+    composite._write_metadata(old_id, old_metadata)
+    process = RunningProcess()
+    with composite._lock:
+        composite._active.clear()
+        composite._active[old_id] = {
+            "process": process, "last_request": time.time(),
+            "dir": composite.cache_dir_for(old_id),
+        }
+        removed = composite._reap_superseded_pairing_locked(
+            new_id, new_metadata
+        )
+    try:
+        assert removed == 1
+        assert process.terminated is True
+        assert old_id not in composite._active
+    finally:
+        with composite._lock:
+            composite._active.clear()
+
+
+def test_composite_cleanup_removes_only_stale_inactive_sessions(monkeypatch, tmp_path):
+    import composite
+
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path))
+    root = tmp_path / "composite"
+    stale = root / ("a" * 24)
+    fresh = root / ("b" * 24)
+    stale.mkdir(parents=True)
+    fresh.mkdir()
+    old = time.time() - 3600
+    os.utime(stale, (old, old))
+
+    removed = composite.cleanup_sessions(ttl_seconds=60)
+
+    assert removed == 1
+    assert not stale.exists()
+    assert fresh.exists()
+
+
+def test_composite_ffmpeg_command_builds_side_by_side_mixed_audio(monkeypatch, tmp_path):
+    import composite
+
+    source = tmp_path / "reaction.mp4"
+    source.write_bytes(b"test")
+    monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
+    monkeypatch.setattr(composite, "get_config", lambda profile_id="default": {
+        "base_url": "http://jellyfin:8096", "token": "server-token"
+    })
+    metadata = {
+        "reaction_id": "Reaction1", "item_id": "Item123",
+        "reaction_start": 12.5, "companion_start": 3.0,
+        "duration": 60.0, "width": 1280, "height": 360,
+    }
+
+    command = composite._ffmpeg_command(metadata, str(tmp_path))
+    filter_graph = command[command.index("-filter_complex") + 1]
+
+    assert "hstack=inputs=2" in filter_graph
+    assert "amix=inputs=2" in filter_graph
+    assert "amix=inputs=2:duration=shortest:normalize=0" in filter_graph
+    assert "scale=640:360" in filter_graph
+    assert "volume=0.8" not in filter_graph
+    assert "channel_layouts=stereo" in filter_graph
+    assert "volume=12.0dB[a0]" in filter_graph
+    assert "volume=-8.0dB[a1]" in filter_graph
+    assert "loudnorm=I=-16.0:LRA=11.0:TP=-1.5:linear=false" in filter_graph
+    assert "aresample=48000" in filter_graph
+    assert "api_key" not in " ".join(command)
+    assert any(part.startswith("X-Emby-Token: server-token") for part in command)
+
+
+def test_composite_audio_targets_change_the_cache_key(monkeypatch, tmp_path):
+    import composite
+
+    source = tmp_path / "reaction.mp4"
+    source.write_bytes(b"test")
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
+    monkeypatch.setattr(composite, "get_duration", lambda path: 100.0)
+    monkeypatch.setattr(composite, "get_config", lambda profile_id="default": {"token": "secret"})
+    monkeypatch.setattr(
+        composite, "item_info",
+        lambda config, item_id: {"id": item_id, "name": "Episode", "duration": 80.0},
+    )
+
+    original_id, original = composite.create_session("Reaction1", "Item123", 10, 5)
+    monkeypatch.setenv("VAULTTUBE_COMPOSITE_LOUDNESS", "-14")
+    louder_id, louder = composite.create_session("Reaction1", "Item123", 10, 5)
+
+    assert original["pipeline_version"] == 2
+    assert original["audio_loudness_i"] == -16.0
+    assert original["reaction_gain_db"] == 12.0
+    assert original["companion_gain_db"] == -8.0
+    assert louder["audio_loudness_i"] == -14.0
+    assert louder_id != original_id
+
+
+def test_composite_rejects_invalid_audio_target(monkeypatch):
+    import composite
+
+    monkeypatch.setenv("VAULTTUBE_COMPOSITE_TRUE_PEAK", "2")
+    with pytest.raises(composite.CompositeError, match="TRUE_PEAK is out of range"):
+        composite._session_payload("Reaction1", "Item123", 10, 5)
+
+
+def test_composite_source_gains_change_the_cache_key(monkeypatch, tmp_path):
+    import composite
+
+    source = tmp_path / "reaction.mp4"
+    source.write_bytes(b"test")
+    monkeypatch.setenv("VAULTTUBE_TRANSCODE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(composite, "source_path_for", lambda video_id: str(source))
+    monkeypatch.setattr(composite, "get_duration", lambda path: 100.0)
+    monkeypatch.setattr(composite, "get_config", lambda profile_id="default": {"token": "secret"})
+    monkeypatch.setattr(
+        composite, "item_info",
+        lambda config, item_id: {"id": item_id, "name": "Episode", "duration": 80.0},
+    )
+
+    original_id, _ = composite.create_session("Reaction1", "Item123", 10, 5)
+    monkeypatch.setenv("VAULTTUBE_COMPOSITE_REACTION_GAIN_DB", "3")
+    adjusted_id, adjusted = composite.create_session("Reaction1", "Item123", 10, 5)
+
+    assert adjusted["reaction_gain_db"] == 3.0
+    assert adjusted_id != original_id
+
+
+def test_composite_create_api_returns_playlist(client, monkeypatch):
+    import api
+
+    monkeypatch.setattr(
+        api, "create_composite_session",
+        lambda *args: ("a" * 24, {"duration": 100.0, "width": 1280, "height": 360}),
+    )
+    monkeypatch.setattr(api, "ensure_composite_running", lambda session_id: None)
+    response = client.post("/api/companion/composite", json={
+        "reaction_id": "Reaction1",
+        "jellyfin_item_id": "Item123",
+        "reaction_start": 12.5,
+        "companion_start": 0,
+    })
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["session_id"] == "a" * 24
+    assert data["playlist"].endswith("/playlist.m3u8")
+
+
+def test_composite_playlist_can_be_reloaded_for_mobile_recovery(client, monkeypatch):
+    import api
+
+    calls = []
+    monkeypatch.setattr(
+        api, "ensure_composite_running",
+        lambda session_id: calls.append(session_id) or {"duration": 60.0},
+    )
+    monkeypatch.setattr(
+        api, "build_vod_playlist",
+        lambda duration: "#EXTM3U\n#EXT-X-ENDLIST\n",
+    )
+
+    response = client.get(
+        "/api/companion/composite/" + ("a" * 24)
+        + "/playlist.m3u8?recover=123"
+    )
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/vnd.apple.mpegurl"
+    assert calls == ["a" * 24]
+
+
+def _insert_companion_reaction(video_id="Reaction1"):
+    import database
+
+    con = database.get_connection()
+    cur = con.cursor()
+    cur.execute(
+        "INSERT INTO videos (id, title, filepath, length) VALUES (%s, %s, %s, %s)",
+        (video_id, "Reaction", "test/reaction.mp4", "3600"),
+    )
+    cur.close()
+    con.close()
+
+
+def test_companion_link_database_round_trip_and_delete():
+    import database
+
+    _insert_companion_reaction()
+    saved = database.save_companion_link(
+        "Reaction1", "Item123", -12.25, 345.5, True
+    )
+
+    assert saved["reaction_id"] == "Reaction1"
+    assert saved["jellyfin_item_id"] == "Item123"
+    assert saved["sync_offset"] == -12.25
+    assert saved["reaction_position"] == 345.5
+    assert saved["synced"] is True
+    assert database.get_companion_link("Reaction1") == saved
+    assert database.delete_companion_link("Reaction1") is True
+    assert database.get_companion_link("Reaction1") is None
+
+
+def test_companion_state_api_validates_once_and_coalesces_progress(client, monkeypatch):
+    import api
+
+    _insert_companion_reaction()
+    validated = []
+    monkeypatch.setattr(api, "get_config", lambda profile_id="default": {"token": "test"})
+    monkeypatch.setattr(
+        api, "item_info",
+        lambda config, item_id: validated.append(item_id) or {"id": item_id},
+    )
+
+    created = client.post("/api/companion/state/Reaction1", json={
+        "jellyfin_item_id": "Item123",
+        "sync_offset": -4.5,
+        "reaction_position": 120.25,
+        "synced": True,
+    })
+    progressed = client.post("/api/companion/state/Reaction1", json={
+        "reaction_position": 140.75,
+    })
+    loaded = client.get("/api/companion/state/Reaction1")
+
+    assert created.status_code == 200
+    assert progressed.status_code == 200
+    assert validated == ["Item123"]
+    state = loaded.get_json()["data"]
+    assert state["server_profile_id"] == "default"
+    assert state["sync_offset"] == -4.5
+    assert state["reaction_position"] == 140.75
+
+    removed = client.delete("/api/companion/state/Reaction1")
+    assert removed.get_json()["data"]["deleted"] is True
+    assert client.get("/api/companion/state/Reaction1").get_json()["data"] is None
+
+
+def test_companion_state_persists_profile_and_reports_optional_progress(
+        client, monkeypatch):
+    import api
+
+    _insert_companion_reaction()
+    configs = []
+    reports = []
+    monkeypatch.setattr(
+        api, "get_config",
+        lambda profile_id="default": configs.append(profile_id) or {
+            "id": profile_id, "token": "test", "report_playback": True,
+        },
+    )
+    monkeypatch.setattr(api, "item_info", lambda config, item_id: {"id": item_id})
+    monkeypatch.setattr(
+        api, "report_playback",
+        lambda config, item_id, position, **kwargs: reports.append(
+            (config["id"], item_id, position, kwargs)
+        ),
+    )
+
+    response = client.post("/api/companion/state/Reaction1", json={
+        "server_profile_id": "remote",
+        "jellyfin_item_id": "Item123",
+        "sync_offset": -5,
+        "reaction_position": 30,
+        "synced": True,
+        "playback_event": "progress",
+    })
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["server_profile_id"] == "remote"
+    assert configs == ["remote"]
+    assert reports == [("remote", "Item123", 25.0, {"watched": False})]
+
+
+def test_companion_state_api_rejects_invalid_progress(client, monkeypatch):
+    import api
+
+    _insert_companion_reaction()
+    monkeypatch.setattr(api, "get_config", lambda profile_id="default": {"token": "test"})
+    monkeypatch.setattr(api, "item_info", lambda config, item_id: {"id": item_id})
+
+    response = client.post("/api/companion/state/Reaction1", json={
+        "jellyfin_item_id": "Item123",
+        "sync_offset": 0,
+        "reaction_position": -1,
+        "synced": True,
+    })
+
+    assert response.status_code == 400
+    assert "reaction_position" in response.get_json()["error"]
+
+
+def test_player_contains_phase1_companion_controls(client):
+    response = client.get("/player.html")
+    assert response.status_code == 200
+    assert b'id="companion-player"' in response.data
+    assert b'id="companion-sync"' in response.data
+    assert b'playsinline' in response.data
+    assert b'var companionSynced = false' in response.data
+    assert b'Unsynced \xe2\x80\x94 play the reaction to its sync point' in response.data
+    assert b"classList.add('companion-mode')" in response.data
+    assert b"video.canPlayType" in response.data
+    assert b"'/api/transcode/'" in response.data
+    assert b"navigator.maxTouchPoints > 1" in response.data
+    assert b"'/api/companion/composite'" in response.data
+    assert b"Play composite" in response.data
+    assert b"Composite playlists start their own timeline at zero" in response.data
+    assert b"vPlayer.currentTime(0);" in response.data
+    assert b"/api/companion/state/" in response.data
+    assert b"canonicalReactionPosition" in response.data
+    assert b"restoreSavedCompanion" in response.data
+    assert b"keepalive: !!force" in response.data
+    assert b"if (companionRemovalPending ||" in response.data
+    assert b"companionRemovalPending = true;" in response.data
+    assert b"window.addEventListener('pagehide'" in response.data
+    assert b'id="companion-remove"' in response.data
+    assert b'id="companion-series"' in response.data
+    assert b'id="companion-season"' in response.data
+    assert b'id="companion-episode"' in response.data
+    assert b'id="companion-profile"' in response.data
+    assert b'id="companion-cancel-change"' in response.data
+    assert b"/api/jellyfin/library/" in response.data
+    assert b"server_profile_id: companionProfileId" in response.data
+    assert b"jellyfin_watched: playbackEvent === 'ended'" in response.data
+    assert b"body.retryable" in response.data
+    assert b"reloadCurrentComposite" in response.data
+    assert b"document.addEventListener('visibilitychange'" in response.data
+    assert b"window.addEventListener('offline'" in response.data
+    assert b"window.addEventListener('online'" in response.data
+    assert b"window.addEventListener('pageshow'" in response.data
+    assert b"window.addEventListener('orientationchange'" in response.data
+    assert b"video.addEventListener('waiting'" in response.data
+    assert b"Composite restored and paused" in response.data
+    assert b"reactionSourceConfig" in response.data
+    assert b"Change / resync" in response.data
+
+
+def test_companion_players_use_equal_letterboxed_viewports():
+    css_path = os.path.join(os.path.dirname(__file__), "..", "app", "static", "css", "theme.css")
+    with open(css_path, encoding="utf-8") as css_file:
+        css = css_file.read()
+    assert ".vt-companion-stage.active .vt-player-frame" in css
+    assert ".vt-companion-stage.active .vt-player-frame::before" in css
+    assert "padding-top: 56.25%" in css
+    assert "position: absolute" in css
+    assert "object-fit: contain" in css
+    assert ".vt-player-layout.companion-mode > aside" in css
+    assert ".vt-companion-stage.active.composite-playing" in css
+    assert "padding-top: 28.125%" in css
+    assert "@media (pointer: coarse)" in css
+    assert "min-height: 44px" in css
+    assert ".vt-companion-controls > button" in css
+    assert "justify-content: center;\n    min-height: 44px;" in css
+
+
 def test_video_getvids_unwatched(client):
     response = client.get("/api/getvids/unwatched/PublishedAt/desc/0")
     data = json.loads(response.get_data(as_text=True))

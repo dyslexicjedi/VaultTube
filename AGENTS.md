@@ -117,6 +117,12 @@ Optional:
 - `VAULTTUBE_TRANSCODE_PRESET` - libx264 preset for HLS transcodes (default `veryfast`)
 - `VAULTTUBE_TRANSCODE_CRF` - libx264 quality for HLS transcodes (default 23)
 - `VAULTTUBE_MAX_CONCURRENT_TRANSCODES` - Maximum simultaneous HLS encodes (default 1)
+- `VAULTTUBE_JELLYFIN_URL/TOKEN/USER_ID/VERIFY_TLS` - Backward-compatible `default` Jellyfin companion profile
+- `VAULTTUBE_JELLYFIN_NAME` - Display name for the default Jellyfin profile
+- `VAULTTUBE_JELLYFIN_REPORT_PLAYBACK` - Opt in to Jellyfin resume/watched reporting for the default profile
+- `VAULTTUBE_JELLYFIN_PROFILES` - JSON object of named server profiles (`name`, `url`, `token`, `user_id`, `verify_tls`, `report_playback`)
+- `VAULTTUBE_MAX_CONCURRENT_COMPOSITES` - Maximum simultaneous companion composite encodes (default 1)
+- `VAULTTUBE_COMPOSITE_MAX_SESSIONS` - Maximum retained inactive composite session caches (default 50)
 
 ## File Naming Convention
 ```

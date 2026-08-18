@@ -10,6 +10,28 @@ VaultTube is current pre-alpha (hot code!), expect bugs, crashes and similar iss
 
 Who should use this: Alpha testers, people who don't mind "early-access" to help improve software.
 
+## Jellyfin companion playback
+
+VaultTube can pair a reaction video with an episode owned and hosted in Jellyfin.
+Before synchronization, the reaction and episode are positioned independently.
+Pressing **Sync here** creates one side-by-side H.264/AAC HLS stream, so desktop
+and iPad browsers use the same playback path and one play/pause action.
+
+The pairing, fractional-second offset, and canonical reaction position are saved
+in MariaDB. Reopening the reaction creates a fresh composite session at the saved
+position and leaves it paused for the next user gesture. Jellyfin credentials are
+applied only on the server and are not included in browser URLs or manifests.
+Backgrounding the browser or losing the network pauses and checkpoints the
+composite; returning reloads it at the same position without autoplaying.
+
+The player's **Companion** dialog can select a named Jellyfin server, search its
+library, and browse from show to season to episode. A manual item-ID field
+remains available as a fallback. See
+[COMPANION_PLAYER_PLAN.md](COMPANION_PLAYER_PLAN.md) for architecture, routes,
+verification, limitations, and the remaining roadmap. Production and real-device
+acceptance guidance is in
+[docs/COMPANION_DEPLOYMENT.md](docs/COMPANION_DEPLOYMENT.md).
+
 ## How-TO:
 Below is a docker compose entry for the database and vaulttube
 
@@ -75,6 +97,41 @@ Optional:
 | `VAULTTUBE_SENTINEL_CENSUS_BUDGET` | YouTube API requests reserved for each Sentinel census pass (default 500) |
 | `VAULTTUBE_SENTINEL_CENSUS_MAX_PAGES` | Safety cap per remote inventory snapshot (default 2000 pages) |
 | `VAULTTUBE_SENTINEL_MANUAL_CENSUS_BUDGET` | YouTube API request cap for an explicitly requested Sentinel census (default 2000) |
+| `VAULTTUBE_JELLYFIN_URL` | Jellyfin server base URL for companion playback |
+| `VAULTTUBE_JELLYFIN_TOKEN` | Access token for a dedicated, restricted Jellyfin user; kept server-side |
+| `VAULTTUBE_JELLYFIN_USER_ID` | Optional Jellyfin user ID used to scope companion playback and library browsing |
+| `VAULTTUBE_JELLYFIN_VERIFY_TLS` | Verify Jellyfin TLS certificates (default `true`; disable only for a trusted local test server) |
+| `VAULTTUBE_JELLYFIN_NAME` | Display name for the legacy/default Jellyfin profile (default `Default`) |
+| `VAULTTUBE_JELLYFIN_REPORT_PLAYBACK` | Opt in to updating the configured Jellyfin user's resume position and watched state (default `false`; requires `USER_ID`) |
+| `VAULTTUBE_JELLYFIN_PROFILES` | JSON object of named Jellyfin profiles; each entry accepts `name`, `url`, `token`, `user_id`, `verify_tls`, and `report_playback` |
+| `VAULTTUBE_COMPOSITE_LOUDNESS` | Composite post-mix integrated loudness target in LUFS (default `-16`) |
+| `VAULTTUBE_COMPOSITE_LOUDNESS_RANGE` | Composite loudness-range target in LU (default `11`) |
+| `VAULTTUBE_COMPOSITE_TRUE_PEAK` | Composite maximum true peak in dBTP (default `-1.5`) |
+| `VAULTTUBE_COMPOSITE_REACTION_GAIN_DB` | Reaction input gain before the final mix (default `+12` dB) |
+| `VAULTTUBE_COMPOSITE_COMPANION_GAIN_DB` | Jellyfin input gain before the final mix (default `-8` dB) |
+| `VAULTTUBE_MAX_CONCURRENT_COMPOSITES` | Maximum simultaneous companion FFmpeg processes (default `1`, capped at `16`) |
+| `VAULTTUBE_COMPOSITE_MAX_SESSIONS` | Maximum inactive composite session caches retained before oldest-first eviction (default `50`) |
+
+The original `VAULTTUBE_JELLYFIN_*` URL/token/user variables remain supported
+as the `default` profile. Named profiles can be supplied without exposing their
+credentials to the browser, for example:
+
+```json
+{
+  "default": {
+    "name": "Home",
+    "url": "http://jellyfin:8096",
+    "token": "server-only-token",
+    "user_id": "jellyfin-user-id",
+    "report_playback": true
+  },
+  "remote": {
+    "name": "Remote library",
+    "url": "https://media.example.com",
+    "token": "another-server-only-token"
+  }
+}
+```
 
 ## Contributing / Architecture
 
