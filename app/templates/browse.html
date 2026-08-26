@@ -44,6 +44,12 @@
             <option value="3600-">Over 60 min</option>
         </select>
     </div>
+    <div class="vt-field">
+        <label>Collection</label>
+        <select id="collection-filter" class="vt-select" style="min-width:140px">
+            <option value="">Any</option>
+        </select>
+    </div>
     <div class="vt-actions">
         <button type="button" class="vt-btn" onclick="applyFilters()">Apply</button>
         <button type="button" class="vt-btn-ghost" onclick="clearFilters()">Clear</button>
@@ -65,7 +71,8 @@
         from_date: '',
         to_date: '',
         min_duration: null,
-        max_duration: null
+        max_duration: null,
+        collection: ''
     };
 
     function getJSON(url) {
@@ -74,7 +81,7 @@
 
     function hasFilters() {
         return state.deleted || state.channel_ids.length > 0 || state.from_date || state.to_date
-            || state.min_duration !== null || state.max_duration !== null;
+            || state.min_duration !== null || state.max_duration !== null || state.collection;
     }
 
     function buildUrl() {
@@ -88,6 +95,7 @@
         if (state.to_date) params.push('to_date=' + encodeURIComponent(state.to_date));
         if (state.min_duration !== null) params.push('min_duration=' + state.min_duration);
         if (state.max_duration !== null) params.push('max_duration=' + state.max_duration);
+        if (state.collection) params.push('collection=' + encodeURIComponent(state.collection));
         return params.length ? url + '?' + params.join('&') : url;
     }
 
@@ -181,6 +189,7 @@
             if (parts[0]) state.min_duration = parseInt(parts[0], 10);
             if (parts[1]) state.max_duration = parseInt(parts[1], 10);
         }
+        state.collection = document.getElementById('collection-filter').value;
         update(1);
     }
 
@@ -194,6 +203,8 @@
         document.getElementById('from-date').value = '';
         document.getElementById('to-date').value = '';
         document.getElementById('duration-filter').value = '';
+        document.getElementById('collection-filter').value = '';
+        state.collection = '';
         update(1);
     }
 
@@ -203,6 +214,16 @@
             var opt = document.createElement('option');
             opt.value = c.channelid;
             opt.textContent = c.channelname;
+            select.appendChild(opt);
+        });
+    });
+
+    getJSON('/api/collections/0').then(function (colls) {
+        var select = document.getElementById('collection-filter');
+        colls.forEach(function (c) {
+            var opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.name;
             select.appendChild(opt);
         });
     });

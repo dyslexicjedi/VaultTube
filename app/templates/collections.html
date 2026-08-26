@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="vt-rail-header" style="margin-bottom:18px">
+    <h2>Collections</h2>
+    <span class="vt-sub" id="coll-count"></span>
+</div>
+
+<form id="new-coll-form" class="vt-coll-create">
+    <input type="text" class="vt-input" id="new-coll-name" placeholder="New collection name" autocomplete="off" maxlength="200">
+    <button type="submit" class="vt-btn">Create</button>
+</form>
+
+<div class="vt-tile-grid" id="coll-grid"></div>
+<div class="vt-empty" id="coll-empty" hidden>No collections yet — create one above, or save a video from its card.</div>
+
+<script src="/static/js/cards.js"></script>
+<script>
+(function () {
+    function tileHTML(c) {
+        var system = String(c.is_system) === '1' || c.is_system === true;
+        var count = parseInt(c.video_count, 10) || 0;
+        var html = '<div class="vt-tile vt-coll-tile">'
+            + '<a class="vt-tile-name" href="/collection.html?id=' + encodeURIComponent(c.id) + '">' + VT.esc(c.name) + '</a>'
+            + '<p class="vt-tile-desc">' + (system ? 'Pinned collection' : '') + '</p>'
+            + '<div class="vt-tile-foot">'
+            + (system ? '<span class="vt-chip">System</span>' : '')
+            + '<span class="vt-sub">' + count + ' video' + (count === 1 ? '' : 's') + '</span>'
+            + (c.cover_video ? '<img class="vt-coll-cover" src="/api/images/' + encodeURIComponent(c.cover_video) + '" alt="" loading="lazy">' : '')
+            + '<div class="vt-actions">'
+            + (system ? '' : '<button type="button" class="vt-btn-ghost vt-btn-sm" data-rename="' + c.id + '" data-name="' + VT.esc(c.name) + '">Rename</button>'
+                + '<button type="button" class="vt-btn-ghost vt-btn-sm danger" data-delete="' + c.id + '">Delete</button>')
+            + '</div></div></div>';
+        return html;
+    }
+
+    function load() {
+        fetch('/api/collections/0')
+            .then(function (r) { return r.json(); })
+            .then(function (colls) {
+                document.getElementById('coll-grid').innerHTML = colls.map(tileHTML).join('');
+                document.getElementById('coll-empty').hidden = colls.length > 0;
+                document.getElementById('coll-count').textContent = colls.length + ' collections';
+                window.scrollTo({ top: 0 });
+            });
+    }
+
+    document.getElementById('new-coll-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var name = document.getElementById('new-coll-name').value.trim();
+        if (!name) return;
+        fetch('/api/collections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (res.success) {
+                    document.getElementById('new-coll-name').value = '';
+                    load();
+                } else {
+                    alert(res.error || 'Create failed');
+                }
+            });
+    });
+
+    document.getElementById('coll-grid').addEventListener('click', function (e) {
+        var rename = e.target.closest('button[data-rename]');
+        if (rename) {
+            var name = prompt('Rename collection', rename.dataset.name);
+            if (!name || name.trim() === rename.dataset.name) return;
+            fetch('/api/collection/' + rename.dataset.rename, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim() })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (res) { res.success ? load() : alert(res.error || 'Rename failed'); });
+            return;
+        }
+        var del = e.target.closest('button[data-delete]');
+        if (del && confirm('Delete this collection? The videos themselves are not removed.')) {
+            fetch('/api/collection/' + del.dataset.delete, { method: 'DELETE' })
+                .then(function (r) { return r.json(); })
+                .then(function (res) { res.success ? load() : alert(res.error || 'Delete failed'); });
+        }
+    });
+
+    load();
+})();
+</script>
+{% endblock %}

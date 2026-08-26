@@ -4,6 +4,7 @@ import subprocess
 from providers.base import get_dl_status, get_cur_videoID, get_cur_videoTitle, get_status_copy, subscribe_sse, unsubscribe_sse, get_alerts
 from backend import process_channel,save_uploaded_video_metadata
 from database import checkdb,get_connection,insert_playlist,find_next_previous,insert_download_error,get_download_errors,clear_download_errors,delete_download_error, update_video_codec_info, export_video_rows, export_subscribed_channels, export_subscribed_playlists, export_pl2vid, export_tombstones, export_row_counts, get_companion_link, save_companion_link, delete_companion_link
+from database import create_collection, rename_collection, delete_collection, get_collections, get_video_collections, add_video_to_collection, remove_video_from_collection, export_collections, export_collection_items
 from flask import request,jsonify,abort
 import shutil
 import datetime
@@ -500,9 +501,15 @@ def getvids(status,opt,direction,page):
             where_clauses.append(f"v.PublishedAt >= %s")
         if to_date:
             where_clauses.append(f"v.PublishedAt <= %s")
-        
+
         if request.args.get('deleted') == '1':
             where_clauses.append("v.isDeleted = 1")
+
+        collection_id = request.args.get('collection', '').strip()
+        if collection_id.isdigit():
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM collection2vid c2v "
+                "WHERE c2v.video_id = v.id AND c2v.collection_id = %s)")
 
         min_duration = request.args.get('min_duration', '').strip()
         max_duration = request.args.get('max_duration', '').strip()
@@ -528,6 +535,8 @@ def getvids(status,opt,direction,page):
             params.append(from_date)
         if to_date:
             params.append(to_date)
+        if collection_id.isdigit():
+            params.append(int(collection_id))
         params.extend(content_params)
         params.append(page_num)
         
@@ -1337,6 +1346,170 @@ def api_playlist(playlist,page):
         logger.error("API Playlist Failed: %s"%e)
         return api_error(str(e), 500)
 
+# ---- Collections: user-created local lists (Watch Later / Favorites are
+# seeded system rows). Row shape matches /api/getvids so VT.render works. ----
+
+COLLECTION_SORTS = {
+    'added_desc': 'c2v.added_at DESC',
+    'added_asc': 'c2v.added_at ASC',
+    'published_desc': 'v.PublishedAt DESC',
+    'published_asc': 'v.PublishedAt ASC',
+}
+
+def _collection_row(cid):
+    con = get_connection(logger)
+    cur = con.cursor()
+    cur.execute("SELECT id, name, is_system FROM collections WHERE id = %s", (cid,))
+    row = cur.fetchone()
+    cur.close()
+    con.close()
+    if not row:
+        return None
+    return {'id': row[0], 'name': row[1], 'is_system': bool(row[2])}
+
+@api_bp.route('/collections/<string:page>')
+def api_collections(page):
+    try:
+        page_num = int(page) if page.isdigit() else 0
+        rows = get_collections(offset=page_num, limit=40)
+        data = [
+            {'id': r[0], 'name': r[1], 'is_system': bool(r[2]),
+             'created_at': str(r[3]), 'video_count': int(r[4]),
+             'cover_video': r[5]}
+            for r in rows
+        ]
+        return jsonify(data)
+    except Exception as e:
+        logger.error("API Collections Failed: %s" % e)
+        return api_error(str(e), 500)
+
+@api_bp.route('/collections', methods=['POST'])
+def api_create_collection():
+    try:
+        body = request.get_json(silent=True) or {}
+        name = (body.get('name') or '').strip()
+        if not name:
+            return api_error("A collection name is required", 400)
+        if len(name) > 200:
+            return api_error("Collection name too long (max 200)", 400)
+        cid = create_collection(name)
+        if cid == 'duplicate':
+            return api_error("A collection with that name already exists", 409)
+        if not isinstance(cid, int):
+            return api_error("Could not create collection", 500)
+        return api_success({'id': cid, 'name': name})
+    except Exception as e:
+        logger.error("API Create Collection Failed: %s" % e)
+        return api_error(str(e), 500)
+
+@api_bp.route('/collection/<int:cid>', methods=['PATCH'])
+def api_rename_collection(cid):
+    try:
+        coll = _collection_row(cid)
+        if coll is None:
+            return api_error("Collection not found", 404)
+        if coll['is_system']:
+            return api_error("System collections cannot be renamed", 403)
+        body = request.get_json(silent=True) or {}
+        name = (body.get('name') or '').strip()
+        if not name:
+            return api_error("A collection name is required", 400)
+        if len(name) > 200:
+            return api_error("Collection name too long (max 200)", 400)
+        result = rename_collection(cid, name)
+        if result == 'duplicate':
+            return api_error("A collection with that name already exists", 409)
+        if result is not True:
+            return api_error("Could not rename collection", 500)
+        return api_success({'id': cid, 'name': name})
+    except Exception as e:
+        logger.error("API Rename Collection Failed: %s" % e)
+        return api_error(str(e), 500)
+
+@api_bp.route('/collection/<int:cid>', methods=['DELETE'])
+def api_delete_collection(cid):
+    try:
+        coll = _collection_row(cid)
+        if coll is None:
+            return api_error("Collection not found", 404)
+        if coll['is_system']:
+            return api_error("System collections cannot be deleted", 403)
+        delete_collection(cid)
+        return api_success()
+    except Exception as e:
+        logger.error("API Delete Collection Failed: %s" % e)
+        return api_error(str(e), 500)
+
+@api_bp.route('/collection/<int:cid>/<string:page>')
+def api_collection_videos(cid, page):
+    """Paged videos in a collection; same row shape as /api/getvids."""
+    try:
+        page_num = int(page) if page.isdigit() else 0
+        sort_key = request.args.get('sort', 'added_desc')
+        order_by = COLLECTION_SORTS.get(sort_key, COLLECTION_SORTS['added_desc'])
+        con = get_connection(logger)
+        cur = con.cursor()
+        cols = ("v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,"
+                "v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,"
+                "v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container")
+        sql = (f"select {cols} from {os.environ['VAULTTUBE_DBNAME']}.collection2vid c2v "
+               f"join {os.environ['VAULTTUBE_DBNAME']}.videos v on v.id = c2v.video_id "
+               f"left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid "
+               f"where c2v.collection_id = %s order by {order_by} limit 40 offset %s")
+        cur.execute(sql, (cid, page_num))
+        return parse_response(cur, con)
+    except Exception as e:
+        logger.error("API Collection Videos Failed: %s" % e)
+        return api_error(str(e), 500)
+
+@api_bp.route('/collection/<int:cid>/info')
+def api_collection_info(cid):
+    try:
+        coll = _collection_row(cid)
+        if coll is None:
+            return api_error("Collection not found", 404)
+        return api_success(coll)
+    except Exception as e:
+        logger.error("API Collection Info Failed: %s" % e)
+        return api_error(str(e), 500)
+
+@api_bp.route('/collection/<int:cid>/videos', methods=['POST'])
+def api_collection_add_video(cid):
+    try:
+        body = request.get_json(silent=True) or {}
+        vid = (body.get('video_id') or '').strip()
+        if not vid:
+            return api_error("video_id is required", 400)
+        if _collection_row(cid) is None:
+            return api_error("Collection not found", 404)
+        if not add_video_to_collection(cid, vid):
+            return api_error("Video not found", 404)
+        return api_success({'collection_id': cid, 'video_id': vid})
+    except Exception as e:
+        logger.error("API Collection Add Video Failed: %s" % e)
+        return api_error(str(e), 500)
+
+@api_bp.route('/collection/<int:cid>/videos/<string:vid>', methods=['DELETE'])
+def api_collection_remove_video(cid, vid):
+    try:
+        if _collection_row(cid) is None:
+            return api_error("Collection not found", 404)
+        removed = remove_video_from_collection(cid, vid)
+        return api_success({'removed': removed})
+    except Exception as e:
+        logger.error("API Collection Remove Video Failed: %s" % e)
+        return api_error(str(e), 500)
+
+@api_bp.route('/video/<string:vid>/collections')
+def api_video_collections(vid):
+    """Collections currently containing this video (for save menus)."""
+    try:
+        memberships = get_video_collections(vid)
+        return api_success([{'id': r[0], 'name': r[1]} for r in memberships])
+    except Exception as e:
+        logger.error("API Video Collections Failed: %s" % e)
+        return api_error(str(e), 500)
+
 @api_bp.route('/random')
 def api_random():
     try:
@@ -1877,6 +2050,10 @@ def api_export():
         playlists = export_subscribed_playlists()
         yield '],"subscriptions":' + json.dumps({'channels': channels, 'playlists': playlists}, default=str)
         yield ',"mappings":' + json.dumps(export_pl2vid(), default=str)
+        yield ',"collections":' + json.dumps({
+            'collections': export_collections(),
+            'items': export_collection_items(),
+        }, default=str)
         yield ',"tombstones":' + json.dumps(export_tombstones(), default=str)
         yield ',"sentinel":' + json.dumps(export_sentinel_data(), default=str)
         yield ',"config":' + json.dumps(_build_export_config(), default=str) + '}'

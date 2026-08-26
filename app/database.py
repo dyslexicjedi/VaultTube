@@ -139,6 +139,40 @@ def checkdb():
                 CONSTRAINT `fk_companion_reaction` FOREIGN KEY (`reaction_id`)
                     REFERENCES `videos` (`id`) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
+        # User-created local collections (Watch Later / Favorites are seeded
+        # system rows). Mirrors pl2vid but with FKs so deletes cascade.
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = %s AND table_name = 'collections' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Collections table not created, creating...")
+            cur.execute("""CREATE TABLE `collections` (
+                `id` int NOT NULL AUTO_INCREMENT,
+                `name` varchar(200) COLLATE utf8mb4_bin NOT NULL,
+                `is_system` tinyint(1) NOT NULL DEFAULT 0,
+                `sort_key` varchar(20) NOT NULL DEFAULT 'added_desc',
+                `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_collection_name` (`name`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;""")
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = %s AND table_name = 'collection2vid' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Collection2vid table not created, creating...")
+            cur.execute("""CREATE TABLE `collection2vid` (
+                `collection_id` int NOT NULL,
+                `video_id` varchar(50) COLLATE utf8mb4_bin NOT NULL,
+                `position` int NOT NULL DEFAULT 0,
+                `added_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`collection_id`, `video_id`),
+                KEY `idx_c2v_video` (`video_id`),
+                CONSTRAINT `fk_c2v_collection` FOREIGN KEY (`collection_id`)
+                    REFERENCES `collections` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_c2v_video` FOREIGN KEY (`video_id`)
+                    REFERENCES `videos` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;""")
+        # Seed the pinned system collections (no-op if they already exist)
+        cur.execute(
+            "INSERT IGNORE INTO collections (id, name, is_system) "
+            "VALUES (1, 'Watch Later', 1), (2, 'Favorites', 1)"
+        )
         #Ignore
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'IgnoreVid' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
@@ -1266,6 +1300,38 @@ def export_pl2vid():
         return []
 
 
+def export_collections():
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute("SELECT id, name, is_system, sort_key, created_at FROM collections ORDER BY id")
+        rows = [
+            {'id': r[0], 'name': r[1], 'is_system': bool(r[2]),
+             'sort_key': r[3], 'created_at': str(r[4])}
+            for r in cur
+        ]
+        cur.close()
+        con.close()
+        return rows
+    except Exception as e:
+        logger.error("export_collections failed: %s", e)
+        return []
+
+
+def export_collection_items():
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute("SELECT collection_id, video_id FROM collection2vid ORDER BY collection_id, video_id")
+        rows = [{'collection_id': r[0], 'videoId': r[1]} for r in cur]
+        cur.close()
+        con.close()
+        return rows
+    except Exception as e:
+        logger.error("export_collection_items failed: %s", e)
+        return []
+
+
 def export_tombstones():
     try:
         con = get_connection()
@@ -1291,6 +1357,8 @@ def export_row_counts():
             ('subscribed_playlists', "SELECT COUNT(*) FROM playlists WHERE subscribed = 1"),
             ('mappings', "SELECT COUNT(*) FROM pl2vid"),
             ('tombstones', "SELECT COUNT(*) FROM IgnoreVid"),
+            ('collections', "SELECT COUNT(*) FROM collections"),
+            ('collection_items', "SELECT COUNT(*) FROM collection2vid"),
             ('sentinel_events', "SELECT COUNT(*) FROM sentinel_events"),
             ('sentinel_video_states', "SELECT COUNT(*) FROM sentinel_video_state"),
             ('sentinel_scan_runs', "SELECT COUNT(*) FROM sentinel_scan_runs"),
@@ -1311,3 +1379,162 @@ def export_row_counts():
     except Exception as e:
         logger.error("export_row_counts failed: %s", e)
         return {}
+
+
+# --- Collections (user-created local playlists) ---
+
+def create_collection(name):
+    """Create a user collection. Returns the new id on success, 'duplicate'
+    if the name is taken, or None on an unexpected failure."""
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute("INSERT INTO collections(name) VALUES(%s)", (name,))
+        cid = cur.lastrowid
+        con.commit()
+        cur.close()
+        con.close()
+        return cid
+    except mariadb.IntegrityError as e:
+        if e.errno == 1062:
+            return 'duplicate'
+        logger.error("Error during create_collection: %s" % e)
+        return None
+    except Exception as e:
+        logger.error("Error during create_collection: %s" % e)
+        return None
+
+def rename_collection(cid, name):
+    """Returns True on success, 'duplicate' if the name is taken, or False
+    on an unexpected failure."""
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute("UPDATE collections SET name=%s WHERE id=%s", (name, cid))
+        updated = cur.rowcount > 0
+        con.commit()
+        cur.close()
+        con.close()
+        return updated
+    except mariadb.IntegrityError as e:
+        if e.errno == 1062:
+            return 'duplicate'
+        logger.error("Error during rename_collection: %s" % e)
+        return False
+    except Exception as e:
+        logger.error("Error during rename_collection: %s" % e)
+        return False
+
+def delete_collection(cid):
+    """Deletes the collection; membership rows cascade."""
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute("DELETE FROM collections WHERE id=%s AND is_system=0", (cid,))
+        deleted = cur.rowcount > 0
+        con.commit()
+        cur.close()
+        con.close()
+        return deleted
+    except Exception as e:
+        logger.error("Error during delete_collection: %s" % e)
+        return False
+
+def get_collections(offset=0, limit=40):
+    """Collections with video counts and a cover video (most recently added)."""
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute(
+            "SELECT c.id, c.name, c.is_system, c.created_at, "
+            "COUNT(c2v.video_id) AS video_count, "
+            "(SELECT c2v2.video_id FROM collection2vid c2v2 "
+            " WHERE c2v2.collection_id = c.id "
+            " ORDER BY c2v2.added_at DESC LIMIT 1) AS cover_video "
+            "FROM collections c "
+            "LEFT JOIN collection2vid c2v ON c2v.collection_id = c.id "
+            "GROUP BY c.id, c.name, c.is_system, c.created_at "
+            "ORDER BY c.is_system DESC, c.created_at ASC "
+            "LIMIT %s OFFSET %s",
+            (limit, offset)
+        )
+        rv = cur.fetchall()
+        cur.close()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during get_collections: %s" % e)
+        return []
+
+def get_video_collections(vid):
+    """[(collection_id, name)] for every collection containing this video."""
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute(
+            "SELECT c.id, c.name FROM collections c "
+            "JOIN collection2vid c2v ON c2v.collection_id = c.id "
+            "WHERE c2v.video_id = %s ORDER BY c.is_system DESC, c.name",
+            (vid,)
+        )
+        rv = cur.fetchall()
+        cur.close()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during get_video_collections: %s" % e)
+        return []
+
+def add_video_to_collection(cid, vid):
+    """Adds a video to a collection (no-op if already present). Appended at
+    the end of the manual ordering. Returns True when the row exists after."""
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 FROM collection2vid "
+            "WHERE collection_id = %s",
+            (cid,)
+        )
+        position = cur.fetchone()[0]
+        # No INSERT IGNORE here: MariaDB silently swallows FK violations
+        # inside INSERT IGNORE, which would fake success for unknown videos.
+        try:
+            cur.execute(
+                "INSERT INTO collection2vid(collection_id, video_id, position) "
+                "VALUES(%s, %s, %s)",
+                (cid, vid, position)
+            )
+        except mariadb.IntegrityError as e:
+            if e.errno == 1062:  # duplicate: already in the collection, fine
+                pass
+            else:
+                # FK failure (unknown video/collection): expected user-input
+                # error — log quietly and report failure to the caller
+                logger.warning("add_video_to_collection rejected (%s -> %s): %s", cid, vid, e)
+                return False
+        con.commit()
+        cur.close()
+        con.close()
+        return True
+    except Exception as e:
+        # Most commonly the FK failing: unknown video or unknown collection
+        logger.error("Error during add_video_to_collection: %s" % e)
+        return False
+
+def remove_video_from_collection(cid, vid):
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute(
+            "DELETE FROM collection2vid WHERE collection_id=%s AND video_id=%s",
+            (cid, vid)
+        )
+        removed = cur.rowcount > 0
+        con.commit()
+        cur.close()
+        con.close()
+        return removed
+    except Exception as e:
+        logger.error("Error during remove_video_from_collection: %s" % e)
+        return False

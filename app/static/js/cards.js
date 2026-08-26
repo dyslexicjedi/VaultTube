@@ -48,6 +48,9 @@ window.VT = (function () {
         var dur = fmtDur(v.length);
         var html = '<div class="vt-card' + (watched ? ' watched' : '') + '" data-id="' + esc(v.id) + '" role="button" tabindex="0" aria-label="' + esc(v.title) + '">';
         html += '<div class="vt-thumb"><img src="/api/images/' + encodeURIComponent(v.id) + '" alt="" loading="lazy">';
+        html += '<button type="button" class="vt-card-save" data-save="' + esc(v.id) + '" title="Save to collection" aria-label="Save to collection">'
+            + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'
+            + '</button>';
         if (opts.dot && !watched) html += '<span class="vt-dot" title="Unwatched"></span>';
         if (dur) html += '<span class="vt-dur">' + esc(dur) + '</span>';
         if (opts.progress) {
@@ -71,9 +74,11 @@ window.VT = (function () {
         container.innerHTML = (videos || []).map(function (v) { return cardHTML(v, opts); }).join('');
     }
 
-    // One document-level handler covers every rendered card; links inside cards win
+    // One document-level handler covers every rendered card; links and the
+    // save-to-collection button inside cards win over card navigation
     function cardTarget(e) {
         if (e.target.closest('a')) return null;
+        if (e.target.closest('.vt-card-save')) return null;
         return e.target.closest('.vt-card[data-id]');
     }
     document.addEventListener('click', function (e) {

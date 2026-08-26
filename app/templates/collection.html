@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="vt-page-head">
+    <h1 id="coll-title">Collection</h1>
+    <a class="vt-sub" href="/collections.html">All collections</a>
+</div>
+
+<div class="vt-grid" id="coll-grid"></div>
+<div class="vt-empty" id="coll-empty" hidden>Nothing saved here yet — use the bookmark button on any video card.</div>
+<ul class="vt-pages" id="coll-pages"></ul>
+
+<script src="/static/js/cards.js"></script>
+<script>
+(function () {
+    var cid = new URLSearchParams(window.location.search).get('id');
+
+    if (cid) {
+        fetch('/api/collection/' + encodeURIComponent(cid) + '/info')
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (res.success && res.data.name) {
+                    document.getElementById('coll-title').textContent = res.data.name;
+                    document.title = res.data.name + ' — VaultTube';
+                }
+            });
+    }
+
+    function load(p) {
+        fetch('/api/collection/' + encodeURIComponent(cid) + '/' + ((p - 1) * 40))
+            .then(function (r) { return r.json(); })
+            .then(function (vids) {
+                VT.render(document.getElementById('coll-grid'), vids, { dot: true });
+                document.getElementById('coll-empty').hidden = vids.length > 0;
+                VT.pager(document.getElementById('coll-pages'), { page: p, hasNext: vids.length === 40, onPage: load });
+                window.scrollTo({ top: 0 });
+            });
+    }
+
+    if (cid) load(1);
+})();
+</script>
+{% endblock %}

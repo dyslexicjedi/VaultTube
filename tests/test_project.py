@@ -4292,3 +4292,173 @@ def test_download_attempt_warning_then_exception_raises_alert(monkeypatch):
             "alert must fire from the WARNING even when a different DownloadError follows"
     finally:
         _clear_all_alerts()
+
+
+# ---------------- Collections (user-created local lists) ----------------
+
+def _insert_collection_video(vid, title='Coll Video', channel='CollChan', published='2024-01-01 10:00:00', watched=0):
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute(
+        "REPLACE INTO channels(channelid, channelname, json, subscribed) VALUES(%s, 'Coll Chan', '{}', 0)",
+        (channel,)
+    )
+    cur.execute(
+        "REPLACE INTO videos(id, channel_name, channelId, json, filepath, PublishedAt, title, watched) "
+        "VALUES(%s, 'Coll Chan', %s, '{}', %s, %s, %s, %s)",
+        (vid, channel, '/videos/%s.mp4' % vid, published, title, watched)
+    )
+    con.commit()
+    con.close()
+
+
+def test_collections_system_seeded(client):
+    r = client.get('/api/collections/0')
+    assert r.status_code == 200
+    colls = r.get_json()
+    names = {c['name']: c for c in colls}
+    for system_name in ('Watch Later', 'Favorites'):
+        assert system_name in names
+        assert names[system_name]['is_system'] in (1, True)
+
+
+def test_collection_create_add_remove_flow(client):
+    _insert_collection_video('CollVid1')
+    # Create
+    r = client.post('/api/collections', json={'name': 'My List'})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body['success']
+    cid = body['data']['id']
+    # Duplicate name rejected
+    r = client.post('/api/collections', json={'name': 'My List'})
+    assert r.status_code == 409
+    # Add video
+    r = client.post('/api/collection/%d/videos' % cid, json={'video_id': 'CollVid1'})
+    assert r.status_code == 200 and r.get_json()['success']
+    # Duplicate add is a no-op success
+    r = client.post('/api/collection/%d/videos' % cid, json={'video_id': 'CollVid1'})
+    assert r.status_code == 200
+    # Membership visible per-video
+    r = client.get('/api/video/CollVid1/collections')
+    ids = [m['id'] for m in r.get_json()['data']]
+    assert cid in ids
+    # Listed with count + cover
+    r = client.get('/api/collections/0')
+    mine = [c for c in r.get_json() if c['id'] == cid]
+    assert len(mine) == 1
+    assert mine[0]['video_count'] == 1
+    assert mine[0]['cover_video'] == 'CollVid1'
+    # Paged videos in getvids row shape (parse_response endpoints are text/html)
+    r = client.get('/api/collection/%d/0' % cid)
+    vids = json.loads(r.data)
+    assert len(vids) == 1
+    assert vids[0]['id'] == 'CollVid1'
+    assert vids[0]['title'] == 'Coll Video'
+    # Info endpoint
+    r = client.get('/api/collection/%d/info' % cid)
+    info = r.get_json()['data']
+    assert info['name'] == 'My List' and not info['is_system']
+    # Remove video
+    r = client.delete('/api/collection/%d/videos/CollVid1' % cid)
+    assert r.status_code == 200 and r.get_json()['success']
+    r = client.get('/api/video/CollVid1/collections')
+    assert r.get_json()['data'] == []
+    r = client.get('/api/collection/%d/0' % cid)
+    assert json.loads(r.data) == []
+
+
+def test_getvids_collection_filter(client):
+    _insert_collection_video('FilterVid1', title='In collection')
+    _insert_collection_video('FilterVid2', title='Not in collection')
+    r = client.post('/api/collections', json={'name': 'Filter Coll'})
+    cid = r.get_json()['data']['id']
+    client.post('/api/collection/%d/videos' % cid, json={'video_id': 'FilterVid1'})
+    r = client.get('/api/getvids/all/PublishedAt/desc/0?collection=%d' % cid)
+    vids = json.loads(r.data)
+    assert [v['id'] for v in vids] == ['FilterVid1']
+
+
+def test_getvids_collection_composes_with_other_filters(client):
+    _insert_collection_video('CompVid1', watched=0)
+    _insert_collection_video('CompVid2', watched=1)
+    r = client.post('/api/collections', json={'name': 'Compose Coll'})
+    cid = r.get_json()['data']['id']
+    for vid in ('CompVid1', 'CompVid2'):
+        client.post('/api/collection/%d/videos' % cid, json={'video_id': vid})
+    r = client.get('/api/getvids/unwatched/PublishedAt/desc/0?collection=%d' % cid)
+    assert [v['id'] for v in json.loads(r.data)] == ['CompVid1']
+
+
+def test_system_collections_protected(client):
+    r = client.get('/api/collections/0')
+    system_id = next(c['id'] for c in r.get_json() if c['name'] == 'Watch Later')
+    r = client.patch('/api/collection/%d' % system_id, json={'name': 'Renamed'})
+    assert r.status_code == 403
+    r = client.delete('/api/collection/%d' % system_id)
+    assert r.status_code == 403
+
+
+def test_collection_rename_and_delete(client):
+    _insert_collection_video('DelVid1')
+    r = client.post('/api/collections', json={'name': 'Temp'})
+    cid = r.get_json()['data']['id']
+    client.post('/api/collection/%d/videos' % cid, json={'video_id': 'DelVid1'})
+    # Rename
+    r = client.patch('/api/collection/%d' % cid, json={'name': 'Renamed'})
+    assert r.status_code == 200 and r.get_json()['data']['name'] == 'Renamed'
+    # Delete cascades membership rows but leaves the video itself alone
+    r = client.delete('/api/collection/%d' % cid)
+    assert r.status_code == 200 and r.get_json()['success']
+    r = client.get('/api/collection/%d/info' % cid)
+    assert r.status_code == 404
+    con = _db_connect()
+    cur = con.cursor()
+    cur.execute("SELECT COUNT(*) FROM collection2vid WHERE collection_id = %s", (cid,))
+    assert cur.fetchone()[0] == 0
+    cur.execute("SELECT COUNT(*) FROM videos WHERE id = 'DelVid1'")
+    assert cur.fetchone()[0] == 1
+    cur.close()
+    con.close()
+
+
+def test_collection_add_errors(client):
+    r = client.post('/api/collection/999999/videos', json={'video_id': 'NoSuchVideo'})
+    assert r.status_code == 404
+    r = client.post('/api/collections', json={'name': 'Err Coll'})
+    cid = r.get_json()['data']['id']
+    # Unknown video fails via FK
+    r = client.post('/api/collection/%d/videos' % cid, json={'video_id': 'NoSuchVideo'})
+    assert r.status_code == 404
+    # Missing payload fields
+    r = client.post('/api/collections', json={})
+    assert r.status_code == 400
+
+
+def test_json_export_includes_collections(client):
+    _insert_collection_video('ExportVid1')
+    r = client.post('/api/collections', json={'name': 'Export Coll'})
+    cid = r.get_json()['data']['id']
+    client.post('/api/collection/%d/videos' % cid, json={'video_id': 'ExportVid1'})
+
+    response = client.get('/api/export?format=json')
+    assert response.status_code == 200
+    payload = json.loads(response.get_data(as_text=True))
+    colls = payload['collections']
+    mine = next(c for c in colls['collections'] if c['id'] == cid)
+    assert mine['name'] == 'Export Coll'
+    assert mine['is_system'] is False
+    assert {'collection_id': cid, 'videoId': 'ExportVid1'} in colls['items']
+    assert payload['meta']['counts']['collections'] >= 3  # + system rows
+
+
+def test_create_duplicate_vs_failure_distinct(client):
+    # Duplicate name -> 409
+    client.post('/api/collections', json={'name': 'Dup Check'})
+    r = client.post('/api/collections', json={'name': 'Dup Check'})
+    assert r.status_code == 409
+    # Rename onto an existing name -> 409, not a generic failure
+    r = client.post('/api/collections', json={'name': 'Other Name'})
+    other_id = r.get_json()['data']['id']
+    r = client.patch('/api/collection/%d' % other_id, json={'name': 'Dup Check'})
+    assert r.status_code == 409

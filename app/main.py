@@ -141,6 +141,14 @@ def playlists():
 def playlist():
     return render_template("/playlist.html")
 
+@app.route("/collections.html")
+def collections():
+    return render_template("/collections.html")
+
+@app.route("/collection.html")
+def collection():
+    return render_template("/collection.html")
+
 @app.route("/random.html")
 def random():
     return render_template("/random.html")

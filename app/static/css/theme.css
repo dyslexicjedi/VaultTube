@@ -2148,3 +2148,123 @@ a:focus-visible {
   .vt-rescue-approval { grid-template-columns: 1fr; }
   .vt-rescue-session-head { align-items: stretch; flex-direction: column; }
 }
+
+/* ---------- Collections ---------- */
+
+/* Save-to-collection button on card thumbnails */
+.vt-card-save {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--vt-line-strong);
+  border-radius: 8px;
+  background: rgba(11, 13, 16, 0.78);
+  color: var(--vt-text);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.vt-card:hover .vt-card-save,
+.vt-card:focus-within .vt-card-save,
+.vt-card-save:focus-visible {
+  opacity: 1;
+}
+.vt-card-save:hover {
+  background: var(--vt-accent);
+  border-color: var(--vt-accent);
+  color: #14171c;
+}
+@media (hover: none) {
+  .vt-card-save { opacity: 1; }
+}
+
+/* "Save to collection" modal (base.html, wired in shell.js) */
+.vt-coll-modal {
+  width: min(360px, calc(100vw - 32px));
+}
+.vt-coll-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: 14px;
+}
+.vt-coll-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius);
+  background: var(--vt-surface-2);
+  color: var(--vt-text);
+  cursor: pointer;
+  font-size: 14px;
+  text-align: left;
+}
+.vt-coll-item:hover {
+  border-color: var(--vt-line-strong);
+}
+.vt-coll-check {
+  visibility: hidden;
+  color: var(--vt-accent);
+  font-weight: 700;
+}
+.vt-coll-item.on .vt-coll-check {
+  visibility: visible;
+}
+.vt-coll-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vt-coll-count {
+  color: var(--vt-text-dim);
+  font-size: 12px;
+}
+.vt-coll-none {
+  color: var(--vt-text-dim);
+  font-size: 14px;
+  margin: 4px 0;
+}
+#coll-new-form {
+  display: flex;
+  gap: 8px;
+}
+#coll-new-form .vt-input {
+  flex: 1;
+}
+
+/* Collections page */
+.vt-coll-create {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  max-width: 420px;
+}
+.vt-coll-create .vt-input {
+  flex: 1;
+}
+.vt-coll-cover {
+  position: absolute;
+  right: 14px;
+  bottom: 52px;
+  width: 64px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--vt-line-strong);
+}
+.vt-coll-tile {
+  position: relative;
+}
+.vt-btn-ghost.danger {
+  color: var(--vt-danger);
+}

@@ -104,6 +104,7 @@ def client():
 
 
 _TABLES = [
+    'collection2vid', 'collections',
     'companion_links',
     'rescue_items', 'rescue_sessions',
     'sentinel_rescue_preview_items', 'sentinel_rescue_previews',
@@ -129,7 +130,12 @@ def db_cleanup():
         )
         cur = con.cursor()
         for table in _TABLES:
-            cur.execute(f'DELETE FROM `{table}`')
+            if table == 'collections':
+                # Keep the seeded system rows (Watch Later / Favorites);
+                # they are only created by checkdb() at startup
+                cur.execute('DELETE FROM collections WHERE is_system = 0')
+            else:
+                cur.execute(f'DELETE FROM `{table}`')
         cur.close()
         con.close()
     except Exception as e:

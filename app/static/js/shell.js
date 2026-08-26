@@ -277,3 +277,134 @@ function do_search() {
             .finally(function () { btn.disabled = false; });
     });
 })();
+
+/* ---- "Save to collection" modal: shared by card + player buttons ---- */
+window.VTColl = (function () {
+    var modal = document.getElementById('coll-modal');
+    if (!modal) return { open: function () {} };
+
+    var list = document.getElementById('coll-list');
+    var status = document.getElementById('coll-status');
+    var newForm = document.getElementById('coll-new-form');
+    var newName = document.getElementById('coll-new-name');
+    var currentVideoId = null;
+    var collections = [];
+    var memberOf = {};
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    function setStatus(msg, cls) {
+        status.textContent = msg || '';
+        status.className = 'vt-modal-status' + (cls ? ' ' + cls : '');
+    }
+
+    function render() {
+        if (!collections.length) {
+            list.innerHTML = '<p class="vt-coll-none">No collections yet — create one below.</p>';
+            return;
+        }
+        list.innerHTML = collections.map(function (c) {
+            var on = !!memberOf[c.id];
+            return '<button type="button" class="vt-coll-item' + (on ? ' on' : '') + '" data-cid="' + c.id + '">'
+                + '<span class="vt-coll-check">✓</span><span class="vt-coll-name">' + esc(c.name) + '</span>'
+                + '<span class="vt-coll-count">' + (c.video_count || 0) + '</span>'
+                + '</button>';
+        }).join('');
+    }
+
+    function toggle(cid, btn) {
+        var on = btn.classList.contains('on');
+        var url = '/api/collection/' + cid + '/videos/' + encodeURIComponent(currentVideoId);
+        fetch(url, { method: on ? 'DELETE' : 'POST', headers: { 'Content-Type': 'application/json' }, body: on ? undefined : JSON.stringify({ video_id: currentVideoId }) })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (!res.success) { setStatus(res.error || 'Failed', 'err'); return; }
+                if (on) delete memberOf[cid]; else memberOf[cid] = true;
+                var coll = collections.find(function (c) { return c.id === cid; });
+                if (coll) coll.video_count = Math.max(0, (coll.video_count || 0) + (on ? -1 : 1));
+                render();
+                setStatus(on ? 'Removed' : 'Saved ✓', on ? '' : 'ok');
+            })
+            .catch(function (err) { setStatus('Request failed: ' + err, 'err'); });
+    }
+
+    function refresh() {
+        return Promise.all([
+            fetch('/api/collections/0').then(function (r) { return r.json(); }),
+            currentVideoId
+                ? fetch('/api/video/' + encodeURIComponent(currentVideoId) + '/collections').then(function (r) { return r.json(); })
+                : Promise.resolve({ data: [] })
+        ]).then(function (results) {
+            collections = results[0] || [];
+            var memberships = (results[1] && results[1].data) || results[1] || [];
+            memberOf = {};
+            memberships.forEach(function (m) { memberOf[m.id] = true; });
+            render();
+        });
+    }
+
+    function open(videoId) {
+        currentVideoId = videoId;
+        setStatus('');
+        newName.value = '';
+        modal.hidden = false;
+        list.innerHTML = '<p class="vt-coll-none">Loading…</p>';
+        refresh().catch(function () {
+            list.innerHTML = '<p class="vt-coll-none">Could not load collections.</p>';
+        });
+        newName.focus();
+    }
+
+    function close() { modal.hidden = true; }
+    document.getElementById('coll-close').addEventListener('click', close);
+    modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !modal.hidden) close();
+    });
+
+    list.addEventListener('click', function (e) {
+        var item = e.target.closest('.vt-coll-item');
+        if (item && currentVideoId) toggle(parseInt(item.dataset.cid, 10), item);
+    });
+
+    newForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var name = newName.value.trim();
+        if (!name || !currentVideoId) return;
+        fetch('/api/collections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (!res.success) { setStatus(res.error || 'Create failed', 'err'); return; }
+                var cid = res.data.id;
+                return fetch('/api/collection/' + cid + '/videos', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_id: currentVideoId })
+                }).then(function () {
+                    newName.value = '';
+                    setStatus('Created and saved ✓', 'ok');
+                    return refresh();
+                });
+            })
+            .catch(function (err) { setStatus('Request failed: ' + err, 'err'); });
+    });
+
+    // Any element carrying data-save (card hover button, player button) opens the modal
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-save]');
+        if (btn && btn.dataset.save) {
+            e.preventDefault();
+            open(btn.dataset.save);
+        }
+    });
+
+    return { open: open };
+})();
