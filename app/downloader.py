@@ -21,7 +21,8 @@ def get_error_type(error_msg):
     if 'not found' in msg_lower or '404' in msg_lower or 'content was not found' in msg_lower:
         return 'Content Not Found'
     elif ('timeout' in msg_lower or 'connection' in msg_lower or 'network' in msg_lower
-          or '429' in msg_lower or 'too many requests' in msg_lower or 'throttl' in msg_lower):
+          or '429' in msg_lower or 'too many requests' in msg_lower or 'throttl' in msg_lower
+          or 'try again later' in msg_lower):
         return 'Network Error'
     elif 'cookie' in msg_lower or 'auth' in msg_lower or '403' in msg_lower:
         return 'Authentication Error'

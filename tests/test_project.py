@@ -3479,6 +3479,113 @@ def test_wait_for_segment_gives_up_when_encode_dead(tmp_path):
     assert result is None
 
 
+class _FakeEncode:
+    """Stands in for an FFmpeg Popen: records argv and writes the first segment."""
+    launched = []
+
+    def __init__(self, cmd, **kwargs):
+        self.cmd = cmd
+        self.alive = True
+        _FakeEncode.launched.append(self)
+        start = int(cmd[cmd.index('-start_number') + 1]) if '-start_number' in cmd else 0
+        seg_dir = os.path.dirname(cmd[cmd.index('-hls_segment_filename') + 1])
+        with open(os.path.join(seg_dir, 'seg_%05d.ts' % start), 'wb') as f:
+            f.write(b'\x47' * 188)
+        with open(cmd[-1], 'w') as f:
+            f.write('#EXTM3U\n')
+
+    def poll(self):
+        return None if self.alive else 0
+
+    def terminate(self):
+        self.alive = False
+
+    def wait(self, timeout=None):
+        return 0
+
+
+def _partial_hls_cache(monkeypatch, tmp_path, present, duration=30.0):
+    import transcoder
+    monkeypatch.setenv('VAULTTUBE_TRANSCODE_CACHE_DIR', str(tmp_path / 'cache'))
+    monkeypatch.setattr(transcoder, 'get_duration', lambda path: duration)
+    monkeypatch.setattr(transcoder.subprocess, 'Popen', _FakeEncode)
+    _FakeEncode.launched = []
+    source = tmp_path / 'source.webm'
+    source.write_bytes(b'src')
+    cache_dir = transcoder.get_transcode_cache_dir('ResumeVid')
+    os.makedirs(cache_dir)
+    with open(os.path.join(cache_dir, 'playlist.m3u8'), 'w') as f:
+        f.write('#EXTM3U\n')
+    for index in present:
+        with open(os.path.join(cache_dir, 'seg_%05d.ts' % index), 'wb') as f:
+            f.write(b'\x47' * 188)
+    return transcoder, str(source), cache_dir
+
+
+def test_generate_hls_resumes_reaped_encode(monkeypatch, tmp_path):
+    """A partial cache with no live encode resumes at the first missing
+    segment instead of being treated as complete (reaped mid-playback)."""
+    transcoder, source, cache_dir = _partial_hls_cache(monkeypatch, tmp_path, [0, 1])
+    key = transcoder.transcode_key('ResumeVid')
+    try:
+        assert transcoder.generate_hls('ResumeVid', source_path=source) == cache_dir
+        assert len(_FakeEncode.launched) == 1
+        cmd = _FakeEncode.launched[0].cmd
+        offset = str(2 * transcoder.SEGMENT_SECONDS)
+        assert cmd[cmd.index('-ss') + 1] == offset
+        assert cmd.index('-ss') < cmd.index('-i')
+        assert cmd[cmd.index('-output_ts_offset') + 1] == offset
+        assert cmd[cmd.index('-start_number') + 1] == '2'
+        assert transcoder._active[key]['start_index'] == 2
+    finally:
+        with transcoder._active_lock:
+            transcoder._active.pop(key, None)
+
+
+def test_generate_hls_complete_cache_launches_nothing(monkeypatch, tmp_path):
+    transcoder, source, cache_dir = _partial_hls_cache(
+        monkeypatch, tmp_path, range(5))
+    assert transcoder.generate_hls('ResumeVid', source_path=source) == cache_dir
+    assert _FakeEncode.launched == []
+
+
+def test_generate_hls_restarts_encode_started_past_request(monkeypatch, tmp_path):
+    """An encode resumed at segment 4 can never write segment 2, so a request
+    for 2 restarts the encode there instead of waiting it out."""
+    transcoder, source, cache_dir = _partial_hls_cache(monkeypatch, tmp_path, [0, 1])
+    key = transcoder.transcode_key('ResumeVid')
+    try:
+        transcoder.generate_hls('ResumeVid', source_path=source, start_index=4)
+        first = _FakeEncode.launched[0]
+        assert first.cmd[first.cmd.index('-start_number') + 1] == '4'
+
+        # A later request for segment 5 reuses the running encode
+        transcoder.generate_hls('ResumeVid', source_path=source, start_index=5)
+        assert len(_FakeEncode.launched) == 1
+
+        transcoder.generate_hls('ResumeVid', source_path=source, start_index=2)
+        assert first.alive is False
+        second = _FakeEncode.launched[1]
+        assert second.cmd[second.cmd.index('-start_number') + 1] == '2'
+        assert transcoder._active[key]['process'] is second
+    finally:
+        with transcoder._active_lock:
+            transcoder._active.pop(key, None)
+
+
+def test_generate_hls_fresh_encode_has_no_resume_flags(monkeypatch, tmp_path):
+    transcoder, source, cache_dir = _partial_hls_cache(monkeypatch, tmp_path, [])
+    os.remove(os.path.join(cache_dir, 'playlist.m3u8'))
+    key = transcoder.transcode_key('ResumeVid')
+    try:
+        transcoder.generate_hls('ResumeVid', source_path=source)
+        cmd = _FakeEncode.launched[0].cmd
+        assert '-ss' not in cmd and '-start_number' not in cmd
+    finally:
+        with transcoder._active_lock:
+            transcoder._active.pop(key, None)
+
+
 def test_apple_direct_routing_detection():
     """is_apple_direct recognizes H264+AAC+mp4 and rejects everything else."""
     from transcoder import is_apple_direct
@@ -3956,6 +4063,94 @@ def test_downloader_handle_failure_logs_under_downloader_logger(client, monkeypa
     assert 'downloader' in names, "got %r" % names
     assert 'main' not in names
     assert any('Retrying' in r.getMessage() for r in records)
+
+
+@pytest.mark.parametrize('msg, permanent', [
+    ('ERROR: [youtube] abcdefghijk: Video unavailable', True),
+    ('ERROR: [youtube] abcdefghijk: Video unavailable. This video has been removed by the uploader', True),
+    ('ERROR: [youtube] abcdefghijk: Private video. Sign in if you\'ve been granted access to this video', True),
+    ('ERROR: [youtube] abcdefghijk: Video unavailable. This video is no longer available because the '
+     'YouTube account associated with this video has been terminated.', True),
+    # YouTube's rate-limit wording: transient, must not hit IgnoreVid
+    ("ERROR: [youtube] abcdefghijk: Video unavailable. This content isn't available, try again later.", False),
+    ('ERROR: [youtube] abcdefghijk: Requested format is not available. Use --list-formats for a list of available formats', False),
+    ('ERROR: [youtube] abcdefghijk: Video unavailable. The uploader has not made this video available in your country', False),
+    ("ERROR: [youtube] abcdefghijk: Sign in to confirm you're not a bot.", False),
+    ('ERROR: unable to download video data: HTTP Error 403: Forbidden', False),
+])
+def test_youtube_permanent_unavailable_classification(msg, permanent):
+    import providers.youtube as youtube
+    assert youtube.is_permanently_unavailable(msg) is permanent
+
+
+def test_youtube_transient_unavailable_is_not_ignored(monkeypatch):
+    """A throttled download is re-raised for the downloader to retry instead
+    of being written to IgnoreVid."""
+    import providers.youtube as youtube
+    from yt_dlp.utils import DownloadError
+
+    ignored = []
+    monkeypatch.setattr(youtube, 'insert_not_found', ignored.append)
+
+    def _throttled(url, ydl_opts, cookies_contents, label=''):
+        raise DownloadError("ERROR: [youtube] abcdefghijk: Video unavailable. "
+                            "This content isn't available, try again later.")
+    monkeypatch.setattr(youtube, '_download_attempt', _throttled)
+
+    with pytest.raises(DownloadError):
+        youtube.download_video('https://www.youtube.com/watch?v=abcdefghijk', cookies='c')
+    assert ignored == []
+
+
+def test_youtube_permanent_unavailable_ignores_bare_id(monkeypatch):
+    """Extra query params never leak into the IgnoreVid ID."""
+    import providers.youtube as youtube
+    from yt_dlp.utils import DownloadError
+
+    ignored = []
+    monkeypatch.setattr(youtube, 'insert_not_found', ignored.append)
+    seen = []
+
+    def _gone(url, ydl_opts, cookies_contents, label=''):
+        seen.append(url)
+        raise DownloadError('ERROR: [youtube] abcdefghijk: Video unavailable')
+    monkeypatch.setattr(youtube, '_download_attempt', _gone)
+
+    assert youtube.download_video(
+        'https://www.youtube.com/watch?v=abcdefghijk&list=PLx&t=30', cookies='c') is False
+    assert ignored == ['abcdefghijk']
+    assert seen == ['https://www.youtube.com/watch?v=abcdefghijk']
+
+
+def test_youtube_download_reraises_for_downloader(monkeypatch):
+    """download() lets failures propagate so download_errors gets the real
+    message and network errors are retried."""
+    import providers.youtube as youtube
+    import downloader
+
+    def _boom(url, cookies=None):
+        raise RuntimeError('Connection reset by peer')
+    monkeypatch.setattr(youtube, 'download_video', _boom)
+
+    with pytest.raises(RuntimeError) as exc:
+        youtube.download('https://www.youtube.com/watch?v=abcdefghijk')
+    assert downloader.get_error_type(str(exc.value)) == 'Network Error'
+    assert downloader.get_error_type("Video unavailable. This content isn't available, "
+                                     "try again later.") == 'Network Error'
+
+
+@pytest.mark.parametrize('url, expected', [
+    ('https://youtu.be/abcdefghijk?si=share', ('video', 'abcdefghijk')),
+    ('https://m.youtube.com/watch?v=abcdefghijk&feature=share', ('video', 'abcdefghijk')),
+    ('https://music.youtube.com/watch?v=abcdefghijk&list=RDx', ('video', 'abcdefghijk')),
+    ('https://www.youtube.com/live/abcdefghijk?si=x', ('video', 'abcdefghijk')),
+    ('https://www.youtube.com/embed/abcdefghijk', ('video', 'abcdefghijk')),
+    ('https://www.youtube.com/shorts/abcdefghijk', ('shorts', 'abcdefghijk')),
+    ('abcdefghijk', ('video', 'abcdefghijk')),
+])
+def test_parse_youtube_url_variants(url, expected):
+    import providers.youtube as youtube
+    assert youtube.parse_youtube_url(url) == expected
 
 
 def test_youtube_download_logs_under_youtube_logger(monkeypatch):

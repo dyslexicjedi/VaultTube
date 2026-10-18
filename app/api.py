@@ -1813,8 +1813,9 @@ def transcode_segment(video_id, segment):
             if total and index >= total:
                 abort(404)
 
-            # Ensure an encode is running (it may have been reaped mid-session).
-            generate_hls(video_id, source_path=source_path)
+            # Ensure an encode that will reach this segment is running (it may
+            # have been reaped mid-session, or started past this point).
+            generate_hls(video_id, source_path=source_path, start_index=index)
 
             timeout = _segment_wait_timeout()
             ready = wait_for_segment(
