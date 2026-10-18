@@ -227,10 +227,43 @@ def _count_running():
         )
 
 
-def generate_hls(video_id, source_path=None):
-    """Ensure an HLS cache exists for video_id. Launch FFmpeg if needed.
+def _segment_present(cache_dir, index):
+    seg = os.path.join(cache_dir, 'seg_%05d.ts' % index)
+    return os.path.isfile(seg) and os.path.getsize(seg) > 0
 
-    Blocks up to ~30s until playlist + first segment exist.
+
+def _first_missing_segment(cache_dir, total, start=0):
+    """Index of the first segment in [start, total) not on disk, or None."""
+    for index in range(max(0, start), total):
+        if not _segment_present(cache_dir, index):
+            return index
+    return None
+
+
+def _wait_for_segment_file(cache_dir, index, key, timeout=30.0, interval=0.2):
+    """Block until segment `index` lands, giving up early if the encode dies."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _segment_present(cache_dir, index):
+            return True
+        if not _is_running(key):
+            return _segment_present(cache_dir, index)
+        time.sleep(interval)
+    return False
+
+
+def generate_hls(video_id, source_path=None, start_index=None):
+    """Ensure an HLS encode covering video_id exists. Launch FFmpeg if needed.
+
+    A cache can be partial: the reaper kills idle encodes mid-video, which
+    leaves playlist.m3u8 and the first N segments on disk. When the source
+    duration is known, the encode resumes from the first missing segment at
+    or after start_index (the segment a client is asking for), seeking the
+    input and offsetting output timestamps so the resumed segments line up
+    with the synthesized VOD playlist. A running encode that started after
+    start_index can never produce it, so it is restarted there.
+
+    Blocks up to ~30s until the first needed segment exists.
     Returns the cache directory path, or None on failure.
     """
     cache_dir = get_transcode_cache_dir(video_id)
@@ -239,10 +272,13 @@ def generate_hls(video_id, source_path=None):
     settings_hash = _settings_hash(get_transcode_settings())
     key = (video_id, settings_hash)
 
-    # Fast path: already complete enough to play
-    if os.path.exists(playlist_path):
-        touch_cache_access(video_id)
-        return cache_dir
+    # Fast path: an encode is running that will reach the requested segment
+    with _active_lock:
+        item = _active.get(key)
+        if item and item['process'].poll() is None:
+            item['last_request'] = time.time()
+            if start_index is None or start_index >= item.get('start_index', 0):
+                return cache_dir
 
     # Determine source path outside any lock
     if source_path is None:
@@ -250,22 +286,53 @@ def generate_hls(video_id, source_path=None):
     if not source_path or not os.path.isfile(source_path):
         return None
 
+    total = segment_count_for_duration(get_duration(source_path))
+    if total:
+        resume = _first_missing_segment(cache_dir, total, start_index or 0)
+        if resume is None:
+            # Everything from the requested segment onward is already on disk
+            touch_cache_access(video_id)
+            return cache_dir
+    elif os.path.exists(playlist_path):
+        # Duration unknown: the route serves FFmpeg's own playlist, so only a
+        # from-scratch encode is safe to start
+        touch_cache_access(video_id)
+        return cache_dir
+    else:
+        resume = 0
+
     # Try to start a new encode. Do expensive/size checks first, then lock.
     _enforce_cache_size_cap()
 
-    if _count_running() >= _max_concurrent():
-        logger.info("Max concurrent transcodes reached for %s", video_id)
-        return cache_dir if os.path.exists(playlist_path) else None
-
     acquired = False
     with _active_lock:
-        if key in _active:
-            _active[key]['last_request'] = time.time()
+        item = _active.get(key)
+        if item and item['process'].poll() is None and (
+                start_index is None or start_index >= item.get('start_index', 0)):
+            # Another request started a usable encode while we were probing;
+            # wait for the first segment it will actually write
+            item['last_request'] = time.time()
+            resume = max(resume, item.get('start_index', 0))
         else:
+            if item:
+                # Dead, or started past the segment we need
+                _kill_proc(item)
+                del _active[key]
+            running = sum(
+                1 for other in _active.values()
+                if other.get('process') and other['process'].poll() is None
+            )
+            if running >= _max_concurrent():
+                logger.info("Max concurrent transcodes reached for %s", video_id)
+                return cache_dir if _segment_present(cache_dir, start_index or 0) else None
             settings = get_transcode_settings()
             err_log = os.path.join(cache_dir, 'ffmpeg.log')
-            cmd = [
-                'ffmpeg', '-y', '-i', source_path,
+            offset = resume * SEGMENT_SECONDS
+            cmd = ['ffmpeg', '-y']
+            if resume:
+                cmd += ['-ss', str(offset)]
+            cmd += [
+                '-i', source_path,
                 '-c:v', settings['vcodec'],
                 '-preset', settings['preset'],
                 '-crf', str(settings['crf']),
@@ -274,6 +341,13 @@ def generate_hls(video_id, source_path=None):
                 # Force a keyframe every SEGMENT_SECONDS so segment cuts are
                 # deterministic and align with the synthesized VOD playlist.
                 '-force_key_frames', 'expr:gte(t,n_forced*%d)' % SEGMENT_SECONDS,
+            ]
+            if resume:
+                # Keep timestamps and segment numbers continuous with the
+                # segments already on disk
+                cmd += ['-output_ts_offset', str(offset),
+                        '-start_number', str(resume)]
+            cmd += [
                 '-f', 'hls',
                 '-hls_time', str(SEGMENT_SECONDS),
                 '-hls_list_size', '0',
@@ -281,7 +355,10 @@ def generate_hls(video_id, source_path=None):
                 '-hls_segment_filename', os.path.join(cache_dir, 'seg_%05d.ts'),
                 playlist_path,
             ]
-            logger.info("Starting HLS transcode for %s", video_id)
+            if resume:
+                logger.info("Resuming HLS transcode for %s at segment %d", video_id, resume)
+            else:
+                logger.info("Starting HLS transcode for %s", video_id)
             err_fh = open(err_log, 'wb')
             try:
                 proc = subprocess.Popen(
@@ -307,12 +384,18 @@ def generate_hls(video_id, source_path=None):
                 'last_request': time.time(),
                 'dir': cache_dir,
                 'video_id': video_id,
+                'start_index': resume,
             }
             acquired = True
 
-    if acquired:
-        if not _wait_for_first_segment(cache_dir):
-            logger.warning("HLS first segment timeout for %s", video_id)
+    if total:
+        ready = _wait_for_segment_file(cache_dir, resume, key)
+    else:
+        ready = _wait_for_first_segment(cache_dir)
+
+    if not ready:
+        logger.warning("HLS first segment timeout for %s", video_id)
+        if acquired:
             # Dump last lines of ffmpeg log for diagnostics
             err_log = os.path.join(cache_dir, 'ffmpeg.log')
             try:
@@ -327,13 +410,7 @@ def generate_hls(video_id, source_path=None):
                 if item:
                     _kill_proc(item)
                     del _active[key]
-            return None
-    else:
-        # Another request started it; wait for it too
-        if not os.path.exists(playlist_path):
-            if not _wait_for_first_segment(cache_dir):
-                logger.warning("HLS first segment timeout (waiter) for %s", video_id)
-                return None
+        return None
 
     return cache_dir
 

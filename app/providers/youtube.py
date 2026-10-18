@@ -454,14 +454,48 @@ def iter_playlist_pages(playlist_id, request_budget=None,
             items_seen, stop_reason,
         )
 
+_YOUTUBE_HOSTS = ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com')
+
+# yt-dlp error text that means the video is gone for good. Anything else
+# (throttling, extraction breakage, geo blocks) must not reach IgnoreVid, or
+# subscription scans never retry the video.
+_PERMANENT_UNAVAILABLE_MARKERS = (
+    'private video', 'this video is private',
+    'this video does not exist',
+    'has been removed',
+    'account associated with this video has been terminated',
+    'this video is no longer available',
+    'this video is not available', 'this video is unavailable',
+)
+# Transient conditions YouTube also words as "Video unavailable", e.g. its
+# rate limit: "Video unavailable. This content isn't available, try again later."
+_TRANSIENT_UNAVAILABLE_MARKERS = (
+    'try again later',
+    'requested format is not available',
+    'not made this video available in your country',
+    "confirm you're not a bot", 'confirm you\u2019re not a bot',
+)
+
+
+def is_permanently_unavailable(err_msg):
+    msg = (err_msg or '').lower()
+    if any(marker in msg for marker in _TRANSIENT_UNAVAILABLE_MARKERS):
+        return False
+    if any(marker in msg for marker in _PERMANENT_UNAVAILABLE_MARKERS):
+        return True
+    # A bare "Video unavailable" with no reason is what yt-dlp reports for
+    # deleted videos
+    return bool(re.search(r'video unavailable\s*$', msg.strip()))
+
+
 def parse_youtube_url(url):
     if not url:
         return (None, None)
     url = url.strip()
     parsed = urlparse(url)
     if parsed.hostname in ('youtu.be',):
-        return ('video', parsed.path.lstrip('/'))
-    if parsed.hostname in ('youtube.com', 'www.youtube.com'):
+        return ('video', parsed.path.lstrip('/').split('/')[0])
+    if parsed.hostname in _YOUTUBE_HOSTS:
         path = parsed.path
         query = parse_qs(parsed.query)
         if path.startswith('/shorts/'):
@@ -469,6 +503,9 @@ def parse_youtube_url(url):
             return ('shorts', vid)
         if path == '/watch' and query.get('v'):
             return ('video', query['v'][0])
+        for prefix in ('/live/', '/embed/'):
+            if path.startswith(prefix):
+                return ('video', path[len(prefix):].split('/')[0])
         if path == '/playlist':
             return ('playlist', query.get('list', [None])[0])
         if path.startswith('/channel/'):
@@ -545,13 +582,14 @@ def _download_attempt(url, ydl_opts, cookies_contents, label=''):
 
 
 def download_video(url, cookies=None):
-    vid = url.split('/watch?v=')[1] if '/watch?v=' in url else url.split('/shorts/')[1].split('/')[0] if '/shorts/' in url else None
-    if not vid:
-        if len(url) == 11 and not url.startswith('http'):
-            vid = url
-            url = "https://www.youtube.com/watch?v=%s" % vid
-        else:
-            raise ValueError("Could not extract video ID from URL: %s" % url)
+    url_type, vid = parse_youtube_url(url)
+    if url_type not in ('video', 'shorts') or not vid:
+        raise ValueError("Could not extract video ID from URL: %s" % url)
+    # Drop playlist/timestamp/share params so yt-dlp fetches exactly one video
+    if url_type == 'shorts':
+        url = "https://www.youtube.com/shorts/%s" % vid
+    else:
+        url = "https://www.youtube.com/watch?v=%s" % vid
     logger.debug("Starting Download: %s" % url)
 
     if cookies is None:
@@ -592,8 +630,7 @@ def download_video(url, cookies=None):
             proxy_opts = dict(base_opts)
             proxy_opts['proxy'] = proxy_url
             _download_attempt(url, proxy_opts, cookies_contents, label='proxy')
-        elif any(p in err_msg.lower() for p in ('video unavailable', 'this video does not exist',
-                                                  'has been removed', 'private video', 'not available')):
+        elif is_permanently_unavailable(err_msg):
             insert_not_found(vid)
             logger.error("Video not available, added to ignore list: %s" % vid)
             return False
@@ -682,10 +719,6 @@ def download(qo):
         if url_type is None:
             raise ValueError("Could not determine URL type for: %s" % url)
         if url_type in ('video', 'shorts'):
-            if url_type == 'shorts':
-                url = "https://www.youtube.com/shorts/%s" % vid
-            elif 'youtu.be' in url:
-                url = "https://www.youtube.com/watch?v=%s" % vid
             return download_video(url)
         elif url_type == 'playlist':
             return download_playlist(qo)
@@ -699,5 +732,8 @@ def download(qo):
     except (YouTubeQuotaExceeded, YouTubeScanBudgetExceeded):
         raise
     except Exception as e:
+        # Re-raise so the downloader records the real message in
+        # download_errors and retries network errors (returning False here
+        # collapsed every failure to "Download returned False")
         logger.error("YT Single Download Failed: %s | url=%s", e, url, exc_info=True)
-        return False
+        raise
