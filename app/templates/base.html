@@ -83,11 +83,15 @@
                 </div>
 
                 <div class="vt-tab" id="add-tab-url">
-                    <p class="vt-modal-text">Download from YouTube, Patreon, Reddit, or paste a video/playlist/channel ID.</p>
+                    <p class="vt-modal-text">Download from YouTube, Patreon, Reddit or any other site yt-dlp supports, or paste a video/playlist/channel ID. For other sites, a channel or playlist link can also be subscribed to.</p>
                     <form id="add-url-form">
                         <input type="text" class="vt-input" id="add-url" placeholder="https://… or video ID" style="width:100%">
+                        <label class="vt-check" id="add-url-backfill-row" style="margin-top:10px">
+                            <input type="checkbox" id="add-url-backfill"> When subscribing, also download existing videos
+                        </label>
                         <div class="vt-modal-actions" style="margin-top:14px">
                             <span class="vt-modal-status" id="add-url-status"></span>
+                            <button type="button" class="vt-btn-ghost" id="add-url-subscribe">Subscribe</button>
                             <button type="submit" class="vt-btn">Download</button>
                         </div>
                     </form>

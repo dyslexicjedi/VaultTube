@@ -203,3 +203,71 @@ def test_legacy_channels_still_classified_by_id_shape(client):
     for src, expected in (('youtube', 'UCabc'), ('patreon', '12345'), ('reddit', 'someuser')):
         listed = json.loads(client.get('/api/channels/0?source=' + src).get_data(as_text=True))
         assert [c['channelid'] for c in listed] == [expected]
+
+
+# ---------------- subscriptions ----------------
+
+def _listing(ids, extractor='vimeo:user'):
+    return {
+        '_type': 'playlist', 'extractor': extractor, 'id': 'user12345',
+        'uploader': 'Some One', 'uploader_id': 'user12345',
+        'webpage_url': 'https://vimeo.com/user12345',
+        'entries': [{'id': i, 'ie_key': 'Vimeo', 'url': 'https://vimeo.com/%s' % i} for i in ids],
+    }
+
+
+def test_subscribe_only_new_then_scan_queues_new_uploads(client, fake_ytdlp, app_queue):
+    from scanner import scan_url_subscriptions
+    channel = 'https://vimeo.com/user12345'
+    fake_ytdlp.infos[channel] = _listing(['3', '2', '1'])
+    resp = client.post('/api/subscribe/url', json={'url': channel})
+    data = json.loads(resp.get_data(as_text=True))
+    assert data['success'] and data['channelid'] == 'vimeo-user12345'
+    assert _query("select subscribed, source, source_url from channels where channelid = 'vimeo-user12345'") == [
+        (1, 'vimeo', channel)]
+
+    # Nothing new yet: the existing listing was recorded as seen
+    scan_url_subscriptions(client.application)
+    assert _query("select count(*) from queue")[0][0] == 0
+
+    # A new upload appears; a rescan within the interval does nothing
+    fake_ytdlp.infos[channel] = _listing(['4', '3', '2', '1'])
+    scan_url_subscriptions(client.application)
+    assert _query("select count(*) from queue")[0][0] == 0
+    con = _db_connect()
+    import datetime
+    con.cursor().execute("update channels set last_scanned_at = %s", (datetime.datetime.now() - datetime.timedelta(hours=7),))
+    con.close()
+    scan_url_subscriptions(client.application)
+    assert _query("select url, channel_id, source from queue") == [
+        ('https://vimeo.com/4', 'vimeo-user12345', 'generic')]
+
+
+def test_subscribe_with_backfill_queues_everything_not_in_vault(client, fake_ytdlp, app_queue):
+    from scanner import scan_url_subscriptions
+    channel = 'https://vimeo.com/user12345'
+    fake_ytdlp.infos[channel] = _listing(['3', '2', '1'])
+    con = _db_connect()
+    con.cursor().execute("insert into videos(id, channelId, json, filepath, source) "
+                         "values ('vimeo-2', 'vimeo-user12345', '{}', 'x/vimeo-2.mp4', 'vimeo')")
+    con.close()
+    client.post('/api/subscribe/url', json={'url': channel, 'backfill': True})
+    scan_url_subscriptions(client.application)
+    assert sorted(r[0] for r in _query("select url from queue")) == [
+        'https://vimeo.com/1', 'https://vimeo.com/3']
+
+
+def test_url_subscriptions_stay_out_of_youtube_scan(client, fake_ytdlp, app_queue):
+    from database import get_active_subscriptions
+    fake_ytdlp.infos['https://vimeo.com/user12345'] = _listing(['1'])
+    client.post('/api/subscribe/url', json={'url': 'https://vimeo.com/user12345'})
+    assert ('vimeo-user12345',) not in get_active_subscriptions()
+    # Unsubscribe through the normal channel endpoint
+    client.get('/api/unsubscribe/channel/vimeo-user12345')
+    from database import get_url_subscriptions
+    assert get_url_subscriptions() == []
+
+
+def test_subscribe_url_rejects_own_provider_sites(client):
+    resp = client.post('/api/subscribe/url', json={'url': 'https://www.youtube.com/@someone'})
+    assert resp.status_code == 400

@@ -252,3 +252,116 @@ def download(qo):
     finally:
         del_status(video_id)
     return True
+
+
+# ---------------- Subscriptions ----------------
+
+SCAN_LIMIT = 50
+
+
+def _entry_source(entry):
+    """Source name for a flat playlist entry (entries carry an ie_key such as
+    'TwitchVod'; the full extractor name 'twitch:vod' gives 'twitch')."""
+    key = entry.get('ie_key')
+    if key:
+        try:
+            return source_name({'extractor': yt_dlp.extractor.get_info_extractor(key).IE_NAME})
+        except Exception:
+            pass
+    return source_name(entry)
+
+
+def list_entries(url, limit=SCAN_LIMIT):
+    """(playlist info, [(namespaced video id, entry url), ...]) for a channel
+    or playlist URL, newest first as the site lists them. ``limit`` None
+    lists everything."""
+    opts = dict(_base_opts(url), extract_flat='in_playlist')
+    if limit:
+        opts['playlistend'] = limit
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    if info.get('_type') not in ('playlist', 'multi_video'):
+        raise ValueError("Not a channel or playlist URL: %s" % url)
+    entries = []
+    for entry in info.get('entries') or []:
+        if not entry or not entry.get('id'):
+            continue
+        entry_url = entry.get('url') or entry.get('webpage_url')
+        if entry_url:
+            entries.append((namespaced_id(_entry_source(entry), entry['id']), entry_url))
+    return info, entries
+
+
+def subscribe(url, backfill=False):
+    """Create (or re-enable) a URL subscription. Without ``backfill`` the
+    current listing is recorded as already seen, so only uploads after now
+    are downloaded; with it the first scan queues the whole back catalogue.
+    Returns (channel id, channel name)."""
+    info, entries = list_entries(url)
+    source = source_name(info)
+    raw = info.get('channel_id') or info.get('uploader_id') or info.get('id')
+    channel_id = namespaced_id(source, raw or url, _CHANNEL_MAX)
+    name = (info.get('channel') or info.get('uploader') or info.get('title') or channel_id)[:100]
+    state = {'seen': [] if backfill else [vid for vid, _ in entries], 'backfill': bool(backfill)}
+    con = get_connection(logger)
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO channels (channelid, channelname, json, subscribed, source, source_url, scan_state) "
+            "VALUES (%s, %s, %s, 1, %s, %s, %s) ON DUPLICATE KEY UPDATE subscribed = 1, "
+            "source = VALUES(source), source_url = VALUES(source_url), scan_state = VALUES(scan_state), "
+            "last_scanned_at = NULL",
+            (channel_id, name, json.dumps({'url': info.get('webpage_url') or url, 'source': source}),
+             source, url, json.dumps(state)))
+        con.commit()
+    finally:
+        con.close()
+    return channel_id, name
+
+
+def _known_ids(ids):
+    if not ids:
+        return set()
+    con = get_connection(logger)
+    try:
+        cur = con.cursor()
+        marks = ','.join(['%s'] * len(ids))
+        cur.execute("SELECT id FROM videos WHERE id IN (%s) UNION SELECT id FROM IgnoreVid WHERE id IN (%s)"
+                    % (marks, marks), tuple(ids) * 2)
+        return {row[0] for row in cur.fetchall()}
+    finally:
+        con.close()
+
+
+def scan_subscription(channel_id, url, scan_state, q):
+    """List one URL subscription and queue entries not yet in the vault or
+    seen on an earlier scan. Returns the number queued."""
+    try:
+        state = json.loads(scan_state) if scan_state else {}
+    except ValueError:
+        state = {}
+    backfill = bool(state.get('backfill'))
+    _, entries = list_entries(url, limit=None if backfill else SCAN_LIMIT)
+    seen = set(state.get('seen') or [])
+    known = _known_ids([vid for vid, _ in entries])
+    queued = 0
+    for vid, entry_url in entries:
+        if vid in seen or vid in known:
+            continue
+        if enqueue(QueueObject(entry_url, channel_id, 'generic', 0, ''), q):
+            queued += 1
+    # Remember the newest listing; older IDs fall out of a 50-item listing
+    # anyway, and anything downloaded is caught by the videos lookup.
+    new_state = {'seen': [vid for vid, _ in entries[:SCAN_LIMIT]], 'backfill': False}
+    con = get_connection(logger)
+    try:
+        cur = con.cursor()
+        # Python's clock, not the DB's NOW(): the scanner compares against
+        # datetime.now() and the two containers' time zones can differ
+        cur.execute("UPDATE channels SET scan_state = %s, last_scanned_at = %s WHERE channelid = %s",
+                    (json.dumps(new_state), datetime.datetime.now(), channel_id))
+        con.commit()
+    finally:
+        con.close()
+    logger.info("Scanned %s: %d new of %d listed", channel_id, queued, len(entries))
+    return queued

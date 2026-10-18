@@ -1,13 +1,15 @@
+import datetime
 import time
 import os
 import logging
 from flask import current_app
 
 from QueueObject import QueueObject
-from database import get_active_subscriptions,get_active_playlist_subs
+from database import get_active_subscriptions,get_active_playlist_subs,get_url_subscriptions
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info
 from database import cleanup_old_errors, cleanup_old_queue_rows
 from providers.patreon import scan_campaign
+from providers import generic
 from providers.youtube import (
     YouTubePlaylistTruncated,
     YouTubeQuotaExceeded,
@@ -39,6 +41,29 @@ def _youtube_scan_budget():
     return YouTubeRequestBudget(limit)
 
 
+def _generic_scan_interval():
+    try:
+        return datetime.timedelta(hours=float(os.environ.get('VAULTTUBE_GENERIC_SCAN_HOURS', 6)))
+    except ValueError:
+        return datetime.timedelta(hours=6)
+
+
+def scan_url_subscriptions(app):
+    """Scan due any-site subscriptions with yt-dlp. Each is isolated, so a
+    broken extractor or slow site never holds up the rest of the pass."""
+    interval = _generic_scan_interval()
+    now = datetime.datetime.now()
+    for channel_id, url, scan_state, last_scanned_at in get_url_subscriptions():
+        if last_scanned_at and now - last_scanned_at < interval:
+            continue
+        with app.app_context():
+            logger.info("Scanning URL subscription %s: %s" % (channel_id, url))
+            try:
+                generic.scan_subscription(channel_id, url, scan_state, app.config['queue'])
+            except Exception as e:
+                logger.error("URL subscription scan failed for %s: %s" % (channel_id, e))
+
+
 def scan_once(app):
     """Run one subscription pass with one shared YouTube request budget."""
     request_budget = _youtube_scan_budget()
@@ -67,6 +92,8 @@ def scan_once(app):
         with app.app_context():
             logger.info("Scanning Patreon Campaign: %s" % channel_id[0])
             scan_campaign(channel_id[0])
+
+    scan_url_subscriptions(app)
 
     youtube_work = [
         ('channel', channel_id)

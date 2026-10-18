@@ -802,7 +802,9 @@ def get_active_subscriptions():
     try:
         con = get_connection()
         cur = con.cursor()
-        cur.execute("select channelid from channels where subscribed = 1;")
+        # URL subscriptions (any-site) are scanned separately; see
+        # get_url_subscriptions
+        cur.execute("select channelid from channels where subscribed = 1 and source_url is null;")
         rv = cur.fetchall()
         cur.close()
         con.close()
@@ -811,6 +813,22 @@ def get_active_subscriptions():
         # Returning None here crashes the scanner's `for id in data:` loop and
         # kills the subscription thread for the life of the process.
         logger.error("Error during subscription poll: %s" % e)
+        return []
+
+def get_url_subscriptions():
+    """Subscribed any-site channels: (channelid, source_url, scan_state,
+    last_scanned_at) rows."""
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute("select channelid, source_url, scan_state, last_scanned_at "
+                    "from channels where subscribed = 1 and source_url is not null;")
+        rv = cur.fetchall()
+        cur.close()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during URL subscription poll: %s" % e)
         return []
 
 _pool = None
@@ -1291,10 +1309,14 @@ def export_subscribed_channels():
     try:
         con = get_connection()
         cur = con.cursor()
-        cur.execute("SELECT channelid, channelname, json FROM channels WHERE subscribed = 1")
+        cur.execute("SELECT channelid, channelname, json, source, source_url FROM channels WHERE subscribed = 1")
         rows = []
         for row in cur:
             d = {'channelId': row[0], 'channelName': row[1]}
+            if row[3]:
+                d['source'] = row[3]
+            if row[4]:
+                d['sourceUrl'] = row[4]
             if row[2]:
                 try:
                     d['metadata'] = json.loads(row[2])

@@ -1312,6 +1312,25 @@ def api_subscribe(type,value):
         logger.error("Playlist Subscribe Failed: %s"%e)
         return api_error(str(e), 500)
 
+@api_bp.route("/subscribe/url", methods=["POST"])
+def api_subscribe_url():
+    """Subscribe to a channel or playlist on any site yt-dlp supports.
+    Body: {"url": ..., "backfill": bool}. Without backfill only uploads from
+    now on are downloaded."""
+    body = request.get_json(force=True, silent=True) or {}
+    url = (body.get('url') or '').strip()
+    if not url:
+        return api_error("Missing URL", 400)
+    if providers.get_provider(url) is not None or not generic.claims(url):
+        return api_error("Subscribe by URL works for sites without their own "
+                         "provider; use the channel page for YouTube/Patreon", 400)
+    try:
+        channel_id, name = generic.subscribe(url, backfill=bool(body.get('backfill')))
+        return jsonify({"success": True, "channelid": channel_id, "channelname": name})
+    except Exception as e:
+        logger.error("URL Subscribe Failed: %s" % e)
+        return api_error("Couldn't read that channel: %s" % e, 400)
+
 @api_bp.route("/unsubscribe/<string:type>/<string:value>")
 def api_unsubscribe(type,value):
     try:

@@ -959,7 +959,8 @@ a {
   font-weight: 700;
   margin: 0;
 }
-.vt-autoplay {
+.vt-autoplay,
+.vt-check {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -968,7 +969,8 @@ a {
   cursor: pointer;
   user-select: none;
 }
-.vt-autoplay input {
+.vt-autoplay input,
+.vt-check input {
   accent-color: var(--vt-accent);
   width: 15px;
   height: 15px;

@@ -225,6 +225,27 @@ function do_search() {
             .catch(function (err) { setStatus('add-url-status', 'Request failed: ' + err, 'err'); });
     });
 
+    document.getElementById('add-url-subscribe').addEventListener('click', function () {
+        var url = document.getElementById('add-url').value.trim();
+        if (!url) return;
+        setStatus('add-url-status', 'Reading channel…');
+        fetch('/api/subscribe/url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: url, backfill: document.getElementById('add-url-backfill').checked })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.success) {
+                    setStatus('add-url-status', 'Subscribed to ' + data.channelname + ' ✓', 'ok');
+                    document.getElementById('add-url').value = '';
+                } else {
+                    setStatus('add-url-status', data.error, 'err');
+                }
+            })
+            .catch(function (err) { setStatus('add-url-status', 'Request failed: ' + err, 'err'); });
+    });
+
     // Upload tab
     var fileInput = document.getElementById('add-file');
     fileInput.addEventListener('change', function () {
