@@ -1550,7 +1550,7 @@ def api_random():
         if include_reddit == '1':
             cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid order by RAND() LIMIT 40;")
         else:
-            cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.source in ('youtube','patreon') order by RAND() LIMIT 40;")
+            cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.source <> 'reddit' order by RAND() LIMIT 40;")
         return parse_response(cur,con)
     except Exception as e:
         logger.error("API Random Fail: %s"%e)
