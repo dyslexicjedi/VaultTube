@@ -104,6 +104,7 @@ def client():
 
 
 _TABLES = [
+    'skip_segments', 'sponsorblock_fetch',
     'collection2vid', 'collections',
     'companion_links',
     'rescue_items', 'rescue_sessions',

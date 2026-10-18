@@ -1808,6 +1808,84 @@ a:focus-visible {
   z-index: 2;
 }
 
+/* ---------- SponsorBlock (seek-bar bands, skip notice, settings) ---------- */
+.vt-skip-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  opacity: 0.75;
+  pointer-events: none;
+  z-index: 1;
+}
+.vt-skip-band.poi {
+  width: 4px;
+  margin-left: -2px;
+  opacity: 1;
+}
+.vt-skip-notice {
+  position: absolute;
+  right: 16px;
+  bottom: 56px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 14px;
+  border-radius: 10px;
+  background: rgba(11, 13, 16, 0.88);
+  border: 1px solid var(--vt-line-strong);
+  font-size: 13px;
+  color: var(--vt-text);
+}
+.vt-skip-notice[hidden] {
+  display: none;
+}
+.vt-skip-notice-btn {
+  background: var(--vt-accent);
+  color: #111;
+  border: none;
+  border-radius: 7px;
+  padding: 6px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.vt-sb-full {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--vt-text-dim);
+}
+.vt-sb-full::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--sb-color, var(--vt-accent));
+}
+.vt-sb-full[hidden] {
+  display: none;
+}
+.vt-sb-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vt-sb-setting {
+  display: grid;
+  grid-template-columns: 12px 1fr minmax(0, 190px);
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+}
+.vt-sb-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
 /* ---------- Accessibility: honor reduced-motion preference ---------- */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from QueueObject import QueueObject
 from queue_utils import enqueue, queue_snapshot
 from chapters import parse_chapters
+from sponsorblock import get_segments, cached_segments, chapters_from_segments
 from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for, cache_stats
 from vault_paths import public_video_path, resolve_vault_path
 from sentinel import export_sentinel_data
@@ -1590,10 +1591,32 @@ def api_chapters(vid):
         cur.close()
         con.close()
         description = row[0] if row else None
-        return jsonify({"chapters": parse_chapters(description)})
+        chapters = parse_chapters(description)
+        if not chapters and row:
+            # Fall back to SponsorBlock community chapters, cache only; the
+            # player's /api/segments call is what fetches them.
+            chapters = chapters_from_segments(cached_segments(vid))
+        return jsonify({"chapters": chapters})
     except Exception as e:
         logger.error("API Chapters Failed: %s" % e)
         return jsonify({"chapters": []})
+
+
+@api_bp.route("/segments/<string:vid>")
+def api_segments(vid):
+    """SponsorBlock skip segments for a YouTube video, plus any SponsorBlock
+    community chapters. Fetched on first request and cached; see
+    ``sponsorblock.get_segments``. Always returns lists (empty for
+    non-YouTube or unknown videos)."""
+    try:
+        segments = get_segments(vid)
+    except Exception as e:
+        logger.error("API Segments Failed: %s" % e)
+        segments = []
+    return jsonify({
+        "segments": [s for s in segments if s['action_type'] != 'chapter'],
+        "chapters": chapters_from_segments(segments),
+    })
 
 
 @api_bp.route("/find_next_previous/<string:vid>")

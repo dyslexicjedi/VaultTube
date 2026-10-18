@@ -580,6 +580,37 @@ def checkdb():
                    CONCAT('imported:youtube:video:', id, ':unavailable'),
                    'channel', channelId
             FROM videos WHERE source='youtube' AND isDeleted=1""")
+        # SponsorBlock: cached skip segments per YouTube video, fetched lazily
+        # on first play (see sponsorblock.py). Kept for good so skips survive
+        # the video (or its segments) disappearing upstream.
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = %s AND table_name = 'sponsorblock_fetch' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("SponsorBlock fetch table not created, creating...")
+            cur.execute("""CREATE TABLE `sponsorblock_fetch` (
+                `video_id` varchar(50) COLLATE utf8mb4_bin NOT NULL,
+                `status` varchar(10) NOT NULL,
+                `fetched_at` timestamp NULL DEFAULT NULL,
+                `attempted_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`video_id`),
+                CONSTRAINT `fk_sbfetch_video` FOREIGN KEY (`video_id`)
+                    REFERENCES `videos` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;""")
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = %s AND table_name = 'skip_segments' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Skip segments table not created, creating...")
+            cur.execute("""CREATE TABLE `skip_segments` (
+                `video_id` varchar(50) COLLATE utf8mb4_bin NOT NULL,
+                `uuid` varchar(80) COLLATE utf8mb4_bin NOT NULL,
+                `category` varchar(40) NOT NULL,
+                `action_type` varchar(20) NOT NULL,
+                `start_s` double NOT NULL,
+                `end_s` double NOT NULL,
+                `votes` int NOT NULL DEFAULT 0,
+                `description` varchar(500) DEFAULT NULL,
+                PRIMARY KEY (`video_id`, `uuid`),
+                CONSTRAINT `fk_skipseg_video` FOREIGN KEY (`video_id`)
+                    REFERENCES `videos` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;""")
         cur.close()
         con.close()
         cleanup_old_errors(7)

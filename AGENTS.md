@@ -47,6 +47,7 @@ by `q.source` as a fallback (see `downloader.py`).
 - `IgnoreVid` - Ignored videos + not-found tombstones (videos gone from the source; these used to be fake `channel_name='404'` rows in `videos`)
 - `download_errors` - Download error logging
 - `queue` - Persisted download queue (status, attempts, last_error); done/failed rows auto-pruned after 7 days
+- `skip_segments` / `sponsorblock_fetch` - Cached SponsorBlock segments per YouTube video and when they were last fetched (`app/sponsorblock.py`)
 
 ## Directory Structure
 
@@ -123,6 +124,8 @@ Optional:
 - `VAULTTUBE_JELLYFIN_PROFILES` - JSON object of named server profiles (`name`, `url`, `token`, `user_id`, `verify_tls`, `report_playback`)
 - `VAULTTUBE_MAX_CONCURRENT_COMPOSITES` - Maximum simultaneous companion composite encodes (default 1)
 - `VAULTTUBE_COMPOSITE_MAX_SESSIONS` - Maximum retained inactive composite session caches (default 50)
+- `VAULTTUBE_SPONSORBLOCK` - Set to `false` to stop SponsorBlock lookups (cached segments still served)
+- `VAULTTUBE_SPONSORBLOCK_URL` - SponsorBlock API base URL (default `https://sponsor.ajay.app`, for mirrors)
 
 ## File Naming Convention
 ```
@@ -171,6 +174,7 @@ Optional:
 - `/api/channel/<id>/<page>` - Paged videos for a single channel (`?status=unwatched|watched`, `?sort=...`, `?direction=asc|desc`)
 - `/api/creator/<creator>/<page>` - Creator videos
 - `/api/search/<query>/<page>` - Search
+- `/api/segments/<id>` - SponsorBlock skip segments + community chapters (fetched on first play, then cached; refreshed weekly for videos under 90 days old)
 - `/api/stats` - Statistics dashboard data
 - `/api/status/stream` - SSE: live queue/download progress
 - `/api/health` - Liveness probe (one SELECT 1; used by the Docker HEALTHCHECK)

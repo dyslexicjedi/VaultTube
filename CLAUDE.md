@@ -94,3 +94,6 @@ preset, default `veryfast`), `VAULTTUBE_TRANSCODE_CRF` (libx264 quality,
 default 23), `VAULTTUBE_MAX_CONCURRENT_TRANSCODES` (default 1),
 `VAULTTUBE_TRANSCODE_SEGMENT_TIMEOUT` (seconds a segment request long-polls
 for a not-yet-produced segment before 404-ing, default 30).
+`VAULTTUBE_SPONSORBLOCK` (default on; `false` serves cached segments only),
+`VAULTTUBE_SPONSORBLOCK_URL` (SponsorBlock API base, default
+`https://sponsor.ajay.app`).

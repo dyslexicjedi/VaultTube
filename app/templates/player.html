@@ -21,6 +21,10 @@
                         <button type="button" class="vt-btn-ghost" id="countdown-cancel">Cancel</button>
                     </div>
                 </div>
+                <div class="vt-skip-notice" id="sb-notice" hidden>
+                    <span id="sb-notice-text"></span>
+                    <button type="button" class="vt-skip-notice-btn" id="sb-notice-btn"></button>
+                </div>
             </div>
             <div class="vt-player-frame vt-companion-frame" id="companion-frame" hidden>
                 <span class="vt-video-label">Jellyfin companion</span>
@@ -42,6 +46,7 @@
 
         <h1 class="vt-player-title" id="title"></h1>
         <div class="vt-player-sub" id="subline"></div>
+        <div class="vt-sb-full" id="sb-full" hidden></div>
 
         <div class="vt-player-row">
             <button type="button" class="vt-btn-ghost" id="btn-watched">
@@ -64,6 +69,7 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 <span id="btn-copy-label">Copy source link</span>
             </button>
+            <button type="button" class="vt-btn-ghost" id="btn-sponsorblock" hidden>SponsorBlock</button>
             <button type="button" class="vt-btn-ghost" id="btn-companion">Companion</button>
             <button type="button" class="vt-btn-ghost danger" id="btn-delete">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -136,6 +142,17 @@
                 <button type="submit" class="vt-btn" id="companion-submit">Load companion</button>
             </div>
         </form>
+    </div>
+</div>
+
+<div class="vt-modal-backdrop" id="sb-modal" hidden>
+    <div class="vt-modal vt-modal-wide" role="dialog" aria-labelledby="sb-modal-title">
+        <h3 id="sb-modal-title">SponsorBlock</h3>
+        <p class="vt-modal-text">Choose what happens for each kind of segment. Segments come from the SponsorBlock community and are saved with the video. Settings apply to this browser.</p>
+        <div class="vt-sb-settings" id="sb-settings"></div>
+        <div class="vt-modal-actions" style="margin-top:16px">
+            <button type="button" class="vt-btn" id="sb-modal-done">Done</button>
+        </div>
     </div>
 </div>
 
@@ -929,6 +946,7 @@
 
         // --- Chapters (derived from the stored description, no re-download) ---
         loadChapters();
+        if (v.source === 'youtube') loadSponsorBlock();
         document.addEventListener('keydown', function (event) {
             var tag = (event.target.tagName || '').toLowerCase();
             if (tag === 'input' || tag === 'textarea' || event.target.isContentEditable) return;
@@ -1027,14 +1045,237 @@
         }
     }
 
-    function loadChapters() {
-        getJSON('/api/chapters/' + encodeURIComponent(id)).then(function (data) {
-            chapters = (data && data.chapters) || [];
-            if (!chapters.length) return; // no chapter UI for chapter-less / non-YouTube
-            renderChapterList();
-            renderMarkers();
+    var chapterHooks = false;
+    function showChapters(list) {
+        chapters = list;
+        activeIdx = -1;
+        renderChapterList();
+        renderMarkers();
+        if (!chapterHooks) {
+            chapterHooks = true;
             vPlayer.on('durationchange', renderMarkers);
             vPlayer.on('timeupdate', updateActiveChapter);
+        }
+    }
+
+    function loadChapters() {
+        getJSON('/api/chapters/' + encodeURIComponent(id)).then(function (data) {
+            var list = (data && data.chapters) || [];
+            // No chapter UI for chapter-less / non-YouTube videos. Description
+            // chapters replace SponsorBlock ones if they arrive second.
+            if (list.length) showChapters(list);
+        });
+    }
+
+    // --- SponsorBlock: progress-bar bands, auto-skip and per-category settings ---
+    // Colors follow SponsorBlock's own defaults so the bands read the same as
+    // the browser extension. Modes: auto = skip/mute automatically, manual =
+    // show a button while inside the segment, off = ignore (no band either).
+    var SB_CATEGORIES = [
+        { key: 'sponsor', label: 'Sponsor', color: '#00d400', def: 'auto' },
+        { key: 'selfpromo', label: 'Self-promotion', color: '#ffff00', def: 'auto' },
+        { key: 'interaction', label: 'Interaction reminder', color: '#cc00ff', def: 'auto' },
+        { key: 'intro', label: 'Intro', color: '#00ffff', def: 'manual' },
+        { key: 'outro', label: 'Outro / end cards', color: '#0202ed', def: 'manual' },
+        { key: 'preview', label: 'Preview / recap', color: '#008fd6', def: 'manual' },
+        { key: 'hook', label: 'Hook / greeting', color: '#395699', def: 'manual' },
+        { key: 'filler', label: 'Filler tangent', color: '#7300ff', def: 'off' },
+        { key: 'music_offtopic', label: 'Non-music section', color: '#ff9900', def: 'manual' },
+        { key: 'poi_highlight', label: 'Highlight', color: '#ff1684', def: 'manual', noAuto: true },
+        { key: 'exclusive_access', label: 'Exclusive access', color: '#008a5c', def: 'manual', noAuto: true }
+    ];
+    var SB_STORAGE_KEY = 'vt-sponsorblock';
+    var sbSegments = [];
+    var sbSettings = {};
+    var sbBandEls = [];
+    var sbSkipped = {};   // uuid -> auto-skipped since the playhead last sat before it
+    var sbUndone = {};    // uuid -> the viewer pressed Undo; never auto-skip again
+    var sbMutedByUs = false;
+    var sbWasMuted = false;
+    var sbNoticeUntil = 0;
+    var sbNoticeKey = null;
+    var sbNoticeAction = null;
+
+    try { sbSettings = JSON.parse(localStorage.getItem(SB_STORAGE_KEY)) || {}; } catch (e) { sbSettings = {}; }
+
+    function sbCategory(key) {
+        for (var i = 0; i < SB_CATEGORIES.length; i++) {
+            if (SB_CATEGORIES[i].key === key) return SB_CATEGORIES[i];
+        }
+        return null;
+    }
+    function sbMode(key) {
+        var cat = sbCategory(key);
+        if (!cat) return 'off';
+        return sbSettings[key] || cat.def;
+    }
+    function sbSaveSettings() {
+        try { localStorage.setItem(SB_STORAGE_KEY, JSON.stringify(sbSettings)); } catch (e) { /* private window */ }
+    }
+
+    function renderSbBands() {
+        sbBandEls.forEach(function (el) { el.remove(); });
+        sbBandEls = [];
+        if (!vPlayer || compositeMode) return;
+        var holder = document.querySelector('#player .vjs-progress-holder');
+        var dur = vPlayer.duration();
+        if (!holder || !dur || !isFinite(dur)) return;
+        sbSegments.forEach(function (seg) {
+            var cat = sbCategory(seg.category);
+            if (!cat || sbMode(seg.category) === 'off') return;
+            if (seg.action_type !== 'skip' && seg.action_type !== 'mute' && seg.action_type !== 'poi') return;
+            var el = document.createElement('div');
+            el.className = 'vt-skip-band' + (seg.action_type === 'poi' ? ' poi' : '');
+            el.style.left = Math.min(100, Math.max(0, (seg.start / dur) * 100)) + '%';
+            if (seg.action_type !== 'poi') {
+                el.style.width = Math.max(0.2, ((Math.min(seg.end, dur) - seg.start) / dur) * 100) + '%';
+            }
+            el.style.background = cat.color;
+            el.title = cat.label;
+            holder.appendChild(el);
+            sbBandEls.push(el);
+        });
+    }
+
+    function renderSbFull() {
+        var full = null;
+        sbSegments.forEach(function (seg) {
+            if (!full && seg.action_type === 'full' && sbMode(seg.category) !== 'off') full = seg;
+        });
+        var el = $id('sb-full');
+        if (!full) { el.hidden = true; return; }
+        var cat = sbCategory(full.category);
+        el.textContent = 'Whole video: ' + (cat ? cat.label : full.category);
+        el.style.setProperty('--sb-color', cat ? cat.color : 'var(--vt-accent)');
+        el.hidden = false;
+    }
+
+    function sbNotice(key, text, btnText, action, ms) {
+        sbNoticeUntil = ms ? Date.now() + ms : 0;
+        if (key === sbNoticeKey) return;
+        sbNoticeKey = key;
+        sbNoticeAction = action;
+        $id('sb-notice-text').textContent = text;
+        $id('sb-notice-btn').textContent = btnText;
+        $id('sb-notice').hidden = false;
+    }
+    function sbHideNotice() {
+        sbNoticeKey = null;
+        sbNoticeAction = null;
+        $id('sb-notice').hidden = true;
+    }
+    $id('sb-notice-btn').addEventListener('click', function () {
+        var action = sbNoticeAction;
+        sbHideNotice();
+        sbNoticeUntil = 0;
+        if (action) action();
+    });
+
+    function sbTick() {
+        // The composite (companion) timeline isn't the reaction's own time,
+        // so segment times don't line up there.
+        if (!vPlayer || !sbSegments.length) return;
+        if (compositeMode) {
+            if (sbMutedByUs) { vPlayer.muted(sbWasMuted); sbMutedByUs = false; }
+            if (sbNoticeKey) sbHideNotice();
+            return;
+        }
+        var t = vPlayer.currentTime();
+        var prompt = null;
+        var muting = false;
+        for (var i = 0; i < sbSegments.length; i++) {
+            var seg = sbSegments[i];
+            var mode = sbMode(seg.category);
+            var cat = sbCategory(seg.category);
+            if (mode === 'off' || !cat) continue;
+            if (seg.action_type === 'poi') {
+                if (!prompt && t < 15 && t < seg.start - 1) {
+                    prompt = { key: 'poi:' + seg.uuid, text: cat.label, btn: 'Jump to highlight', seek: seg.start };
+                }
+                continue;
+            }
+            if (seg.action_type !== 'skip' && seg.action_type !== 'mute') continue;
+            if (t < seg.start && !sbUndone[seg.uuid]) sbSkipped[seg.uuid] = false;
+            var inside = t >= seg.start && t < seg.end - 0.3;
+            if (!inside) continue;
+            if (mode === 'auto' && !sbUndone[seg.uuid]) {
+                if (seg.action_type === 'mute') { muting = true; continue; }
+                if (!sbSkipped[seg.uuid]) {
+                    sbSkipped[seg.uuid] = true;
+                    vPlayer.currentTime(seg.end);
+                    var undoSeg = seg;
+                    sbNotice('undo:' + seg.uuid, 'Skipped ' + cat.label.toLowerCase(), 'Undo', function () {
+                        sbUndone[undoSeg.uuid] = true;
+                        vPlayer.currentTime(undoSeg.start);
+                    }, 5000);
+                    return;
+                }
+                continue;
+            }
+            if (!prompt) {
+                prompt = { key: 'skip:' + seg.uuid, text: cat.label, btn: 'Skip', seek: seg.end };
+            }
+        }
+        if (muting && !sbMutedByUs) {
+            sbWasMuted = vPlayer.muted();
+            vPlayer.muted(true);
+            sbMutedByUs = true;
+        } else if (!muting && sbMutedByUs) {
+            vPlayer.muted(sbWasMuted);
+            sbMutedByUs = false;
+        }
+        if (Date.now() < sbNoticeUntil) return; // an Undo notice is still showing
+        if (prompt) {
+            var target = prompt.seek;
+            sbNotice(prompt.key, prompt.text, prompt.btn, function () { vPlayer.currentTime(target); });
+        } else if (sbNoticeKey) {
+            sbHideNotice();
+        }
+    }
+
+    function renderSbSettings() {
+        var wrap = $id('sb-settings');
+        wrap.innerHTML = '';
+        SB_CATEGORIES.forEach(function (cat) {
+            var row = document.createElement('label');
+            row.className = 'vt-sb-setting';
+            var opts = cat.noAuto
+                ? [['manual', 'Show'], ['off', 'Ignore']]
+                : [['auto', 'Skip automatically'], ['manual', 'Show skip button'], ['off', 'Ignore']];
+            row.innerHTML = '<span class="vt-sb-swatch" style="background:' + cat.color + '"></span>'
+                + '<span class="vt-sb-setting-label">' + VT.esc(cat.label) + '</span>'
+                + '<select class="vt-select">' + opts.map(function (o) {
+                    return '<option value="' + o[0] + '">' + o[1] + '</option>';
+                }).join('') + '</select>';
+            var sel = row.querySelector('select');
+            sel.value = sbMode(cat.key);
+            sel.addEventListener('change', function () {
+                sbSettings[cat.key] = sel.value;
+                sbSaveSettings();
+                renderSbBands();
+                renderSbFull();
+            });
+            wrap.appendChild(row);
+        });
+    }
+    $id('btn-sponsorblock').addEventListener('click', function () {
+        renderSbSettings();
+        $id('sb-modal').hidden = false;
+    });
+    $id('sb-modal-done').addEventListener('click', function () { $id('sb-modal').hidden = true; });
+    $id('sb-modal').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
+
+    function loadSponsorBlock() {
+        $id('btn-sponsorblock').hidden = false;
+        getJSON('/api/segments/' + encodeURIComponent(id)).then(function (data) {
+            sbSegments = (data && data.segments) || [];
+            var sbChapters = (data && data.chapters) || [];
+            if (!chapters.length && sbChapters.length) showChapters(sbChapters);
+            if (!sbSegments.length) return;
+            renderSbBands();
+            renderSbFull();
+            vPlayer.on('durationchange', renderSbBands);
+            vPlayer.on('timeupdate', sbTick);
         });
     }
 
