@@ -3,7 +3,7 @@
 
 <div class="vt-rail-header" style="margin-bottom:18px">
     <h2>Channels</h2>
-    <div class="vt-seg" id="source-seg">
+    <div class="vt-seg vt-seg-scroll" id="source-seg">
         <button type="button" data-value="" class="active">All</button>
         <button type="button" data-value="youtube">YouTube</button>
         <button type="button" data-value="patreon">Patreon</button>
@@ -21,6 +21,7 @@
 (function () {
     var page = 1;
     var source = '';
+    var labels = { youtube: 'YouTube', patreon: 'Patreon', reddit: 'Reddit' };
 
     function channelSource(c) {
         if (c.source) return c.source;
@@ -41,7 +42,7 @@
         var unwatched = parseInt(c.unwatched, 10) || 0;
         var subbed = String(c.subscribed) === '1';
         var src = channelSource(c);
-        var srcLabel = { youtube: 'YouTube', patreon: 'Patreon', reddit: 'Reddit' }[src] || src;
+        var srcLabel = labels[src] || src;
         return '<div class="vt-tile src-' + VT.esc(src) + '">'
             + '<a class="vt-tile-name" href="/creator.html?creator=' + encodeURIComponent(c.channelid) + '">' + VT.esc(c.channelname) + '</a>'
             + '<p class="vt-tile-desc">' + VT.esc(desc) + '</p>'
@@ -63,7 +64,7 @@
                 document.getElementById('channels-grid').innerHTML = channels.map(tileHTML).join('');
                 var empty = document.getElementById('channels-empty');
                 empty.hidden = channels.length > 0;
-                empty.textContent = source ? 'No ' + source + ' channels.' : 'No channels yet — download something first.';
+                empty.textContent = source ? 'No ' + (labels[source] || source) + ' channels.' : 'No channels yet — download something first.';
                 document.getElementById('channels-count').textContent = channels.length === 40 ? '' : channels.length + ' channels';
                 VT.pager(document.getElementById('channels-pages'), { page: p, hasNext: channels.length === 40, onPage: load });
                 window.scrollTo({ top: 0 });
@@ -90,6 +91,21 @@
         source = btn.dataset.value;
         load(1);
     });
+
+    // Any-site sources (Vimeo, Twitch, ...) get their own filter buttons
+    fetch('/api/sources').then(function (r) { return r.json(); }).then(function (sources) {
+        var seg = document.getElementById('source-seg');
+        sources.forEach(function (s) {
+            labels[s.source] = s.label;
+            if (seg.querySelector('button[data-value="' + s.source + '"]')) return;
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.dataset.value = s.source;
+            btn.textContent = s.label;
+            seg.appendChild(btn);
+        });
+        load(page);
+    }).catch(function () {});
 
     load(1);
 })();

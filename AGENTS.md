@@ -26,6 +26,7 @@ VaultTube is a **video archive and player application** built with Python/Flask 
 - `providers/youtube.py` - YouTube download via yt-dlp
 - `providers/patreon.py` - Patreon download with screenshot capture (URL normalization + browser impersonation for Cloudflare)
 - `providers/reddit.py` - Reddit/RedGifs download via praw + yt-dlp
+- `providers/generic.py` - Any other site yt-dlp supports (claims no domains; the downloader falls back to it). IDs namespaced `{site}-{id}`; also handles URL subscriptions
 
 **Provider contract** (required to be picked up by the loader):
 ```python
@@ -40,7 +41,7 @@ by `q.source` as a fallback (see `downloader.py`).
 
 **Database Tables:**
 - `videos` - Video metadata, filepath, watched status, timestamps
-- `channels` - Channel info, subscription status
+- `channels` - Channel info, subscription status; any-site rows also carry `source`, `source_url` (URL subscription), `scan_state` (last listing) and `last_scanned_at`
 - `playlists` - Playlist metadata, subscription status
 - `pl2vid` - Playlist-to-video mappings
 - `images` - Thumbnail blobs
@@ -126,6 +127,9 @@ Optional:
 - `VAULTTUBE_COMPOSITE_MAX_SESSIONS` - Maximum retained inactive composite session caches (default 50)
 - `VAULTTUBE_SPONSORBLOCK` - Set to `false` to stop SponsorBlock lookups (cached segments still served)
 - `VAULTTUBE_SPONSORBLOCK_URL` - SponsorBlock API base URL (default `https://sponsor.ajay.app`, for mirrors)
+- `VAULTTUBE_COOKIES_DIR` - Per-site cookies for the any-site provider (`<host>.txt`, parent domains tried)
+- `VAULTTUBE_GENERIC_SCAN_HOURS` - Any-site subscription scan interval in hours (default 6)
+- `VAULTTUBE_GENERIC_ALLOW_ANY` - Let yt-dlp's catch-all page scraper handle URLs no extractor claims (default off)
 
 ## File Naming Convention
 ```
@@ -154,6 +158,7 @@ Optional:
 - YouTube channels (`UC...` IDs) and playlists: enumerated via the YouTube Data API `playlistItems.list` endpoint (`scanner.py:iter_playlist_pages` and `providers/youtube.py:download_playlist`), paging 50 items at a time newest-first. Channel scans stop at the first page with a known video; playlist subscriptions archive the whole list. The API key (`VAULTTUBE_YTKEY`) is consumed here as well as by `deleted_check` and `get_playlist_info`
 - Patreon campaigns (numeric IDs in `channels`): polled via the Patreon posts API with cookies + impersonation (`scan_campaign` in `providers/patreon.py`); a post is enqueued if it's a `*video*` post type OR a block-editor post with an inline video block in `content_json_string` (these report `text_only`). Posts with neither are skipped
 - Patreon campaigns get their `channels` row auto-created on first download or vault scan (`ensure_channel`); subscribe via the normal `/api/subscribe/channel/<campaign_id>` endpoint
+- Any-site URL subscriptions (`channels.source_url` set): listed with yt-dlp `extract_flat` every `VAULTTUBE_GENERIC_SCAN_HOURS` (`scan_url_subscriptions`), 50 newest entries per pass (whole catalogue on a backfill first scan); entries already in `videos`/`IgnoreVid` or in the last listing (`scan_state`) are skipped. Each subscription is isolated from the others and from the YouTube circuit breaker
 
 ## Testing & CI
 - `.venv/bin/python -m pytest tests/ -q` — tests spin up an isolated MariaDB
@@ -175,6 +180,8 @@ Optional:
 - `/api/creator/<creator>/<page>` - Creator videos
 - `/api/search/<query>/<page>` - Search
 - `/api/segments/<id>` - SponsorBlock skip segments + community chapters (fetched on first play, then cached; refreshed weekly for videos under 90 days old)
+- `/api/subscribe/url` (POST `{url, backfill}`) - Subscribe to a channel/playlist on any yt-dlp site
+- `/api/sources` - Every source in the vault with label and video count (drives the source filters)
 - `/api/stats` - Statistics dashboard data
 - `/api/status/stream` - SSE: live queue/download progress
 - `/api/health` - Liveness probe (one SELECT 1; used by the Docker HEALTHCHECK)

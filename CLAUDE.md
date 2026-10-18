@@ -36,7 +36,18 @@ full code map (files, DB tables, API routes).
   `download(q, logger) -> bool` where `q` is a `QueueObject` (`q.url`,
   `q.source`, ...). Return `True` on success; raise or return `False` on
   failure (downloader logs both to `download_errors`).
-- `app/downloader.py` dispatches by URL domain first, then by `q.source`.
+- `app/downloader.py` dispatches by URL domain first, then to the generic
+  provider (`app/providers/generic.py`) when a yt-dlp extractor claims the URL,
+  then by `q.source`.
+- **Any-site provider**: videos/channels from sites without their own provider
+  are namespaced `{site}-{id}` (e.g. `vimeo-76979871`, channel dir
+  `vimeo-user12345`) because `videos.id` comes from the file name and numeric
+  directories mean Patreon. `source` is the site part of yt-dlp's extractor
+  name (`twitch:vod` -> `twitch`). URL subscriptions have `channels.source_url`
+  set; the scanner lists them with yt-dlp `extract_flat`
+  (`generic.scan_subscription`) and keeps the last listing in
+  `channels.scan_state` so only unseen entries are queued. Legacy channel rows
+  have `source` NULL and are classified by ID shape (`sources.py`).
 - Background threads (backend file scanner, subscription scanner, downloader)
   are started from `app/main.py`; `VAULTTUBE_DISABLEBACK` controls them.
 - Subscriptions live in the `channels` table; the scanner treats numeric
@@ -93,7 +104,12 @@ cache TTL in seconds, default 86400), `VAULTTUBE_TRANSCODE_MAX_CACHE_GB`
 preset, default `veryfast`), `VAULTTUBE_TRANSCODE_CRF` (libx264 quality,
 default 23), `VAULTTUBE_MAX_CONCURRENT_TRANSCODES` (default 1),
 `VAULTTUBE_TRANSCODE_SEGMENT_TIMEOUT` (seconds a segment request long-polls
-for a not-yet-produced segment before 404-ing, default 30).
+for a not-yet-produced segment before 404-ing, default 30),
 `VAULTTUBE_SPONSORBLOCK` (default on; `false` serves cached segments only),
 `VAULTTUBE_SPONSORBLOCK_URL` (SponsorBlock API base, default
-`https://sponsor.ajay.app`).
+`https://sponsor.ajay.app`),
+`VAULTTUBE_COOKIES_DIR` (per-site Netscape cookies for the any-site provider,
+named `<host>.txt`, parent domains tried too), `VAULTTUBE_GENERIC_SCAN_HOURS`
+(any-site subscription scan interval, default 6),
+`VAULTTUBE_GENERIC_ALLOW_ANY` (let yt-dlp's catch-all page scraper handle
+URLs no extractor claims; default off).

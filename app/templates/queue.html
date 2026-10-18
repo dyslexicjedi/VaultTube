@@ -25,6 +25,7 @@
         <span class="vt-sub" id="errors-count"></span>
         <a class="vt-all" href="#" id="errors-clear" hidden>Clear all</a>
     </div>
+    <div class="vt-error-sites" id="errors-sites" hidden></div>
     <div class="vt-list" id="errors-list"></div>
     <div class="vt-empty" id="errors-empty" style="padding:18px 0">No failed downloads.</div>
 </section>
@@ -117,6 +118,18 @@
                     + '<div class="vt-row-sub">' + VT.esc(new Date(err.created_at).toLocaleString()) + '</div>'
                     + '</div>';
             }).join('');
+            // Per-site counts, so one broken extractor stands out from scattered rows
+            var sites = {};
+            errors.forEach(function (err) {
+                var host = 'other';
+                try { host = new URL(err.url).hostname.replace(/^(www|m)\./, ''); } catch (e) { /* bare ID */ }
+                sites[host] = (sites[host] || 0) + 1;
+            });
+            var siteKeys = Object.keys(sites).sort(function (a, b) { return sites[b] - sites[a]; });
+            $id('errors-sites').innerHTML = siteKeys.map(function (h) {
+                return '<span class="vt-chip">' + VT.esc(h) + ' · ' + sites[h] + '</span>';
+            }).join('');
+            $id('errors-sites').hidden = siteKeys.length < 2;
             $id('errors-empty').style.display = errors.length ? 'none' : '';
             $id('errors-count').textContent = errors.length ? errors.length : '';
             $id('errors-clear').hidden = !errors.length;
