@@ -3,6 +3,7 @@ import time
 import threading
 import logging
 import providers
+from providers import generic
 from QueueObject import QueueObject
 from flask import current_app
 from database import insert_download_error, update_queue_status
@@ -68,6 +69,8 @@ def start_dl_queue(app):
             logger.info("Downloading %s" % qo.url)
             update_queue_status(qo.row_id, 'downloading')
             provider = providers.get_provider(qo.url)
+            if not provider and generic.claims(qo.url):
+                provider = generic
             if not provider and qo.source:
                 provider = get_provider_by_source(qo.source)
             if provider:

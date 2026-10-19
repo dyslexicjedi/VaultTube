@@ -376,7 +376,7 @@ def save_video_from_ytdlp(video_id, info, fpath):
         logger.error("save_video_from_ytdlp failed for %s: %s" % (video_id, e))
 
 
-def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source,webpage_url=None,description='',thumbnail_override=None):
+def save_uploaded_video_metadata(video_id, file_path, title, channel_id, published_at,db_path,source,webpage_url=None,description='',thumbnail_override=None,extra=None):
     """Save a non-YouTube video (Reddit download or manual upload) to the DB.
     The json column gets a plain metadata dict; webpage_url, when known,
     powers the player's copy-source-link button."""
@@ -419,6 +419,11 @@ def save_uploaded_video_metadata(video_id, file_path, title, channel_id, publish
             'source': source,
             'webpage_url': webpage_url,
         }
+        if extra:
+            # Provider-specific fields (e.g. generic sites' extractor and
+            # chapters); never overrides the core keys above
+            for key, value in extra.items():
+                ret["Json"].setdefault(key, value)
         ret["Filepath"] = db_path
         ret['PublishedAt'] = published_at.isoformat()
         ret['channelId'] = channel_id

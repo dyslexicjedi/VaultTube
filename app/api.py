@@ -15,6 +15,9 @@ from QueueObject import QueueObject
 from queue_utils import enqueue, queue_snapshot
 from chapters import parse_chapters
 from sponsorblock import get_segments, cached_segments, chapters_from_segments
+from sources import SOURCE_RE, channel_source_sql, label as source_label
+import providers
+from providers import generic
 from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for, cache_stats
 from vault_paths import public_video_path, resolve_vault_path
 from sentinel import export_sentinel_data
@@ -846,6 +849,8 @@ def api_download():
             source = "youtube"
         elif 'youtube.com' in url or 'youtu.be' in url:
             source = "youtube"
+        elif providers.get_provider(url) is None and generic.claims(url):
+            source = "generic"
         i = QueueObject(url, "", source, 0, "")
         enqueue(i, current_app.config["queue"])
         return api_success()
@@ -903,14 +908,10 @@ def channels(page):
             params = []
 
         src = request.args.get('source')
-        if src in ('youtube', 'patreon', 'reddit'):
-            # Empty channels have no videos.source; classify by ID shape, same
-            # heuristic as channels.html / /api/channel
-            having_clauses.append(
-                "coalesce(source, case when left(channels.channelId, 2) = 'UC' "
-                "then 'youtube' when channels.channelId regexp '^[0-9]+$' "
-                "then 'patreon' else 'reddit' end) = %s"
-            )
+        if src and SOURCE_RE.match(src):
+            # Empty channels have no videos.source; fall back to the
+            # channel's own source, then its ID shape (see sources.py)
+            having_clauses.append("source = %s")
             params.append(src)
         having = (
             " having " + " AND ".join(having_clauses)
@@ -918,7 +919,7 @@ def channels(page):
             else ""
         )
         cur.execute(
-            f"select channels.*,count(videos.id) as vidcount,max(PublishedAt) as lastvidtime,coalesce(sum(videos.watched = 0),0) as unwatched,max(videos.source) as source from channels {videos_join} group by channels.channelId{having} order by {order_by} limit 40 offset %s;",
+            f"select channels.channelid,channels.channelname,channels.json,channels.subscribed,count(videos.id) as vidcount,max(PublishedAt) as lastvidtime,coalesce(sum(videos.watched = 0),0) as unwatched,coalesce(max(videos.source), {channel_source_sql()}) as source from channels {videos_join} group by channels.channelId{having} order by {order_by} limit 40 offset %s;",
             (*params, page_num),
         )
         return parse_response(cur,con)
@@ -988,12 +989,20 @@ def api_channel(channelid):
     try:
         con = get_connection(logger)
         cur = con.cursor()
-        cur.execute("select channelname, subscribed, json from channels where channelid = %s;", (channelid,))
+        cur.execute("select channelname, subscribed, json, source, source_url from channels where channelid = %s;", (channelid,))
         row = cur.fetchone()
-        name, subscribed, jdata = row if row else (None, None, None)
+        name, subscribed, jdata, channel_source, subscribed_url = row if row else (None, None, None, None, None)
 
         source_url = None
-        if channelid.startswith('UC'):
+        if channel_source:
+            # Any-site channel: the subscribed URL, else the URL yt-dlp gave
+            source_url = subscribed_url
+            if not source_url:
+                try:
+                    source_url = json.loads(jdata).get('url')
+                except Exception:
+                    pass
+        elif channelid.startswith('UC'):
             source_url = 'https://www.youtube.com/channel/' + channelid
         elif channelid.isdigit():
             try:
@@ -1018,6 +1027,7 @@ def api_channel(channelid):
             'channelname': name,
             'subscribed': subscribed,
             'source_url': source_url,
+            'source': channel_source,
             'description': _channel_description(jdata, channelid),
             'thumbnail_url': _channel_thumbnail_url(jdata, channelid),
             'video_count': int(vidcount),
@@ -1302,6 +1312,25 @@ def api_subscribe(type,value):
         logger.error("Playlist Subscribe Failed: %s"%e)
         return api_error(str(e), 500)
 
+@api_bp.route("/subscribe/url", methods=["POST"])
+def api_subscribe_url():
+    """Subscribe to a channel or playlist on any site yt-dlp supports.
+    Body: {"url": ..., "backfill": bool}. Without backfill only uploads from
+    now on are downloaded."""
+    body = request.get_json(force=True, silent=True) or {}
+    url = (body.get('url') or '').strip()
+    if not url:
+        return api_error("Missing URL", 400)
+    if providers.get_provider(url) is not None or not generic.claims(url):
+        return api_error("Subscribe by URL works for sites without their own "
+                         "provider; use the channel page for YouTube/Patreon", 400)
+    try:
+        channel_id, name = generic.subscribe(url, backfill=bool(body.get('backfill')))
+        return jsonify({"success": True, "channelid": channel_id, "channelname": name})
+    except Exception as e:
+        logger.error("URL Subscribe Failed: %s" % e)
+        return api_error("Couldn't read that channel: %s" % e, 400)
+
 @api_bp.route("/unsubscribe/<string:type>/<string:value>")
 def api_unsubscribe(type,value):
     try:
@@ -1521,7 +1550,7 @@ def api_random():
         if include_reddit == '1':
             cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid order by RAND() LIMIT 40;")
         else:
-            cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.source in ('youtube','patreon') order by RAND() LIMIT 40;")
+            cur.execute(f"select v.id,c.channelname as channel_name,v.channelId,v.json,v.filepath,v.AddedAt,v.PublishedAt,v.watched,v.`timestamp`,v.`length`,v.lastScanned,v.isDeleted,v.source,v.title,v.vcodec,v.acodec,v.container from {os.environ['VAULTTUBE_DBNAME']}.videos v left outer join {os.environ['VAULTTUBE_DBNAME']}.channels c on v.channelId = c.channelid where v.source <> 'reddit' order by RAND() LIMIT 40;")
         return parse_response(cur,con)
     except Exception as e:
         logger.error("API Random Fail: %s"%e)
@@ -1586,12 +1615,20 @@ def api_chapters(vid):
     try:
         con = get_connection(logger)
         cur = con.cursor()
-        cur.execute("select description from videos where id = %s;", (vid,))
+        cur.execute("select description, json from videos where id = %s;", (vid,))
         row = cur.fetchone()
         cur.close()
         con.close()
         description = row[0] if row else None
         chapters = parse_chapters(description)
+        if not chapters and row:
+            # Any-site downloads store yt-dlp's chapter list in the json
+            try:
+                stored = json.loads(row[1]).get('chapters')
+            except Exception:
+                stored = None
+            if isinstance(stored, list) and len(stored) >= 2:
+                chapters = [c for c in stored if isinstance(c, dict) and 'start' in c]
         if not chapters and row:
             # Fall back to SponsorBlock community chapters, cache only; the
             # player's /api/segments call is what fetches them.
@@ -1617,6 +1654,31 @@ def api_segments(vid):
         "segments": [s for s in segments if s['action_type'] != 'chapter'],
         "chapters": chapters_from_segments(segments),
     })
+
+
+@api_bp.route("/sources")
+def api_sources():
+    """Every source in the vault with its display label and video count,
+    for the source filters (YouTube/Patreon/Reddit plus any-site sources)."""
+    try:
+        con = get_connection(logger)
+        cur = con.cursor()
+        cur.execute(
+            "select s, sum(n) from ("
+            " select source as s, count(*) as n from videos group by source"
+            " union all"
+            " select source as s, 0 as n from channels where source is not null"
+            ") x where s is not null group by s order by sum(n) desc, s")
+        rows = cur.fetchall()
+        cur.close()
+        con.close()
+        return jsonify([
+            {"source": s, "label": source_label(s), "videos": int(n or 0)}
+            for s, n in rows
+        ])
+    except Exception as e:
+        logger.error("API Sources Failed: %s" % e)
+        return api_error(str(e), 500)
 
 
 @api_bp.route("/find_next_previous/<string:vid>")

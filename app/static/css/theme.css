@@ -677,6 +677,17 @@ a {
   background: var(--vt-accent-soft);
   color: var(--vt-accent);
 }
+/* A segmented control whose options grow (e.g. one per source) scrolls
+   sideways instead of clipping on narrow screens */
+.vt-seg.vt-seg-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.vt-seg.vt-seg-scroll button {
+  flex: none;
+}
 
 /* ---------- Filter bar (browse page) ---------- */
 .vt-filterbar {
@@ -959,7 +970,8 @@ a {
   font-weight: 700;
   margin: 0;
 }
-.vt-autoplay {
+.vt-autoplay,
+.vt-check {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -968,7 +980,8 @@ a {
   cursor: pointer;
   user-select: none;
 }
-.vt-autoplay input {
+.vt-autoplay input,
+.vt-check input {
   accent-color: var(--vt-accent);
   width: 15px;
   height: 15px;
@@ -1317,6 +1330,17 @@ a {
   padding: 2px 8px;
   border-radius: 999px;
   white-space: nowrap;
+  background: var(--vt-surface-2);
+  color: var(--vt-text-dim);
+}
+.vt-error-sites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.vt-error-sites[hidden] {
+  display: none;
 }
 .vt-source-chip.src-youtube {
   background: rgba(255, 92, 92, 0.14);

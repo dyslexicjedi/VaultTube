@@ -42,6 +42,20 @@ def checkdb():
         if(not cur.fetchone()):
             logger.info("Channels Table not created, creating...")
             cur.execute("create table channels (`channelid` varchar(100),`channelname` varchar(100),`json` longtext,`subscribed` int(11) DEFAULT 0,PRIMARY KEY(`channelid`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
+        # Any-site channels (providers/generic.py): source is the yt-dlp
+        # extractor name; source_url marks a URL subscription the scanner
+        # lists with yt-dlp. NULL source = legacy YouTube/Patreon/Reddit row,
+        # still classified by ID shape.
+        for col, ddl in (
+            ('source', "`source` varchar(100) DEFAULT NULL"),
+            ('source_url', "`source_url` varchar(2000) DEFAULT NULL"),
+            ('scan_state', "`scan_state` longtext DEFAULT NULL"),
+            ('last_scanned_at', "`last_scanned_at` datetime DEFAULT NULL"),
+        ):
+            cur.execute("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = %s AND table_name = 'channels' AND column_name = %s", (os.environ['VAULTTUBE_DBNAME'], col))
+            if cur.fetchone()[0] == 0:
+                logger.info("Adding %s column to channels table..." % col)
+                cur.execute("ALTER TABLE channels ADD COLUMN " + ddl)
         #Pl2VID
         cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = '%s' AND table_name = 'pl2vid' LIMIT 1;"%(os.environ['VAULTTUBE_DBNAME']))
         if(not cur.fetchone()):
@@ -788,7 +802,9 @@ def get_active_subscriptions():
     try:
         con = get_connection()
         cur = con.cursor()
-        cur.execute("select channelid from channels where subscribed = 1;")
+        # URL subscriptions (any-site) are scanned separately; see
+        # get_url_subscriptions
+        cur.execute("select channelid from channels where subscribed = 1 and source_url is null;")
         rv = cur.fetchall()
         cur.close()
         con.close()
@@ -797,6 +813,22 @@ def get_active_subscriptions():
         # Returning None here crashes the scanner's `for id in data:` loop and
         # kills the subscription thread for the life of the process.
         logger.error("Error during subscription poll: %s" % e)
+        return []
+
+def get_url_subscriptions():
+    """Subscribed any-site channels: (channelid, source_url, scan_state,
+    last_scanned_at) rows."""
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute("select channelid, source_url, scan_state, last_scanned_at "
+                    "from channels where subscribed = 1 and source_url is not null;")
+        rv = cur.fetchall()
+        cur.close()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during URL subscription poll: %s" % e)
         return []
 
 _pool = None
@@ -1277,10 +1309,14 @@ def export_subscribed_channels():
     try:
         con = get_connection()
         cur = con.cursor()
-        cur.execute("SELECT channelid, channelname, json FROM channels WHERE subscribed = 1")
+        cur.execute("SELECT channelid, channelname, json, source, source_url FROM channels WHERE subscribed = 1")
         rows = []
         for row in cur:
             d = {'channelId': row[0], 'channelName': row[1]}
+            if row[3]:
+                d['source'] = row[3]
+            if row[4]:
+                d['sourceUrl'] = row[4]
             if row[2]:
                 try:
                     d['metadata'] = json.loads(row[2])
