@@ -18,6 +18,7 @@ from sponsorblock import get_segments, cached_segments, chapters_from_segments
 from sources import SOURCE_RE, channel_source_sql, label as source_label
 import providers
 from providers import generic
+import cookie_store
 from transcoder import generate_hls, touch_cache_access, note_segment_request, is_apple_direct, get_codec_info, get_container_from_ext, get_transcode_cache_dir, get_duration, build_vod_playlist, segment_count_for_duration, wait_for_segment, transcode_key, source_path_for, cache_stats
 from vault_paths import public_video_path, resolve_vault_path
 from sentinel import export_sentinel_data
@@ -1205,6 +1206,44 @@ def status_alerts():
     as ``{"type": "alert", ...}`` / ``{"type": "alert_clear", "id": ...}``."""
     return jsonify({'success': True, 'data': get_alerts()})
 
+def _cookie_token_ok():
+    """Optional shared secret for the cookie endpoints (VAULTTUBE_COOKIE_TOKEN)."""
+    token = os.environ.get('VAULTTUBE_COOKIE_TOKEN')
+    if not token:
+        return True
+    return request.headers.get('Authorization', '') == 'Bearer ' + token
+
+
+@api_bp.route('/cookies/youtube', methods=['GET'])
+def youtube_cookie_status():
+    """Age and sign-in state of the stored YouTube cookies (never values)."""
+    if not _cookie_token_ok():
+        return api_error('Invalid or missing token', 401)
+    return jsonify({'success': True, 'data': cookie_store.youtube_cookie_status()})
+
+
+@api_bp.route('/cookies/youtube', methods=['POST'])
+def youtube_cookie_upload():
+    """Replace the stored YouTube cookies with a Netscape cookies.txt, sent as
+    the raw request body or a multipart ``cookies`` file. Cookies for other
+    sites are discarded; takes effect on the next download, no restart."""
+    if not _cookie_token_ok():
+        return api_error('Invalid or missing token', 401)
+    if (request.content_length or 0) > cookie_store.MAX_COOKIE_BYTES:
+        return api_error('Cookie file too large', 413)
+    upload = request.files.get('cookies')
+    raw = upload.read() if upload else request.get_data()
+    if len(raw) > cookie_store.MAX_COOKIE_BYTES:
+        return api_error('Cookie file too large', 413)
+    try:
+        stats = cookie_store.save_youtube_cookies(raw.decode('utf-8', errors='replace'))
+    except cookie_store.CookieFileError as e:
+        return api_error(str(e), 400)
+    except OSError as e:
+        logger.error("Saving YouTube cookies failed: %s" % e)
+        return api_error('Could not write cookie file: %s' % e, 500)
+    return jsonify({'success': True, 'data': stats})
+
 @api_bp.route('/status/stream')
 def status_stream():
     """Server-Sent Events endpoint that pushes real-time download progress to clients.
@@ -2072,7 +2111,7 @@ def _build_export_config():
         'providers': {
             'youtube': {
                 'api_key_configured': bool(env.get('VAULTTUBE_YTKEY')),
-                'cookie_path': env.get('VAULTTUBE_YTCOOKIE'),
+                'cookie_path': cookie_store.youtube_cookie_path(),
             },
             'patreon': {
                 'cookie_path': env.get('VAULTTUBE_PATREONCOOKIE'),

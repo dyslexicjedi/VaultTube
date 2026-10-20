@@ -1,7 +1,7 @@
 import os
 import logging
 import re
-from io import StringIO
+import tempfile
 from urllib.parse import urlparse, parse_qs
 import requests
 import yt_dlp
@@ -12,6 +12,7 @@ from database import check_db_video, check_pl2vid_info, insert_pl2vid_info, inse
 from backend import save_video_from_ytdlp
 from providers.base import set_status, update_status, del_status, raise_alert
 from QueueObject import QueueObject
+import cookie_store
 from queue_utils import enqueue
 
 logger = logging.getLogger('youtube')
@@ -99,16 +100,20 @@ class _CookieWarningCapture(logging.Handler):
             self.cookie_invalid = True
 
 
+def _raise_cookie_alert():
+    raise_alert(
+        cookie_store.YOUTUBE_ALERT_ID,
+        'YouTube cookies are invalid',
+        'yt-dlp reports the stored YouTube account cookies are no longer valid. '
+        'Run scripts/vaulttube-cookies.sh on a computer signed in to YouTube '
+        '(or POST a fresh cookies.txt to /api/cookies/youtube); no restart needed.',
+    )
+
+
 def _check_cookie_warnings(capture):
     """Raise the youtube_cookies_invalid alert if the capture saw the warning."""
     if capture is not None and getattr(capture, 'cookie_invalid', False):
-        raise_alert(
-            'youtube_cookies_invalid',
-            'YouTube cookies are invalid',
-            'yt-dlp reports the YouTube account cookies in VAULTTUBE_YTCOOKIE '
-            'are no longer valid. Re-export a fresh cookies.txt from a logged-in '
-            'browser session and restart VaultTube.',
-        )
+        _raise_cookie_alert()
 
 
 def dl_progress_hook(d):
@@ -522,12 +527,13 @@ def parse_youtube_url(url):
             return ('playlist', url)
     return (None, None)
 
-def _download_attempt(url, ydl_opts, cookies_contents, label=''):
+def _download_attempt(url, ydl_opts, cookie_path, label=''):
     """Run a single yt-dlp download attempt. Returns True on success.
-    Cleans up progress status and any temporary cookie StringIO it creates."""
+    yt-dlp loads ``cookie_path`` and saves its (possibly refreshed) cookie
+    jar back to it on exit, so pass a scratch copy, not the stored file."""
     opts = dict(ydl_opts)
-    if cookies_contents is not None:
-        opts['cookiefile'] = StringIO(cookies_contents)
+    if cookie_path is not None:
+        opts['cookiefile'] = cookie_path
     # Install a warning-capture logger so the "cookies are no longer valid"
     # warning is observable even when the download succeeds via a fallback.
     capture = _CookieWarningCapture()
@@ -550,23 +556,11 @@ def _download_attempt(url, ydl_opts, cookies_contents, label=''):
         return True
     except DownloadError as e:
         if _is_cookie_invalid_error(e):
-            raise_alert(
-                'youtube_cookies_invalid',
-                'YouTube cookies are invalid',
-                'yt-dlp reports the YouTube account cookies in VAULTTUBE_YTCOOKIE '
-                'are no longer valid. Re-export a fresh cookies.txt from a logged-in '
-                'browser session and restart VaultTube.',
-            )
+            _raise_cookie_alert()
         raise
     except Exception as e:
         if _is_cookie_invalid_error(e):
-            raise_alert(
-                'youtube_cookies_invalid',
-                'YouTube cookies are invalid',
-                'yt-dlp reports the YouTube account cookies in VAULTTUBE_YTCOOKIE '
-                'are no longer valid. Re-export a fresh cookies.txt from a logged-in '
-                'browser session and restart VaultTube.',
-            )
+            _raise_cookie_alert()
         raise
     finally:
         # Check the warning capture in finally so the alert fires even when
@@ -575,9 +569,6 @@ def _download_attempt(url, ydl_opts, cookies_contents, label=''):
         _check_cookie_warnings(capture)
         if videoID is not None:
             del_status(videoID)
-        cookiefile = opts.get('cookiefile')
-        if cookiefile is not None and hasattr(cookiefile, 'close'):
-            cookiefile.close()
         cookie_logger.removeHandler(capture)
 
 
@@ -592,11 +583,15 @@ def download_video(url, cookies=None):
         url = "https://www.youtube.com/watch?v=%s" % vid
     logger.debug("Starting Download: %s" % url)
 
+    stored_path = stored_mtime = None
     if cookies is None:
-        cookie_path = os.environ.get('VAULTTUBE_YTCOOKIE')
-        if not cookie_path:
-            raise RuntimeError("VAULTTUBE_YTCOOKIE not configured; cannot download from YouTube")
-        with open(cookie_path) as f:
+        stored_path = cookie_store.youtube_cookie_path()
+        if not stored_path or not os.path.isfile(stored_path):
+            raise RuntimeError("No YouTube cookies at %s (set VAULTTUBE_YTCOOKIE or upload "
+                               "them to /api/cookies/youtube); cannot download from YouTube"
+                               % stored_path)
+        stored_mtime = os.path.getmtime(stored_path)
+        with open(stored_path) as f:
             cookies_contents = f.read()
     elif isinstance(cookies, str):
         cookies_contents = cookies
@@ -620,16 +615,39 @@ def download_video(url, cookies=None):
     if deno_path:
         base_opts['js_runtimes'] = {'deno': {'path': deno_path}}
 
+    # yt-dlp rewrites its cookie file on exit with whatever YouTube refreshed;
+    # give it a private copy and fold the changes back into the stored file.
+    fd, scratch = tempfile.mkstemp(prefix='vt-ytcookies-', suffix='.txt')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(cookies_contents)
+        return _download_with_fallbacks(url, vid, base_opts, scratch)
+    finally:
+        if stored_path:
+            try:
+                with open(scratch) as f:
+                    rotated = f.read()
+                cookie_store.persist_rotated_cookies(stored_path, stored_mtime,
+                                                     cookies_contents, rotated)
+            except Exception as e:
+                logger.warning("Refreshed YouTube cookies not saved: %s" % e)
+        try:
+            os.unlink(scratch)
+        except OSError:
+            pass
+
+
+def _download_with_fallbacks(url, vid, base_opts, cookie_path):
     proxy_url = os.environ.get('VAULTTUBE_PROXY')
     try:
-        _download_attempt(url, base_opts, cookies_contents, label='')
+        _download_attempt(url, base_opts, cookie_path, label='')
     except DownloadError as e:
         err_msg = str(e)
         if proxy_url and 'country' in err_msg.lower() and 'blocked' in err_msg.lower():
             logger.info("YouTube country block detected; retrying through proxy %s" % proxy_url)
             proxy_opts = dict(base_opts)
             proxy_opts['proxy'] = proxy_url
-            _download_attempt(url, proxy_opts, cookies_contents, label='proxy')
+            _download_attempt(url, proxy_opts, cookie_path, label='proxy')
         elif is_permanently_unavailable(err_msg):
             insert_not_found(vid)
             logger.error("Video not available, added to ignore list: %s" % vid)
