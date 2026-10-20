@@ -2,6 +2,7 @@ import os
 import logging
 import re
 import tempfile
+import time
 from urllib.parse import urlparse, parse_qs
 import requests
 import yt_dlp
@@ -10,7 +11,7 @@ from flask import current_app
 
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info, insert_not_found
 from backend import save_video_from_ytdlp
-from providers.base import set_status, update_status, del_status, raise_alert
+from providers.base import set_status, update_status, del_status, raise_alert, get_alerts
 from QueueObject import QueueObject
 import cookie_store
 from queue_utils import enqueue
@@ -108,6 +109,11 @@ def _raise_cookie_alert():
         'Run scripts/vaulttube-cookies.sh on a computer signed in to YouTube '
         '(or POST a fresh cookies.txt to /api/cookies/youtube); no restart needed.',
     )
+
+
+def _cookie_alert_since(started):
+    return any(a['id'] == cookie_store.YOUTUBE_ALERT_ID and a['created_at'] >= started
+               for a in get_alerts())
 
 
 def _check_cookie_warnings(capture):
@@ -618,12 +624,14 @@ def download_video(url, cookies=None):
     # yt-dlp rewrites its cookie file on exit with whatever YouTube refreshed;
     # give it a private copy and fold the changes back into the stored file.
     fd, scratch = tempfile.mkstemp(prefix='vt-ytcookies-', suffix='.txt')
+    started = time.time()
     try:
         with os.fdopen(fd, 'w') as f:
             f.write(cookies_contents)
         return _download_with_fallbacks(url, vid, base_opts, scratch)
     finally:
-        if stored_path:
+        # Don't write back a jar YouTube just reported as dead.
+        if stored_path and not _cookie_alert_since(started):
             try:
                 with open(scratch) as f:
                     rotated = f.read()
