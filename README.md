@@ -70,6 +70,34 @@ services:
       - db
 ```
 
+## Keeping YouTube cookies fresh
+
+YouTube downloads need cookies from a signed-in browser, and they expire. Instead
+of exporting them with a browser extension and copying them to the server, run
+`scripts/vaulttube-cookies.sh` on a Mac (or Linux desktop) that is signed in to
+YouTube. It reads the cookies straight from the browser with
+`yt-dlp --cookies-from-browser`, keeps only youtube.com/google.com ones, and
+uploads them to `POST /api/cookies/youtube`. VaultTube uses them on the next
+download with no restart, and clears the "YouTube cookies are invalid" banner.
+
+```bash
+brew install yt-dlp
+scripts/vaulttube-cookies.sh setup     # writes ~/.config/vaulttube/cookies.conf; set VAULTTUBE_URL and BROWSER
+scripts/vaulttube-cookies.sh run       # push once (Chrome asks for Keychain access: choose Always Allow)
+scripts/vaulttube-cookies.sh install   # push every 12 hours via launchd
+scripts/vaulttube-cookies.sh status    # cookie age and sign-in state on the server
+```
+
+Tips:
+- Use a browser profile that only stays signed in to YouTube (e.g.
+  `BROWSER="chrome:Profile 2"`). Browsing YouTube in the exported profile makes
+  Google rotate the session, which kills the server's copy until the next push.
+- VaultTube saves the cookies YouTube refreshes during each download back to the
+  cookie file, so a push lasts longer than a one-off export did. The file must be
+  writable (mount its directory, not just the file, if you can).
+- Safari needs Full Disk Access for the process running the script; Chrome,
+  Brave, Edge and Firefox do not.
+
 ## Environment Variables
 
 Required:
@@ -84,7 +112,8 @@ Optional:
 
 | Variable | Purpose |
 |----------|---------|
-| `VAULTTUBE_YTCOOKIE` | Path to a Netscape-format cookies.txt for YouTube (used by downloads and subscription scanning) |
+| `VAULTTUBE_YTCOOKIE` | Path to a Netscape-format cookies.txt for YouTube (default `<VAULTTUBE_VAULTDIR>/.cookies/youtube.txt`; must be writable so uploads and refreshed cookies can be saved) |
+| `VAULTTUBE_COOKIE_TOKEN` | Shared secret required (as `Authorization: Bearer <token>`) by `/api/cookies/youtube`; unset means no token |
 | `VAULTTUBE_PATREONCOOKIE` | Path to a Netscape-format cookies.txt for Patreon |
 | `VAULTTUBE_DENOPATH` | Path to a deno binary for yt-dlp's JS runtime |
 | `VAULTTUBE_REDDIT_CLIENT_ID` / `CLIENT_SECRET` / `USERNAME` / `PASSWORD` / `USER_AGENT` | Reddit API credentials (all five required to use the Reddit provider) |

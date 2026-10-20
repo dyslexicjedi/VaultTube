@@ -99,7 +99,8 @@ Required at startup (validated in `main.py`):
 - `VAULTTUBE_YTKEY` - YouTube API key (used by `deleted_check` and `get_playlist_info`; no longer used for subscription scanning)
 
 Optional:
-- `VAULTTUBE_YTCOOKIE` - YouTube cookies file (Netscape cookies.txt path)
+- `VAULTTUBE_YTCOOKIE` - YouTube cookies file (Netscape cookies.txt path; default `<VAULTDIR>/.cookies/youtube.txt`). Written by `/api/cookies/youtube` uploads and by downloads (refreshed cookies), see `app/cookie_store.py`
+- `VAULTTUBE_COOKIE_TOKEN` - Optional bearer token required by `/api/cookies/youtube`
 - `VAULTTUBE_PROXY` - Optional HTTP/HTTPS/SOCKS proxy URL for yt-dlp to use when YouTube returns a "blocked in your country" error
 - `VAULTTUBE_PATREONCOOKIE` - Patreon cookies file (Netscape cookies.txt path)
 - `VAULTTUBE_DENOPATH` - Deno binary path for yt-dlp's JS runtime (`/root/.deno/bin/deno` in the Docker image)
@@ -173,6 +174,7 @@ Optional:
 - `/api/watched/<id>` - Mark watched
 - `/api/up_next/<id>` - Series-ordered unwatched list for the player
 - `/api/download/single` - Download single URL
+- `/api/cookies/youtube` - GET cookie age/sign-in state; POST a cookies.txt (raw body or multipart `cookies`) to replace the YouTube cookies (pushed by `scripts/vaulttube-cookies.sh`)
 - `/api/downloads/retry` (POST) - Re-enqueue a failed download
 - `/api/channels/<page>` - List channels (per-channel unwatched counts, `?order=activity`)
 - `/api/channel/<id>` - Channel info + derived source URL, plus `description`, `thumbnail_url`, and `video_count`

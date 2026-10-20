@@ -84,12 +84,20 @@ full code map (files, DB tables, API routes).
   master). Truly media-less posts (announcements, polls) also exist; check
   `content_json_string` to tell them apart.
 
+- **YouTube cookies** (`app/cookie_store.py`): `scripts/vaulttube-cookies.sh`
+  on a desktop pushes browser cookies to `POST /api/cookies/youtube` (only
+  youtube.com/google.com kept). `download_video` hands yt-dlp a scratch copy
+  of the cookie file, because yt-dlp rewrites its cookiefile on exit with the
+  cookies YouTube refreshed; those are folded back into the stored file unless
+  it changed mid-download (a newer upload wins).
+
 ## Environment variables
 
 Required: `VAULTTUBE_VAULTDIR`, `VAULTTUBE_DBHOST/DBUSER/DBPASS/DBNAME/DBPORT`,
 `VAULTTUBE_YTKEY`.
 Optional: `VAULTTUBE_YTCOOKIE`, `VAULTTUBE_PATREONCOOKIE` (Netscape cookies.txt
-paths), `VAULTTUBE_PROXY` (HTTP/HTTPS/SOCKS proxy URL for yt-dlp to use when
+paths; YouTube's defaults to `<VAULTDIR>/.cookies/youtube.txt`),
+`VAULTTUBE_COOKIE_TOKEN` (bearer token for `/api/cookies/youtube`), `VAULTTUBE_PROXY` (HTTP/HTTPS/SOCKS proxy URL for yt-dlp to use when
 YouTube returns a "blocked in your country" error),
 `VAULTTUBE_DENOPATH` (deno binary for yt-dlp JS runtime;
 `/root/.deno/bin/deno` in the image), `VAULTTUBE_REDDIT_CLIENT_ID/
