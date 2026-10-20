@@ -27,3 +27,8 @@ HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
 # runs as PID 1 and receives docker stop's SIGTERM directly (the shell replaces
 # itself via exec, so no /bin/sh wrapper is left to swallow the signal)
 ENTRYPOINT ["sh", "/app/entrypoint.sh"]
+
+# OCI labels: lets tools (e.g. Renovate re-pin PRs) map an image digest back
+# to the vaulttube commit it was built from.
+LABEL org.opencontainers.image.source="https://github.com/dyslexicjedi/vaulttube" \
+      org.opencontainers.image.revision="${VAULTTUBE_REVISION}"
