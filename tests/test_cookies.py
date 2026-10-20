@@ -151,3 +151,19 @@ def test_download_without_cookies_raises(cookie_path):
 def test_script_syntax():
     script = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'vaulttube-cookies.sh')
     subprocess.run(['bash', '-n', script], check=True)
+
+
+def test_download_skips_write_back_when_cookies_reported_invalid(cookie_path, monkeypatch):
+    import providers.youtube as youtube
+    cookie_path.parent.mkdir()
+    cookie_path.write_text(SIGNED_IN)
+    attempt, _ = _rotating_attempt('sid2')
+
+    def attempt_invalid(*args, **kw):
+        attempt(*args, **kw)
+        youtube._raise_cookie_alert()
+        return True
+    monkeypatch.setattr(youtube, '_download_attempt', attempt_invalid)
+
+    youtube.download_video('https://www.youtube.com/watch?v=abcdefghijk')
+    assert 'sid1' in cookie_path.read_text()
