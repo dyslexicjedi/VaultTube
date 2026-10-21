@@ -116,6 +116,16 @@ cmd_status() {
     echo
 }
 
+# Fixed clock times (every INTERVAL_HOURS from 08:00) rather than
+# StartInterval: launchd runs a calendar job missed during sleep on wake,
+# while an interval timer only advances while the Mac is awake.
+calendar_entries() {
+    local h
+    for ((h = 8; h < 32; h += INTERVAL_HOURS)); do
+        echo "        <dict><key>Hour</key><integer>$((h % 24))</integer><key>Minute</key><integer>0</integer></dict>"
+    done
+}
+
 cmd_install() {
     [ "$(uname)" = "Darwin" ] || die "install uses launchd (macOS); use cron elsewhere"
     load_config
@@ -137,7 +147,10 @@ cmd_install() {
         <string>$script</string>
         <string>run</string>
     </array>
-    <key>StartInterval</key><integer>$((INTERVAL_HOURS * 3600))</integer>
+    <key>StartCalendarInterval</key>
+    <array>
+$(calendar_entries)
+    </array>
     <key>RunAtLoad</key><false/>
     <key>StandardOutPath</key><string>$LOG</string>
     <key>StandardErrorPath</key><string>$LOG</string>
@@ -146,7 +159,7 @@ cmd_install() {
 EOF
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$PLIST"
-    echo "Installed: pushes every $INTERVAL_HOURS h. Log: $LOG"
+    echo "Installed: pushes every $INTERVAL_HOURS h from 08:00 (or on wake if missed). Log: $LOG"
 }
 
 cmd_uninstall() {
