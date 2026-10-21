@@ -48,6 +48,7 @@ by `q.source` as a fallback (see `downloader.py`).
 - `IgnoreVid` - Ignored videos + not-found tombstones (videos gone from the source; these used to be fake `channel_name='404'` rows in `videos`)
 - `download_errors` - Download error logging
 - `queue` - Persisted download queue (status, attempts, last_error); done/failed rows auto-pruned after 7 days
+- `watched_subreddits` - Subreddits the scanner checks for new posts (`name`, `last_seen_utc` = newest post creation time already handled, `last_scanned_at`)
 - `skip_segments` / `sponsorblock_fetch` - Cached SponsorBlock segments per YouTube video and when they were last fetched (`app/sponsorblock.py`)
 
 ## Directory Structure
@@ -183,6 +184,7 @@ Optional:
 - `/api/search/<query>/<page>` - Search
 - `/api/segments/<id>` - SponsorBlock skip segments + community chapters (fetched on first play, then cached; refreshed weekly for videos under 90 days old)
 - `/api/subscribe/url` (POST `{url, backfill}`) - Subscribe to a channel/playlist on any yt-dlp site
+- `/api/reddit/subreddits` (GET list, POST `{name}` to watch, DELETE `/<name>` to stop) - Watched subreddits; new media posts are queued through the Reddit provider on every scanner pass
 - `/api/sources` - Every source in the vault with label and video count (drives the source filters)
 - `/api/stats` - Statistics dashboard data
 - `/api/status/stream` - SSE: live queue/download progress

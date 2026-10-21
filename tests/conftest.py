@@ -114,7 +114,7 @@ _TABLES = [
     'sentinel_events', 'sentinel_video_state', 'sentinel_sources',
     'sentinel_scan_runs',
     'videos', 'channels', 'images', 'playlists', 'pl2vid', 'IgnoreVid',
-    'queue', 'download_errors',
+    'queue', 'download_errors', 'watched_subreddits',
 ]
 
 

@@ -625,6 +625,19 @@ def checkdb():
                 CONSTRAINT `fk_skipseg_video` FOREIGN KEY (`video_id`)
                     REFERENCES `videos` (`id`) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;""")
+        # Watched subreddits: the scanner queues new posts from each through
+        # the Reddit provider. last_seen_utc is the newest post creation time
+        # already handled, so only posts after it are queued.
+        cur.execute("SELECT * FROM information_schema.tables WHERE table_schema = %s AND table_name = 'watched_subreddits' LIMIT 1", (os.environ['VAULTTUBE_DBNAME'],))
+        if not cur.fetchone():
+            logger.info("Watched subreddits table not created, creating...")
+            cur.execute("""CREATE TABLE `watched_subreddits` (
+                `name` varchar(100) NOT NULL,
+                `last_seen_utc` double DEFAULT NULL,
+                `last_scanned_at` datetime DEFAULT NULL,
+                `added_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`name`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
         cur.close()
         con.close()
         cleanup_old_errors(7)
@@ -830,6 +843,45 @@ def get_url_subscriptions():
     except Exception as e:
         logger.error("Error during URL subscription poll: %s" % e)
         return []
+
+def get_watched_subreddits():
+    """Watched subreddits: (name, last_seen_utc, last_scanned_at) rows."""
+    try:
+        con = get_connection()
+        cur = con.cursor()
+        cur.execute("select name, last_seen_utc, last_scanned_at from watched_subreddits order by name;")
+        rv = cur.fetchall()
+        cur.close()
+        con.close()
+        return rv
+    except Exception as e:
+        logger.error("Error during watched subreddit poll: %s" % e)
+        return []
+
+def add_watched_subreddit(name, last_seen_utc):
+    con = get_connection()
+    cur = con.cursor()
+    cur.execute("INSERT INTO watched_subreddits (name, last_seen_utc) VALUES (%s, %s) "
+                "ON DUPLICATE KEY UPDATE name = name", (name, last_seen_utc))
+    cur.close()
+    con.close()
+
+def remove_watched_subreddit(name):
+    con = get_connection()
+    cur = con.cursor()
+    cur.execute("DELETE FROM watched_subreddits WHERE name = %s", (name,))
+    removed = cur.rowcount
+    cur.close()
+    con.close()
+    return removed > 0
+
+def update_subreddit_scan(name, last_seen_utc):
+    con = get_connection()
+    cur = con.cursor()
+    cur.execute("UPDATE watched_subreddits SET last_seen_utc = %s, last_scanned_at = NOW() WHERE name = %s",
+                (last_seen_utc, name))
+    cur.close()
+    con.close()
 
 _pool = None
 _pool_lock = threading.Lock()

@@ -2031,15 +2031,7 @@ def api_reddit_saved():
             return api_error("Reddit credentials not configured: %s" % ', '.join(missing), 400)
 
         import praw
-        from providers.reddit import _get_reddit_client
-
-        def _has_media(submission):
-            if submission.is_video:
-                return True
-            url = (submission.url or '').lower()
-            if any(url.split('?')[0].endswith(ext) for ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4')):
-                return True
-            return any(host in url for host in ('redgifs.com', 'i.redd.it', 'i.imgur.com'))
+        from providers.reddit import _get_reddit_client, has_media as _has_media
 
         reddit = _get_reddit_client()
         q = current_app.config['queue']
@@ -2060,6 +2052,57 @@ def api_reddit_saved():
         return api_success({"enqueued": enqueued, "skipped": skipped})
     except Exception as e:
         logger.error("API Reddit Saved Failed: %s" % e)
+        return api_error(str(e), 500)
+
+def _reddit_missing_vars():
+    return [v for v in ('VAULTTUBE_REDDIT_CLIENT_ID', 'VAULTTUBE_REDDIT_CLIENT_SECRET',
+                        'VAULTTUBE_REDDIT_USER_AGENT', 'VAULTTUBE_REDDIT_USERNAME',
+                        'VAULTTUBE_REDDIT_PASSWORD') if v not in os.environ]
+
+@api_bp.route("/reddit/subreddits", methods=["GET"])
+def api_watched_subreddits():
+    from database import get_watched_subreddits
+    rows = get_watched_subreddits()
+    return api_success([{
+        "name": name,
+        "last_scanned_at": last_scanned_at.isoformat() if last_scanned_at else None,
+    } for name, _, last_scanned_at in rows])
+
+@api_bp.route("/reddit/subreddits", methods=["POST"])
+def api_watch_subreddit():
+    """Watch a subreddit: each scanner pass queues its new media posts through
+    the Reddit provider. Body: {"name": "videos" | "r/videos" | URL}. Only
+    posts made after this call are downloaded."""
+    from database import add_watched_subreddit
+    from providers.reddit import normalize_subreddit, resolve_subreddit
+    body = request.get_json(force=True, silent=True) or {}
+    name = normalize_subreddit(body.get('name'))
+    if not name:
+        return api_error("Not a subreddit name: %s" % (body.get('name') or ''), 400)
+    missing = _reddit_missing_vars()
+    if missing:
+        return api_error("Reddit credentials not configured: %s" % ', '.join(missing), 400)
+    try:
+        name, newest = resolve_subreddit(name)
+    except Exception as e:
+        logger.error("Watch subreddit %s failed: %s" % (name, e))
+        return api_error("Couldn't read r/%s: %s" % (name, e), 400)
+    try:
+        add_watched_subreddit(name, newest)
+    except Exception as e:
+        logger.error("Saving watched subreddit %s failed: %s" % (name, e))
+        return api_error(str(e), 500)
+    return api_success({"name": name})
+
+@api_bp.route("/reddit/subreddits/<string:name>", methods=["DELETE"])
+def api_unwatch_subreddit(name):
+    from database import remove_watched_subreddit
+    try:
+        if not remove_watched_subreddit(name):
+            return api_error("Not watching r/%s" % name, 404)
+        return api_success({"name": name})
+    except Exception as e:
+        logger.error("Unwatch subreddit %s failed: %s" % (name, e))
         return api_error(str(e), 500)
 
 @api_bp.route('/creator/count/<string:creator>')
