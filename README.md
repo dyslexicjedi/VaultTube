@@ -84,7 +84,7 @@ download with no restart, and clears the "YouTube cookies are invalid" banner.
 brew install yt-dlp
 scripts/vaulttube-cookies.sh setup     # writes ~/.config/vaulttube/cookies.conf; set VAULTTUBE_URL and BROWSER
 scripts/vaulttube-cookies.sh run       # push once (Chrome asks for Keychain access: choose Always Allow)
-scripts/vaulttube-cookies.sh install   # push at 08:00 and 20:00 via launchd (on wake if asleep)
+scripts/vaulttube-cookies.sh install   # push hourly via launchd (INTERVAL_HOURS in the config; catches up on wake)
 scripts/vaulttube-cookies.sh status    # cookie age and sign-in state on the server
 ```
 
