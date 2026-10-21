@@ -7,7 +7,8 @@
 #
 #   vaulttube-cookies.sh setup       write the config file, then edit it
 #   vaulttube-cookies.sh run         push cookies once (default)
-#   vaulttube-cookies.sh install     push once, then every INTERVAL_HOURS via launchd (macOS)
+#   vaulttube-cookies.sh install     push once, then every INTERVAL_HOURS via launchd (macOS);
+#                                    not for a dedicated profile, see README
 #   vaulttube-cookies.sh uninstall   remove the launchd job
 #   vaulttube-cookies.sh status      show what the server has
 #
@@ -54,16 +55,19 @@ VAULTTUBE_URL="http://vaulttube.local:5000"
 
 # Browser (and optional profile) that is signed in to YouTube, in yt-dlp's
 # --cookies-from-browser syntax: chrome, firefox, brave, edge, safari, or
-# e.g. "chrome:Profile 2". A profile used ONLY to stay signed in to YouTube
-# works best: browsing YouTube in it rotates the session and invalidates the
-# copy on the server until the next push.
+# e.g. "brave:Profile 1". Use a profile made ONLY for VaultTube: sign in to
+# YouTube there, close it, push once with 'run', and push again only when
+# VaultTube shows the expired-cookies banner. The server keeps the session
+# fresh by itself; browsing in the profile rotates the session and breaks the
+# server's copy.
 BROWSER="chrome"
 
 # Only if the server sets VAULTTUBE_COOKIE_TOKEN.
 VAULTTUBE_COOKIE_TOKEN=""
 
-# How often the launchd job pushes (install). YouTube rotates the session
-# often while the browser is in use, so hourly keeps the server's copy fresh.
+# How often the launchd job pushes (install). Leave install unused with a
+# dedicated profile: scheduled pushes would replace the server's refreshed
+# session with the profile's older copy.
 INTERVAL_HOURS=1
 EOF
     chmod 600 "$CONFIG"

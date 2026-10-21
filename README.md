@@ -80,21 +80,36 @@ YouTube. It reads the cookies straight from the browser with
 uploads them to `POST /api/cookies/youtube`. VaultTube uses them on the next
 download with no restart, and clears the "YouTube cookies are invalid" banner.
 
+**Give the server its own Google session.** Google rotates a session's cookies
+as it is used, and a session shared between your everyday browser and the
+server breaks on whichever side didn't rotate. So:
+
+1. Create a browser profile just for VaultTube (Chrome/Brave: open
+   `chrome://profile-picker` / `brave://profile-picker` and click Add), sign in
+   to YouTube in it, then close that window and don't use the profile again.
+2. Find its folder name (`chrome://version` or `brave://version` → Profile Path, e.g. `Profile 1`)
+   and set `BROWSER="brave:Profile 1"` (or `chrome:...`) in the config.
+3. Push once:
+
 ```bash
 brew install yt-dlp
 scripts/vaulttube-cookies.sh setup     # writes ~/.config/vaulttube/cookies.conf; set VAULTTUBE_URL and BROWSER
-scripts/vaulttube-cookies.sh run       # push once (Chrome asks for Keychain access: choose Always Allow)
-scripts/vaulttube-cookies.sh install   # push hourly via launchd (INTERVAL_HOURS in the config; catches up on wake)
+scripts/vaulttube-cookies.sh run       # push once (the browser asks for Keychain access: choose Always Allow)
 scripts/vaulttube-cookies.sh status    # cookie age and sign-in state on the server
 ```
 
+From then on VaultTube saves the cookies YouTube refreshes during each download
+back to the cookie file, so the server keeps its session alive on its own. Push
+again only when the "YouTube cookies are invalid" banner appears. The cookie
+file must be writable (mount its directory, not just the file, if you can).
+
+Don't schedule pushes (`install`) from a dedicated profile: its on-disk cookies
+stop changing once it's closed, so each push would replace the server's newer
+session with an older one. `install` (hourly via launchd, `INTERVAL_HOURS` in
+the config) only makes sense when pushing from a profile you browse with, which
+keeps breaking the server's copy between pushes anyway.
+
 Tips:
-- Use a browser profile that only stays signed in to YouTube (e.g.
-  `BROWSER="chrome:Profile 2"`). Browsing YouTube in the exported profile makes
-  Google rotate the session, which kills the server's copy until the next push.
-- VaultTube saves the cookies YouTube refreshes during each download back to the
-  cookie file, so a push lasts longer than a one-off export did. The file must be
-  writable (mount its directory, not just the file, if you can).
 - Safari needs Full Disk Access for the process running the script; Chrome,
   Brave, Edge and Firefox do not.
 
