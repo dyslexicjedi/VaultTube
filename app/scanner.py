@@ -6,10 +6,12 @@ from flask import current_app
 
 from QueueObject import QueueObject
 from database import get_active_subscriptions,get_active_playlist_subs,get_url_subscriptions
+from database import get_watched_subreddits, update_subreddit_scan
 from database import check_db_video, check_pl2vid_info, insert_pl2vid_info
 from database import cleanup_old_errors, cleanup_old_queue_rows
 from providers.patreon import scan_campaign
 from providers import generic
+from providers import reddit
 from providers.youtube import (
     YouTubePlaylistTruncated,
     YouTubeQuotaExceeded,
@@ -64,6 +66,30 @@ def scan_url_subscriptions(app):
                 logger.error("URL subscription scan failed for %s: %s" % (channel_id, e))
 
 
+def scan_watched_subreddits(app):
+    """Queue new media posts from each watched subreddit. Runs every scanner
+    pass, the same schedule as YouTube channels; each subreddit is isolated
+    so one failure doesn't stop the rest."""
+    subreddits = get_watched_subreddits()
+    if not subreddits:
+        return
+    try:
+        reddit._get_reddit_client()
+    except RuntimeError as e:
+        logger.warning("Skipping watched subreddits: %s" % e)
+        return
+    for name, last_seen_utc, _ in subreddits:
+        with app.app_context():
+            logger.info("Scanning subreddit: r/%s" % name)
+            try:
+                queued, newest = reddit.scan_subreddit(name, last_seen_utc, app.config['queue'])
+                update_subreddit_scan(name, newest)
+                if queued:
+                    logger.info("Queued %d new posts from r/%s" % (queued, name))
+            except Exception as e:
+                logger.error("Subreddit scan failed for r/%s: %s" % (name, e))
+
+
 def scan_once(app):
     """Run one subscription pass with one shared YouTube request budget."""
     request_budget = _youtube_scan_budget()
@@ -94,6 +120,7 @@ def scan_once(app):
             scan_campaign(channel_id[0])
 
     scan_url_subscriptions(app)
+    scan_watched_subreddits(app)
 
     youtube_work = [
         ('channel', channel_id)

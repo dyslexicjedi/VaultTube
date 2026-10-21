@@ -55,6 +55,13 @@ full code map (files, DB tables, API routes).
   only `*video*` post types enqueued) and `UC...` IDs as YouTube channels.
   Patreon campaigns get their `channels` row auto-created on first download
   or vault scan (`ensure_channel` in `app/providers/patreon.py`).
+- **Watched subreddits** (`watched_subreddits` table, `scan_watched_subreddits`
+  in `app/scanner.py`): every scanner pass (hourly, alongside YouTube) reads
+  each subreddit's `/new` via PRAW and enqueues posts newer than
+  `last_seen_utc` that have media (`reddit.has_media`) as ordinary Reddit
+  post URLs, so downloads go through the normal Reddit provider and land
+  under the post author's channel. Watching records the newest post, so only
+  posts after that are downloaded. Needs the Reddit credentials.
 - Video files live at `$VAULTTUBE_VAULTDIR/{channel_id}/{video_id}.{ext}`;
   the backend thread scans the vault and adds any new files to the DB, so
   a download is "done" when the file lands in the right place.

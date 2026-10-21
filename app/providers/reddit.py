@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 import datetime
 from urllib.parse import urlparse
@@ -172,3 +173,64 @@ def extract_redgifs_id(url):
     return None
 
 
+
+
+def has_media(submission):
+    """True when the post carries something the downloader can save: a
+    Reddit-hosted video, an image/gif/mp4 link or a RedGifs/imgur link."""
+    if submission.is_video:
+        return True
+    url = (submission.url or '').lower()
+    if any(url.split('?')[0].endswith(ext) for ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4')):
+        return True
+    return any(host in url for host in ('redgifs.com', 'i.redd.it', 'i.imgur.com'))
+
+
+_SUBREDDIT_RE = re.compile(r'^[A-Za-z0-9_]{2,21}$')
+
+
+def normalize_subreddit(value):
+    """Accept 'videos', 'r/videos', '/r/videos/' or a subreddit URL and
+    return the bare name, or None if it isn't a valid subreddit name."""
+    value = (value or '').strip()
+    if '://' in value:
+        value = urlparse(value).path
+    value = value.strip('/')
+    if value.lower().startswith('r/'):
+        value = value[2:]
+    value = value.split('/')[0]
+    return value if _SUBREDDIT_RE.match(value) else None
+
+
+def resolve_subreddit(name):
+    """Look the subreddit up so typos and private/banned subs are caught when
+    watching starts. Returns (display name, creation time of its newest post
+    or None) so only posts after now are queued."""
+    subreddit = _get_reddit_client().subreddit(name)
+    subreddit.id  # forces the fetch; raises for missing/private subreddits
+    display_name = subreddit.display_name
+    newest = next(iter(subreddit.new(limit=1)), None)
+    return display_name, (newest.created_utc if newest else None)
+
+
+def scan_subreddit(name, last_seen_utc, q, limit=100):
+    """Queue posts newer than last_seen_utc that have media and aren't in the
+    vault yet. Each goes through the normal Reddit post download. Returns
+    (number queued, newest creation time seen)."""
+    from QueueObject import QueueObject
+    from database import check_db_video
+    from queue_utils import enqueue
+
+    newest = last_seen_utc
+    queued = 0
+    for post in _get_reddit_client().subreddit(name).new(limit=limit):
+        if last_seen_utc is not None and post.created_utc <= last_seen_utc:
+            continue
+        if newest is None or post.created_utc > newest:
+            newest = post.created_utc
+        if not post.permalink or not has_media(post) or check_db_video(post.id):
+            continue
+        qo = QueueObject("https://www.reddit.com" + post.permalink, "", "reddit", 0, "")
+        if enqueue(qo, q):
+            queued += 1
+    return queued, newest

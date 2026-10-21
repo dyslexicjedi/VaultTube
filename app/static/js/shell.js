@@ -171,7 +171,7 @@ function do_search() {
     });
 })();
 
-/* ---- "+ Add" modal: URL download / file upload / Reddit saved ---- */
+/* ---- "+ Add" modal: URL download / file upload / Reddit saved + watched subreddits ---- */
 (function () {
     var modal = document.getElementById('add-modal');
     if (!modal) return;
@@ -296,6 +296,60 @@ function do_search() {
             })
             .catch(function (err) { setStatus('add-reddit-status', 'Request failed: ' + err, 'err'); })
             .finally(function () { btn.disabled = false; });
+    });
+
+    // Watched subreddits (Reddit tab)
+    var subList = document.getElementById('add-subreddit-list');
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function loadSubreddits() {
+        fetch('/api/reddit/subreddits')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var subs = data.success ? data.data : [];
+                subList.innerHTML = subs.length ? subs.map(function (s) {
+                    return '<li><span>r/' + esc(s.name) + '</span>'
+                        + '<button type="button" class="vt-btn-ghost" data-unwatch="' + esc(s.name) + '">Remove</button></li>';
+                }).join('') : '<li><span class="vt-sub">None yet</span></li>';
+            })
+            .catch(function () {});
+    }
+    tabs.addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-tab="reddit"]');
+        if (btn) loadSubreddits();
+    });
+    subList.addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-unwatch]');
+        if (!btn) return;
+        btn.disabled = true;
+        fetch('/api/reddit/subreddits/' + encodeURIComponent(btn.dataset.unwatch), { method: 'DELETE' })
+            .then(function () { loadSubreddits(); });
+    });
+    document.getElementById('add-subreddit-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var input = document.getElementById('add-subreddit');
+        var name = input.value.trim();
+        if (!name) return;
+        setStatus('add-subreddit-status', 'Checking subreddit…');
+        fetch('/api/reddit/subreddits', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.success) {
+                    setStatus('add-subreddit-status', 'Watching r/' + data.data.name + ' ✓', 'ok');
+                    input.value = '';
+                    loadSubreddits();
+                } else {
+                    setStatus('add-subreddit-status', data.error, 'err');
+                }
+            })
+            .catch(function (err) { setStatus('add-subreddit-status', 'Request failed: ' + err, 'err'); });
     });
 })();
 
