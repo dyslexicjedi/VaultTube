@@ -32,7 +32,7 @@ load_config() {
     VAULTTUBE_URL="${VAULTTUBE_URL%/}"
     set_auth
     BROWSER="${BROWSER:-chrome}"
-    INTERVAL_HOURS="${INTERVAL_HOURS:-12}"
+    INTERVAL_HOURS="${INTERVAL_HOURS:-1}"
 }
 
 AUTH=()
@@ -62,8 +62,9 @@ BROWSER="chrome"
 # Only if the server sets VAULTTUBE_COOKIE_TOKEN.
 VAULTTUBE_COOKIE_TOKEN=""
 
-# How often the launchd job pushes (install).
-INTERVAL_HOURS=12
+# How often the launchd job pushes (install). YouTube rotates the session
+# often while the browser is in use, so hourly keeps the server's copy fresh.
+INTERVAL_HOURS=1
 EOF
     chmod 600 "$CONFIG"
     echo "Wrote $CONFIG; edit it, then run '$0 run' once to test."
@@ -116,6 +117,20 @@ cmd_status() {
     echo
 }
 
+# Fixed clock times (hourly on the hour, or every INTERVAL_HOURS from 08:00)
+# rather than StartInterval: launchd runs a calendar job missed during sleep
+# on wake, while an interval timer only advances while the Mac is awake.
+calendar_entries() {
+    local h
+    if [ "$INTERVAL_HOURS" -le 1 ]; then
+        echo "        <dict><key>Minute</key><integer>0</integer></dict>"
+        return
+    fi
+    for ((h = 8; h < 32; h += INTERVAL_HOURS)); do
+        echo "        <dict><key>Hour</key><integer>$((h % 24))</integer><key>Minute</key><integer>0</integer></dict>"
+    done
+}
+
 cmd_install() {
     [ "$(uname)" = "Darwin" ] || die "install uses launchd (macOS); use cron elsewhere"
     load_config
@@ -137,7 +152,10 @@ cmd_install() {
         <string>$script</string>
         <string>run</string>
     </array>
-    <key>StartInterval</key><integer>$((INTERVAL_HOURS * 3600))</integer>
+    <key>StartCalendarInterval</key>
+    <array>
+$(calendar_entries)
+    </array>
     <key>RunAtLoad</key><false/>
     <key>StandardOutPath</key><string>$LOG</string>
     <key>StandardErrorPath</key><string>$LOG</string>
@@ -146,7 +164,7 @@ cmd_install() {
 EOF
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$PLIST"
-    echo "Installed: pushes every $INTERVAL_HOURS h. Log: $LOG"
+    echo "Installed: pushes every $INTERVAL_HOURS h (missed runs catch up on wake). Log: $LOG"
 }
 
 cmd_uninstall() {
