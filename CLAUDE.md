@@ -12,6 +12,11 @@ full code map (files, DB tables, API routes).
 
 - Tests spin up an isolated MariaDB Docker container via `testcontainers`
   (`conftest.py`). No `.env` file or external database is used or needed.
+  The image is `mariadb:latest`, matching production's docker-compose; don't
+  test against a distro-packaged MariaDB (Ubuntu's 10.11 rejects the 2099
+  dates some tests use).
+- In Claude cloud sessions `.claude/hooks/session-start.sh` starts the Docker
+  daemon, pre-pulls `mariadb:latest`, and builds `.venv`.
 - A pre-commit hook runs the full test suite on every commit; commits fail if
   tests fail.
 - Branch `dev` is the working/default branch; `latest` image tag is stable.
