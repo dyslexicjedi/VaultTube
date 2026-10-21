@@ -150,3 +150,31 @@ def test_scan_without_credentials_is_skipped(client, app_queue, monkeypatch):
         monkeypatch.delenv(var, raising=False)
     scan_watched_subreddits(client.application)
     assert _query("select count(*) from queue")[0][0] == 0
+
+
+def test_download_saves_subreddit_in_metadata(client, monkeypatch):
+    import types
+    from QueueObject import QueueObject
+
+    class Sub:
+        display_name = 'videos'
+
+    post = types.SimpleNamespace(
+        id='abc123', title='A post', author=types.SimpleNamespace(name='someone'),
+        created_utc=1700000000, is_video=False, url='https://i.redd.it/abc.jpg',
+        permalink='/r/videos/comments/abc123/a_post/', subreddit=Sub())
+    monkeypatch.setattr(reddit, '_get_reddit_client',
+                        lambda: types.SimpleNamespace(submission=lambda id: post))
+
+    class Resp:
+        content = b'not really an image'
+        def raise_for_status(self):
+            pass
+    import requests
+    monkeypatch.setattr(requests, 'get', lambda *a, **k: Resp())
+
+    assert reddit.download(QueueObject('https://www.reddit.com/r/videos/comments/abc123/a_post/', '', 'reddit'))
+    saved = json.loads(_query("select json from videos where id = 'abc123'")[0][0])
+    assert saved['subreddit'] == 'videos'
+    assert saved['webpage_url'] == 'https://www.reddit.com/r/videos/comments/abc123/a_post/'
+    os.remove(os.path.join(os.environ['VAULTTUBE_VAULTDIR'], 'someone', 'abc123.jpg'))

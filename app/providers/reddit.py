@@ -83,10 +83,13 @@ def download(q):
         logger.debug("Is image: %s" % is_image)
 
         post_url = "https://www.reddit.com" + submission.permalink if submission.permalink else url
+        # Stored in the video's json so posts can be traced to (and later
+        # filtered by) the subreddit they came from
+        extra = {'subreddit': submission.subreddit.display_name} if submission.subreddit else None
         if is_image:
-            result = download_image(video_url, video_id, channel_id, video_title, published_at, webpage_url=post_url)
+            result = download_image(video_url, video_id, channel_id, video_title, published_at, webpage_url=post_url, extra=extra)
         else:
-            result = download_video(video_url, video_id, video_title, channel_id, published_at, webpage_url=post_url)
+            result = download_video(video_url, video_id, video_title, channel_id, published_at, webpage_url=post_url, extra=extra)
 
         if result and submission and getattr(q, 'unsave', False):
             try:
@@ -102,7 +105,7 @@ def download(q):
         return False
 
 
-def download_video(video_url, video_id, video_title, channel_id, published_at, webpage_url=None):
+def download_video(video_url, video_id, video_title, channel_id, published_at, webpage_url=None, extra=None):
     if published_at is None:
         published_at = datetime.datetime.utcnow()
     filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + ".mp4")
@@ -133,14 +136,14 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, w
         set_status(video_id, {'progress': '0%', 'title': video_title, 'type': 'reddit'})
         try:
             ydl.download([video_url])
-            save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit', webpage_url=webpage_url)
+            save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit', webpage_url=webpage_url, extra=extra)
         finally:
             del_status(video_id)
 
     return True
 
 
-def download_image(image_url, video_id, channel_id, video_title, published_at, webpage_url=None):
+def download_image(image_url, video_id, channel_id, video_title, published_at, webpage_url=None, extra=None):
     try:
         import requests
         if published_at is None:
@@ -155,7 +158,7 @@ def download_image(image_url, video_id, channel_id, video_title, published_at, w
         with open(filepath, 'wb') as f:
             f.write(response.content)
 
-        save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit', webpage_url=webpage_url)
+        save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit', webpage_url=webpage_url, extra=extra)
 
         return True
     except Exception as e:
