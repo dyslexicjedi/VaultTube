@@ -4657,3 +4657,43 @@ def test_create_duplicate_vs_failure_distinct(client):
     other_id = r.get_json()['data']['id']
     r = client.patch('/api/collection/%d' % other_id, json={'name': 'Dup Check'})
     assert r.status_code == 409
+
+
+class _FakeSubmission:
+    id = 'abc123'
+    title = 'Reddit video'
+    permalink = '/r/test/comments/abc123/reddit_video/'
+    created_utc = 1700000000
+    is_video = True
+    url = 'https://v.redd.it/xyz'
+
+    class author:
+        name = 'someuser'
+
+    def __init__(self, media):
+        self.media = media
+
+
+def _run_reddit_download(monkeypatch, media):
+    import types
+    import providers.reddit as reddit
+    sub = _FakeSubmission(media)
+    monkeypatch.setattr(reddit, '_get_reddit_client',
+                        lambda: types.SimpleNamespace(submission=lambda id: sub))
+    calls = []
+    monkeypatch.setattr(reddit, 'download_video',
+                        lambda video_url, *a, **kw: calls.append(video_url) or True)
+    assert reddit.download('https://www.reddit.com/r/test/comments/abc123/reddit_video/')
+    return calls[0]
+
+
+def test_reddit_video_uses_praw_hls_url(monkeypatch):
+    """yt-dlp's Reddit extractor needs auth now; the HLS stream PRAW resolved
+    is downloaded instead of the post URL."""
+    hls = 'https://v.redd.it/xyz/HLSPlaylist.m3u8?a=sig'
+    assert _run_reddit_download(monkeypatch, {'reddit_video': {'hls_url': hls}}) == hls
+
+
+def test_reddit_video_without_media_falls_back_to_post_url(monkeypatch):
+    url = _run_reddit_download(monkeypatch, None)
+    assert url == 'https://www.reddit.com/r/test/comments/abc123/reddit_video/'

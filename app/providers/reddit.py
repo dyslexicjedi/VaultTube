@@ -69,7 +69,11 @@ def download(q):
             published_at = datetime.datetime.utcfromtimestamp(submission.created_utc)
 
             if submission.is_video:
-                video_url = url  # pass the post URL so yt-dlp can merge audio+video
+                # yt-dlp's Reddit extractor fetches the post anonymously, which Reddit
+                # now refuses ("Account authentication is required"); use the HLS
+                # stream PRAW already resolved (audio+video) and fall back to the post URL
+                reddit_video = (submission.media or {}).get('reddit_video') or {}
+                video_url = reddit_video.get('hls_url') or url
             elif submission.url:
                 video_url = submission.url
                 is_image = submission.url.lower().split('?')[0].endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
@@ -127,7 +131,8 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, w
 
     ydl_opts = {
         'outtmpl': filepath,
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        # v.redd.it HLS labels its audio-only renditions mp4, not m4a
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=mp4]/best[ext=mp4]/best',
         "progress_hooks": [make_progress_hook(video_id)],
     }
 
