@@ -4666,6 +4666,7 @@ class _FakeSubmission:
     created_utc = 1700000000
     is_video = True
     url = 'https://v.redd.it/xyz'
+    subreddit = None
 
     class author:
         name = 'someuser'
