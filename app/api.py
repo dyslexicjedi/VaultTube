@@ -850,7 +850,10 @@ def api_download():
             source = "youtube"
         elif 'youtube.com' in url or 'youtu.be' in url:
             source = "youtube"
-        elif providers.get_provider(url) is None and generic.claims(url):
+        elif providers.get_provider(url) is not None:
+            # e.g. a Reddit post goes to the PRAW-based Reddit provider
+            source = providers.get_provider(url).__name__.split('.')[-1]
+        elif generic.claims(url):
             source = "generic"
         i = QueueObject(url, "", source, 0, "")
         enqueue(i, current_app.config["queue"])

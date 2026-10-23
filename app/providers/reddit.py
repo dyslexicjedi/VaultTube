@@ -33,52 +33,76 @@ def _get_reddit_client():
     )
 
 
+def _reddit_video(submission):
+    """The v.redd.it media dict for a post, following crossposts (a crosspost
+    has is_video False and no media of its own; the video is on the parent)."""
+    for media in (getattr(submission, 'secure_media', None), getattr(submission, 'media', None)):
+        if isinstance(media, dict) and media.get('reddit_video'):
+            return media['reddit_video']
+    for parent in getattr(submission, 'crosspost_parent_list', None) or []:
+        for key in ('secure_media', 'media'):
+            media = parent.get(key)
+            if isinstance(media, dict) and media.get('reddit_video'):
+                return media['reddit_video']
+    return None
+
+
+def _media_url(submission, url):
+    """Return (content_url, is_image) for what a post carries, or raise when
+    there is nothing to download."""
+    reddit_video = _reddit_video(submission)
+    if reddit_video:
+        # The HLS master has audio and video together, and comes straight from
+        # the v.redd.it CDN, so yt-dlp doesn't have to fetch the post's JSON
+        # itself (Reddit blocks that unauthenticated request with a 403)
+        hls = reddit_video.get('hls_url')
+        if hls:
+            return hls, False
+    if submission.is_video:
+        return url, False  # pass the post URL so yt-dlp can merge audio+video
+    if getattr(submission, 'is_self', False) or not submission.url:
+        raise ValueError("Reddit post has no media (text post)")
+    content_url = submission.url
+    if content_url.startswith('/'):
+        content_url = "https://www.reddit.com" + content_url
+    is_image = content_url.lower().split('?')[0].endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
+    return content_url, is_image
+
+
 def download(q):
+    # Errors are raised, not swallowed, so the downloader records the real
+    # reason in download_errors instead of "Download returned False"
     url = q.url if hasattr(q, 'url') else q
     try:
-        submission = None
-        video_id = None
-        video_url = None
-        video_title = None
-        channel_id = None
-        is_image = False
-        
         if 'redgifs.com' in url:
             video_id = extract_redgifs_id(url)
             if not video_id:
-                logger.error("Could not extract RedGIF ID from URL: %s" % url)
                 insert_not_found("redgifs_" + url.split('/')[-1][:50])
-                return False
+                raise ValueError("Could not extract RedGIF ID from URL")
             return download_video(url, video_id, video_id, 'redgifs', None, webpage_url=url)
 
+        parsed = urlparse(url)
+        if parsed.hostname in ('redd.it',):
+            vid = parsed.path.strip('/')
         else:
-            parsed = urlparse(url)
-            if parsed.hostname in ('redd.it',):
-                vid = parsed.path.lstrip('/')
-            else:
-                vid = url.split('/comments/')[1].split('/')[0] if '/comments/' in url else None
-            if not vid:
-                logger.error("Could not extract video ID from URL: %s" % url)
-                return False
-            
-            reddit = _get_reddit_client()
-            submission = reddit.submission(id=vid)
-            video_id = submission.id
-            video_title = submission.title
-            channel_id = submission.author.name if submission.author else 'unknown'
-            published_at = datetime.datetime.utcfromtimestamp(submission.created_utc)
+            vid = url.split('/comments/')[1].split('/')[0] if '/comments/' in url else None
+        if not vid:
+            raise ValueError("Not a Reddit post URL (no /comments/<id>/)")
 
-            if submission.is_video:
-                video_url = url  # pass the post URL so yt-dlp can merge audio+video
-            elif submission.url:
-                video_url = submission.url
-                is_image = submission.url.lower().split('?')[0].endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
-            else:
-                logger.error("No media found in submission: %s" % url)
-                insert_not_found(video_id)
-                return False
+        reddit = _get_reddit_client()
+        submission = reddit.submission(id=vid)
+        video_id = submission.id
+        video_title = submission.title
+        channel_id = submission.author.name if submission.author else 'unknown'
+        published_at = datetime.datetime.utcfromtimestamp(submission.created_utc)
 
-        logger.debug("Starting Reddit/RedGIF Download: %s" % url)
+        try:
+            video_url, is_image = _media_url(submission, url)
+        except ValueError:
+            insert_not_found(video_id)
+            raise
+
+        logger.debug("Starting Reddit Download: %s" % url)
         logger.debug("Content URL: %s" % video_url)
         logger.debug("Is image: %s" % is_image)
 
@@ -91,7 +115,7 @@ def download(q):
         else:
             result = download_video(video_url, video_id, video_title, channel_id, published_at, webpage_url=post_url, extra=extra)
 
-        if result and submission and getattr(q, 'unsave', False):
+        if result and getattr(q, 'unsave', False):
             try:
                 submission.unsave()
                 logger.info("Unsaved Reddit post %s" % submission.id)
@@ -102,7 +126,7 @@ def download(q):
 
     except Exception as e:
         logger.error("Reddit Download Failed for %s: %s" % (url, e))
-        return False
+        raise
 
 
 def download_video(video_url, video_id, video_title, channel_id, published_at, webpage_url=None, extra=None):
@@ -144,26 +168,22 @@ def download_video(video_url, video_id, video_title, channel_id, published_at, w
 
 
 def download_image(image_url, video_id, channel_id, video_title, published_at, webpage_url=None, extra=None):
-    try:
-        import requests
-        if published_at is None:
-            published_at = datetime.datetime.utcnow()
-        response = requests.get(image_url, timeout=60)
-        response.raise_for_status()
+    import requests
+    if published_at is None:
+        published_at = datetime.datetime.utcnow()
+    response = requests.get(image_url, timeout=60)
+    response.raise_for_status()
 
-        ext = image_url.lower().split('?')[0].split('.')[-1]
-        filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + "." + ext)
+    ext = image_url.lower().split('?')[0].split('.')[-1]
+    filepath = os.path.join(os.environ['VAULTTUBE_VAULTDIR'], channel_id, video_id + "." + ext)
 
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'wb') as f:
-            f.write(response.content)
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, 'wb') as f:
+        f.write(response.content)
 
-        save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit', webpage_url=webpage_url, extra=extra)
+    save_uploaded_video_metadata(video_id, filepath, video_title, channel_id, published_at, filepath, 'reddit', webpage_url=webpage_url, extra=extra)
 
-        return True
-    except Exception as e:
-        logger.error("Image download failed for %s: %s" % (image_url, e))
-        return False
+    return True
 
 
 def extract_redgifs_id(url):

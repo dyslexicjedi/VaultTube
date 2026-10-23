@@ -178,3 +178,53 @@ def test_download_saves_subreddit_in_metadata(client, monkeypatch):
     assert saved['subreddit'] == 'videos'
     assert saved['webpage_url'] == 'https://www.reddit.com/r/videos/comments/abc123/a_post/'
     os.remove(os.path.join(os.environ['VAULTTUBE_VAULTDIR'], 'someone', 'abc123.jpg'))
+
+
+def _post(**kw):
+    import types
+
+    class Sub:
+        display_name = 'videogames'
+
+    fields = dict(
+        id='xyz789', title='A trailer', author=types.SimpleNamespace(name='someone'),
+        created_utc=1700000000, is_video=False, is_self=False, media=None, secure_media=None,
+        url='https://www.reddit.com/r/videogames/comments/xyz789/a_trailer/',
+        permalink='/r/videogames/comments/xyz789/a_trailer/', subreddit=Sub())
+    fields.update(kw)
+    return types.SimpleNamespace(**fields)
+
+
+HLS = 'https://v.redd.it/vid1/HLSPlaylist.m3u8?a=1'
+
+
+@pytest.mark.parametrize('kw', [
+    # Native video: use the HLS master from the API, not the post URL
+    dict(is_video=True, secure_media={'reddit_video': {'hls_url': HLS}}),
+    # Crosspost of a video: the media lives on the parent
+    dict(url='/r/gaming/comments/orig1/a_trailer/',
+         crosspost_parent_list=[{'secure_media': {'reddit_video': {'hls_url': HLS}}}]),
+])
+def test_media_url_uses_reddit_video_hls(kw):
+    post = _post(**kw)
+    assert reddit._media_url(post, 'https://www.reddit.com' + post.permalink) == (HLS, False)
+
+
+def test_media_url_link_post_and_text_post():
+    assert reddit._media_url(_post(url='https://youtu.be/abc'), 'x') == ('https://youtu.be/abc', False)
+    with pytest.raises(ValueError, match='no media'):
+        reddit._media_url(_post(is_self=True), 'x')
+
+
+def test_download_raises_real_error(monkeypatch):
+    from QueueObject import QueueObject
+    monkeypatch.setattr(reddit, '_get_reddit_client', lambda: (_ for _ in ()).throw(
+        RuntimeError('Reddit credentials not configured: VAULTTUBE_REDDIT_CLIENT_ID')))
+    with pytest.raises(RuntimeError, match='credentials'):
+        reddit.download(QueueObject('https://www.reddit.com/r/videogames/comments/1xcpff8/a/', '', 'reddit'))
+
+
+def test_add_reddit_url_queues_as_reddit(client, app_queue):
+    url = 'https://www.reddit.com/r/videogames/comments/1xcpff8/a_bioware_developer_has_leaked_a_trailer_for_the/'
+    assert client.post('/api/download/single', json={'url': url}).status_code == 200
+    assert _query("select url, source from queue") == [(url, 'reddit')]
